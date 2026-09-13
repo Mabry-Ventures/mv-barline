@@ -52,6 +52,7 @@ h2 { font-size: clamp(30px, 3vw, 44px); }
 h3 { font-size: 25px; letter-spacing: -.65px; }
 p { color: var(--muted); margin-block: 18px; }
 .features { padding-block: 42px 68px; }
+.feature-lead { max-width: 760px; font-size: 23px; }
 .feature-columns { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 60px; margin-top: 50px; }
 .feature-columns p { margin-bottom: 0; }
 .two-columns { display: grid; grid-template-columns: 1.1fr .9fr; gap: 90px; padding-block: 62px; }

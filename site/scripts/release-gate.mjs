@@ -29,14 +29,14 @@ export function validateProduction({ release, pages, headers, robots }) {
     throw new Error('Unexpected release configuration field. Keep credentials and provider state out of site builds.');
   }
   const approvedExternal = new Set([
-    ...Object.values(expected), canonical + '/', canonical + '/about/', canonical + '/privacy/',
-    repository, repository + '/issues',
-    ...['LICENSE', 'NOTICE.md', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md', 'docs/PROVENANCE.md']
+    ...Object.values(expected), canonical + '/', canonical + '/about/', canonical + '/privacy/', canonical + '/support/',
+    repository, repository + '/issues', repository + '/issues/new/choose',
+    ...['LICENSE', 'NOTICE.md', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md', 'FREQUENT_ISSUES.md', 'docs/PROVENANCE.md']
       .map(path => `${repository}/blob/main/${path}`),
     'https://github.com/jordanbaird/Ice', 'https://github.com/lxy1992/Ice',
     'https://stripe.com/privacy', 'https://www.cloudflare.com/privacypolicy/',
   ]);
-  for (const file of ['index.html', 'about/index.html', 'privacy/index.html', '404.html']) {
+  for (const file of ['index.html', 'about/index.html', 'privacy/index.html', 'support/index.html', '404.html']) {
     if (!pages.has(file)) throw new Error(`Missing production page: ${file}`);
   }
   // Constrain authored markup rather than claim a general HTML/visibility audit.
