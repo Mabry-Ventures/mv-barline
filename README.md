@@ -6,7 +6,10 @@ Barline is a free, open-source menu bar utility for Apple Silicon Macs. Keep
 everyday items visible, tuck the rest away, and reveal them when you need them.
 No account, subscription, advertising, or paid feature tier.
 
-**Site:** [usebarline.com](https://usebarline.com/) · **Support (optional):** [contribute via Stripe](https://buy.stripe.com/cNibJ1a370l33AVgnk1ck02) · If Barline helps you, a [GitHub star](https://github.com/Mabry-Ventures/mv-barline) helps others find it.
+[Website](https://usebarline.com) · [Download](#download) · [Support (optional)](https://usebarline.com/#support) · [Releases](https://github.com/Mabry-Ventures/mv-barline/releases)
+
+If Barline helps you organize your Mac, starring the
+[repository](https://github.com/Mabry-Ventures/mv-barline) helps others find it.
 
 ## Download
 
@@ -18,9 +21,9 @@ notarized by Apple, and updates itself through Sparkle. The
 has the release notes, `SHA256SUMS` checksums, and the complete corresponding
 source.
 
-Do not download an Ice binary expecting it to be Barline. Do not install an
-unofficial "Barline" build, and do not disable macOS security protections to
-run one.
+Do not download an Ice binary (the upstream project Barline forks) expecting it
+to be Barline. Do not install an unofficial "Barline" build, and do not disable
+macOS security protections to run one.
 
 ## What Barline does
 
