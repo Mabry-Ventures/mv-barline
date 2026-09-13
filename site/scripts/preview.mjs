@@ -10,7 +10,7 @@ const server = createServer(async (request, response) => {
   response.setHeader('Content-Security-Policy', policy);
   response.setHeader('X-Content-Type-Options', 'nosniff');
   response.setHeader('Referrer-Policy', 'no-referrer');
-  response.setHeader('Cache-Control', 'no-store');
+  response.setHeader('Cache-Control', 'no-store, no-transform');
   if (request.method !== 'GET' && request.method !== 'HEAD') { response.writeHead(405); response.end(); return; }
   try {
     const pathname = decodeURIComponent(new URL(request.url, 'http://localhost').pathname);
