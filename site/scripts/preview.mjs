@@ -5,7 +5,7 @@ import { build } from './build.mjs';
 
 const output = await build();
 const types = { '.html': 'text/html; charset=utf-8', '.css': 'text/css; charset=utf-8', '.png': 'image/png', '.txt': 'text/plain; charset=utf-8' };
-const policy = "default-src 'none'; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
+const policy = "default-src 'none'; script-src https://plausible.io 'sha256-Ebt84R/xi8miDnxS/0/bkTjVgDRKQpWS1eI09TLbNkg='; connect-src https://plausible.io; style-src 'self'; img-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'";
 const server = createServer(async (request, response) => {
   response.setHeader('Content-Security-Policy', policy);
   response.setHeader('X-Content-Type-Options', 'nosniff');

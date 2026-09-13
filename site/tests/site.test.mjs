@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile, stat, mkdtemp, writeFile, symlink, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { build, assertAllowedTree } from '../scripts/build.mjs';
+import { build, assertAllowedTree, assertApprovedAnalytics } from '../scripts/build.mjs';
 
 const output = await build();
 const pages = ['index.html', 'about/index.html', 'privacy/index.html', 'support/index.html', '404.html'];
@@ -19,13 +19,15 @@ test('build refuses unexpected stale files and symlinks without deleting them', 
     await assert.rejects(assertAllowedTree(join(fixture, 'linked-root'), ['index.html', 'old-checkout.js', 'linked-root']), /real directory/);
   } finally { await rm(fixture, { recursive: true }); }
 });
-test('production pages have semantic headings, canonical URLs and no tracking/payment code', async () => {
+test('production pages have semantic headings, canonical URLs and only approved Plausible analytics', async () => {
   for (const path of pages) {
     const html = await readFile(join(output, path), 'utf8');
     assert.match(html, /<html lang="en">/);
     assert.match(html, /name="viewport"/);
     assert.equal((html.match(/<h1\b/g) ?? []).length, 1);
-    assert.doesNotMatch(html, /<script\b|<iframe\b|<form\b|on(?:click|load|error)=/i);
+    assert.doesNotThrow(() => assertApprovedAnalytics(html, path));
+    assert.equal((html.match(/<script\b/g) ?? []).length, 2);
+    assert.doesNotMatch(html, /<iframe\b|<form\b|on(?:click|load|error)=/i);
     if (path === '404.html') {
       assert.match(html, /name="robots" content="noindex/);
     } else {
@@ -34,6 +36,14 @@ test('production pages have semantic headings, canonical URLs and no tracking/pa
       assert.match(html, new RegExp(`<link rel="canonical" href="https://usebarline\\.com${suffix}">`));
     }
   }
+});
+test('analytics allowlist rejects alternate, duplicate and modified scripts', async () => {
+  const html = await readFile(join(output, 'index.html'), 'utf8');
+  for (const changed of [
+    html + '<script src="https://example.com/tracker.js"></script>',
+    html.replace('https://plausible.io/js/pa-zm9NLR0vTVQctEpExKk2L.js', 'https://example.com/tracker.js'),
+    html.replace('plausible.init()', 'plausible.init({ trackLocalhost: true })'),
+  ]) assert.throws(() => assertApprovedAnalytics(changed));
 });
 test('every local link and asset resolves, every local fragment exists', async () => {
   for (const path of pages) {
@@ -92,8 +102,18 @@ test('static security policy disallows executable/embed/payment surfaces', async
   const headers = await readFile(join(output, '_headers'), 'utf8');
   const robots = await readFile(join(output, 'robots.txt'), 'utf8');
   for (const value of ["default-src 'none'", "frame-ancestors 'none'", "form-action 'none'", 'no-referrer', 'nosniff']) assert.ok(headers.includes(value));
+  assert.match(headers, /script-src https:\/\/plausible\.io 'sha256-Ebt84R\/xi8miDnxS\/0\/bkTjVgDRKQpWS1eI09TLbNkg='/);
+  assert.match(headers, /connect-src https:\/\/plausible\.io/);
+  assert.doesNotMatch(headers, /unsafe-inline|script-src[^;]*\*/);
   assert.doesNotMatch(headers, /noindex|nofollow/i);
   assert.match(robots, /^Allow: \/$/m);
+});
+test('privacy page discloses aggregate Plausible measurement and preserves the no-app-analytics boundary', async () => {
+  const privacy = await readFile(join(output, 'privacy/index.html'), 'utf8');
+  assert.match(privacy, /aggregate traffic such as page views, referral sources/);
+  assert.match(privacy, /does not use cookies, local storage, cross-site tracking, or persistent identifiers/);
+  assert.match(privacy, /Barline app itself contains no analytics/);
+  assert.match(privacy, /href="https:\/\/plausible\.io\/data-policy"/);
 });
 test('About preserves provenance while the footer stays focused on navigation', async () => {
   const home = await readFile(join(output, 'index.html'), 'utf8');
