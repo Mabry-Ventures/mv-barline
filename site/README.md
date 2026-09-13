@@ -1,7 +1,9 @@
 # Barline website
 
-A small static HTML/CSS site for Cloudflare Pages. No framework, client-side
-JavaScript, third-party fonts, analytics, cookies, database, or app backend.
+A small static HTML/CSS site for Cloudflare Pages. No framework, third-party
+fonts, cookies, database, or app backend. A narrowly allowlisted Plausible
+script provides aggregate, privacy-friendly website analytics; the native app
+contains no analytics.
 Optional contributions open Stripe-hosted checkout; the site contains no
 payment SDK, secret keys, card fields, webhook, or entitlement logic.
 

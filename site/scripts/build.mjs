@@ -6,6 +6,19 @@ import { validateProduction } from './release-gate.mjs';
 export const root = fileURLToPath(new URL('../', import.meta.url));
 const sourceFiles = ['index.html', 'about/index.html', 'privacy/index.html', 'support/index.html', '404.html', 'styles.css', '_headers', 'robots.txt'];
 const outputFiles = [...sourceFiles, 'assets/barline.png'];
+const plausibleScript = 'https://plausible.io/js/pa-zm9NLR0vTVQctEpExKk2L.js';
+const plausibleInitializer = 'window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()';
+
+export function assertApprovedAnalytics(html, file = 'page') {
+  const scripts = [...html.matchAll(/<script(?:\s[^>]*)?>([\s\S]*?)<\/script>/gi)];
+  const external = scripts.filter(match => /\ssrc=/.test(match[0]));
+  const inline = scripts.filter(match => !/\ssrc=/.test(match[0]));
+  if (scripts.length !== 2 || external.length !== 1 || inline.length !== 1 ||
+      !external[0][0].includes(`async src="${plausibleScript}"`) ||
+      inline[0][1].trim() !== plausibleInitializer) {
+    throw new Error(`Static site permits only the approved Plausible loader and initializer: ${file}`);
+  }
+}
 
 // Refuse stale checkout scripts, symlinks or unrelated assets before uploading.
 // Never delete unknown output on the user's behalf.
@@ -37,7 +50,8 @@ export async function build({ mode = 'preview', release, outputDirectory = join(
   const pages = new Map();
   for (const file of sourceFiles.filter(file => file.endsWith('.html'))) {
     const html = await readFile(join(root, 'src', file), 'utf8');
-    if (/<script\b|<iframe\b|<form\b/i.test(html)) throw new Error('Static site must not embed scripts, checkout, or forms.');
+    if (/<iframe\b|<form\b|on(?:click|load|error)=/i.test(html)) throw new Error('Static site must not embed checkout, forms, or event handlers.');
+    assertApprovedAnalytics(html, file);
     pages.set(file, html);
   }
   if (mode === 'production') {
