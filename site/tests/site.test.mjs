@@ -104,6 +104,7 @@ test('static security policy disallows executable/embed/payment surfaces', async
   for (const value of ["default-src 'none'", "frame-ancestors 'none'", "form-action 'none'", 'no-referrer', 'nosniff']) assert.ok(headers.includes(value));
   assert.match(headers, /script-src https:\/\/plausible\.io 'sha256-Ebt84R\/xi8miDnxS\/0\/bkTjVgDRKQpWS1eI09TLbNkg='/);
   assert.match(headers, /connect-src https:\/\/plausible\.io/);
+  assert.match(headers, /Cache-Control: public, max-age=0, must-revalidate, no-transform/);
   assert.doesNotMatch(headers, /unsafe-inline|script-src[^;]*\*/);
   assert.doesNotMatch(headers, /noindex|nofollow/i);
   assert.match(robots, /^Allow: \/$/m);
