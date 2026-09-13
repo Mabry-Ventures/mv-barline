@@ -21,6 +21,7 @@ function fixture() {
     pages: new Map([['index.html', `<link rel="canonical" href="https://usebarline.com/">${Object.entries(release).filter(([key]) => key.endsWith('URL')).map(([, url]) => `<a href="${url}">Link</a>`).join('')}`],
       ['about/index.html', '<link rel="canonical" href="https://usebarline.com/about/">'],
       ['privacy/index.html', '<link rel="canonical" href="https://usebarline.com/privacy/">'],
+      ['support/index.html', '<link rel="canonical" href="https://usebarline.com/support/">'],
       ['404.html', '<meta name="robots" content="noindex">']]) };
 }
 

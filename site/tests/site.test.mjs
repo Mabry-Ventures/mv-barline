@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { build, assertAllowedTree } from '../scripts/build.mjs';
 
 const output = await build();
-const pages = ['index.html', 'about/index.html', 'privacy/index.html', '404.html'];
+const pages = ['index.html', 'about/index.html', 'privacy/index.html', 'support/index.html', '404.html'];
 test('build refuses unexpected stale files and symlinks without deleting them', async () => {
   const fixture = await mkdtemp(join(tmpdir(), 'barline-site-manifest-'));
   try {
@@ -50,20 +50,26 @@ test('every local link and asset resolves, every local fragment exists', async (
     }
   }
 });
-test('production links the qualified release and states the OS boundary', async () => {
+test('production links the qualified release and presents the supported configuration', async () => {
   const html = await readFile(join(output, 'index.html'), 'utf8');
   assert.match(html, /Download Barline 1\.0\.12/);
   assert.match(html, /Barline 1\.0\.12 release notes/);
   assert.match(html, /Corresponding source/);
   assert.match(html, /Checksums/);
-  assert.match(html, /macOS 27 compatibility has not yet been qualified\./);
+  assert.match(html, /Apple Silicon · macOS 26/);
+  assert.doesNotMatch(html, /macOS 27 compatibility has not yet been qualified\./);
+  for (const capability of ['visible, hidden, and always-hidden', 'three-dot control', 'Search your menu bar locally', 'Save useful layouts', 'native macOS Focus Filter', 'display-specific layouts']) {
+    assert.ok(html.includes(capability), capability);
+  }
   assert.doesNotMatch(html, /preview site|final qualification|noindex|nofollow/i);
 });
 test('contributions use only the approved live hosted link with accurate privacy copy', async () => {
   const html = await readFile(join(output, 'index.html'), 'utf8');
+  const support = await readFile(join(output, 'support/index.html'), 'utf8');
   const privacy = await readFile(join(output, 'privacy/index.html'), 'utf8');
   const checkoutLinks = [...html.matchAll(/href="(https:\/\/(?:buy|checkout)\.stripe\.com\/[^\"]+)"/g)].map(match => match[1]);
   assert.deepEqual(checkoutLinks, ['https://buy.stripe.com/cNibJ1a370l33AVgnk1ck02']);
+  assert.match(support, /href="https:\/\/buy\.stripe\.com\/cNibJ1a370l33AVgnk1ck02" rel="noreferrer">Contribute via Stripe/);
   assert.match(html, /rel="noreferrer">Contribute via Stripe/);
   assert.match(html, /One-time support for Mabry Ventures LLC/);
   assert.match(privacy, /can access transaction details through Stripe/);
@@ -73,6 +79,14 @@ test('contributions use only the approved live hosted link with accurate privacy
     const page = await readFile(join(output, path), 'utf8');
     assert.doesNotMatch(page, /buy\.stripe\.com\/test_|sk_(?:live|test)_|pk_(?:live|test)_/);
   }
+});
+test('support navigation has a real destination with help and contribution actions', async () => {
+  const home = await readFile(join(output, 'index.html'), 'utf8');
+  const support = await readFile(join(output, 'support/index.html'), 'utf8');
+  assert.equal((home.match(/href="\/support\/"/g) ?? []).length, 2);
+  assert.doesNotMatch(home, /href="#support">Support/);
+  assert.match(support, /href="https:\/\/github\.com\/Mabry-Ventures\/mv-barline\/issues\/new\/choose">Report an issue/);
+  assert.match(support, /href="https:\/\/github\.com\/Mabry-Ventures\/mv-barline\/blob\/main\/FREQUENT_ISSUES\.md">troubleshooting guide/);
 });
 test('static security policy disallows executable/embed/payment surfaces', async () => {
   const headers = await readFile(join(output, '_headers'), 'utf8');

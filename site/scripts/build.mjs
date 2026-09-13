@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { validateProduction } from './release-gate.mjs';
 
 export const root = fileURLToPath(new URL('../', import.meta.url));
-const sourceFiles = ['index.html', 'about/index.html', 'privacy/index.html', '404.html', 'styles.css', '_headers', 'robots.txt'];
+const sourceFiles = ['index.html', 'about/index.html', 'privacy/index.html', 'support/index.html', '404.html', 'styles.css', '_headers', 'robots.txt'];
 const outputFiles = [...sourceFiles, 'assets/barline.png'];
 
 // Refuse stale checkout scripts, symlinks or unrelated assets before uploading.
