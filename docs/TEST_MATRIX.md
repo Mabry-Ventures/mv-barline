@@ -5,7 +5,7 @@ under ignored `.artifacts/ci/<sha>/` directories.
 
 | Area | Current automated evidence | Status |
 | --- | --- | --- |
-| Pure domain | Swift Testing for snapshots, state coordination, profile presentation, display reconnect resolution, persistence/import, search, Spotlight records, and command/service validation | 358 tests pass on the exact-head full gate |
+| Pure domain | Swift Testing for snapshots, state coordination, profile presentation, display reconnect resolution, persistence/import, search, Spotlight records, and command/service validation | 380 tests pass for the 1.0.13 source candidate |
 | Recovery policy | Standalone Swift script | Implemented |
 | Notch overflow resolver | Standalone Swift script | Implemented |
 | Debug/Release/analyze | Local Xcode steps in `script/ci.sh full` | Exact-head full gate passes on macOS 26.6.2 arm64 |
@@ -18,14 +18,16 @@ under ignored `.artifacts/ci/<sha>/` directories.
 | Support-bundle privacy | Encoder content probes plus static logging/credential checks | Passes on the exact-head full gate |
 | Performance smoke | Shelf responsiveness and app-owned production reopen probes | Exact-head 20-cycle shelf and 20-cycle reopen presentation budgets pass in the unlocked interactive session |
 | Soak | Repeated Core cycles plus XPC interruption and responsiveness | Prior integration evidence exists; the release-duration soak is explicitly deferred |
-| Release/install/update | Clean archive, signing, notarization, stapling, Gatekeeper, Sparkle, and SBOM gates | Build 37 passed exact-head signed packaging including the disk image, notarization, independent verification, and a signed build-36-to-37 Sparkle update with cold launch, and was published as `v1.0.12`; clean installation on a Mac that has never run Barline and installed click journeys were not run |
+| Release/install/update | Clean archive, signing, notarization, stapling, Gatekeeper, Sparkle, and SBOM gates | Build 38 passed exact-source packaging, signing, notarization, stapling, Gatekeeper, Sparkle, SBOM, public hash verification, and an installed launch check, and was published as `v1.0.13`; clean installation on a Mac that has never run Barline and installed click journeys were not run |
 
 The fail-closed full gate runs these scripts and reports unavailable permissions
 or missing product behavior instead of silently treating them as passed.
 
 ## Required real-macOS scenarios
 
-The published 1.0.12 (build 37) has bounded upgrade evidence from build 36. The
+The published 1.0.13 (build 38) has an installed upgrade and launch check from
+the exact public disk image. The published 1.0.12 (build 37) has bounded signed
+Sparkle upgrade evidence from build 36. The
 clean-install, helper-interruption, Focus and target-activation evidence belongs
 to 1.0.11 (build 36) and does not qualify build 37. Separate runtime evidence remains for Ice import,
 login launch, sleep/wake, repeated sleep/wake, active-space changes, full-screen,

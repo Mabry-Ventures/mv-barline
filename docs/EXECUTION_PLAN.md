@@ -1,5 +1,21 @@
 # Barline execution plan
 
+## Barline 1.0.13 discovery hotfix published — September 13, 2026
+
+Barline 1.0.13 (build 38), tag `v1.0.13` at `fa60b13`, is public. It replaces
+the menu-item discovery spinner's implicit empty-cache inference with explicit
+state, bounded transient retry, last-known-good preservation, and terminal
+empty/error UI with a Try Again action. The source candidate passed 380 Core
+tests and the local build, fixture, recovery, accessibility, privacy, menu-bar,
+and performance lanes. The XCUITest lane was blocked by host UI Automation
+authorization; independent Accessibility UI and performance probes passed.
+
+The app and disk image are Developer ID signed, notarized, stapled, and
+Gatekeeper-accepted. The exact public DMG hash was verified before installing
+build 38 on the maintainer Mac. GitHub release assets, the Sparkle appcast, and
+the canonical Cloudflare Pages download are live. Clean-first-install and
+cross-device physical coverage remain separate evidence classes.
+
 ## Barline 1.0.12 published — September 12, 2026
 
 Barline 1.0.12 (build 37) is published as GitHub release `v1.0.12`, marked

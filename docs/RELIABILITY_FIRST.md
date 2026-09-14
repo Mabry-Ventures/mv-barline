@@ -5,7 +5,7 @@ language about macOS 27 feature adoption or deferring its compatibility work.
 It does not supersede the source-bound qualification record of any candidate.
 
 The latest implementation and remaining feature gates are tracked in
-[FEATURE_QUALIFICATION.md](FEATURE_QUALIFICATION.md). Version 1.0.12 includes
+[FEATURE_QUALIFICATION.md](FEATURE_QUALIFICATION.md). Version 1.0.13 includes
 the authoring/rule/shortcut paths. Consult the qualification record for the
 installed candidate and exact source-bound results. Installed qualification remains
 separate from implementation. The user has conditionally

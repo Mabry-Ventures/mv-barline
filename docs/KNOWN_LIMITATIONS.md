@@ -1,6 +1,6 @@
 # Known limitations and release status
 
-This page describes the boundaries of Barline 1.0.12. Release evidence is bound
+This page describes the boundaries of Barline 1.0.13. Release evidence is bound
 to its exact source and signed binary; it is not blanket approval for later
 changes.
 
@@ -38,14 +38,14 @@ validation requirements; see [search architecture](SEARCH_AND_APPLE_INTELLIGENCE
 
 ## Current reliability and distribution boundary
 
-Barline 1.0.12 (build 37) was published on September 12, 2026. Before
-publication it passed its source-bound local macOS 26.6.2 gate; Developer ID
-signing; notarization of the zip and stapling of the app it contains;
-notarization and stapling of the disk image; Gatekeeper; independent
-verification that the disk image holds the same app as the notarized zip; and a
-signed Sparkle update from the installed 1.0.11 (build 36) followed by a cold
-launch. That update left preferences and saved layouts unchanged and showed
-neither the move-to-Applications offer nor the first-run walkthrough.
+Barline 1.0.13 (build 38) was published on September 13, 2026. Before
+publication it passed 380 Core tests, the fixture, recovery, privacy,
+accessibility, menu-bar, performance, Debug/Release, analysis, and repository
+hygiene lanes on macOS 26.6.2. Its Developer ID app and disk image were
+notarized, stapled, and accepted by Gatekeeper. The exact public disk image was
+hash-verified, installed over 1.0.12 on the maintainer Mac, and launch-checked.
+The XCUITest lane could not acquire macOS UI Automation authorization; separate
+Accessibility UI and performance lanes passed.
 
 Clean installation on a Mac that has never run Barline has not been run. It is
 the only way to exercise the disk image install, the move-to-Applications offer,
@@ -59,7 +59,7 @@ when Barline's WindowServer confirmation for that presentation times out. The
 shelf stays open and the next click closes it. Automated rapid open/close
 testing observed this in about 1 of 300 cycles; ordinary click timing is
 expected to reach that window far less often. Its cause is still under
-investigation, and it is accepted as a known limitation for 1.0.11 and 1.0.12.
+investigation, and it is accepted as a known limitation through 1.0.13.
 
 The public support site and hosted Stripe checkout do not qualify the app and do
 not unlock features.
