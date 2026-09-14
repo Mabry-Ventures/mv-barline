@@ -21,23 +21,20 @@ final class BarlineUITests: XCTestCase {
 
     /// Fixture qualification only. The installed-candidate journey shell gate is
     /// separate: this test must never be reported as proof of Barline activation.
+    /// The native-right installed journey owns right-click qualification because
+    /// XCUI can acknowledge a status-item rightClick without delivering it.
     @MainActor
     func testNativeFixtureReportsTargetActionAndClosure() throws {
-        try exerciseFixtureTarget("BF Native", rightClick: false)
+        try exerciseFixtureTarget("BF Native")
     }
 
     @MainActor
     func testPopoverFixtureReportsTargetActionAndClosure() throws {
-        try exerciseFixtureTarget("BF Popover", rightClick: false)
+        try exerciseFixtureTarget("BF Popover")
     }
 
     @MainActor
-    func testFixtureReportsRightClickIndependently() throws {
-        try exerciseFixtureTarget("BF Native", rightClick: true)
-    }
-
-    @MainActor
-    private func exerciseFixtureTarget(_ target: String, rightClick: Bool) throws {
+    private func exerciseFixtureTarget(_ target: String) throws {
         let session = UUID().uuidString
         let receiptURL = FileManager.default.temporaryDirectory.appendingPathComponent("barline-fixture-\(session).json")
         defer {
@@ -94,12 +91,7 @@ final class BarlineUITests: XCTestCase {
         // AppKit-hosted StatusItem reports isHittable=false on some macOS 26
         // versions despite a valid on-screen frame. Use the exact discovered
         // element's coordinate, never an assumed/global location or AXPress.
-        let itemCenter = item.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-        if rightClick {
-            itemCenter.rightClick()
-        } else {
-            itemCenter.click()
-        }
+        item.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
         let delivered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
             guard let data = try? Data(contentsOf: receiptURL),
                   let receipt = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
@@ -111,27 +103,20 @@ final class BarlineUITests: XCTestCase {
             XCTFail("Host XCTest status-item event produced no target-process receipt. Event-delivery gate failed; menu behavior is not established.")
             return
         }
-        let action = target == "BF Popover" && !rightClick
+        let action = target == "BF Popover"
             ? app.buttons["fixture-journey-action"] : app.menuItems["Fixture Receipt Action"]
         let completedReceipt = {
             guard let data = try? Data(contentsOf: receiptURL),
                   let receipt = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { return false }
             return receipt["session"] as? String == session &&
-                receipt["button"] as? String == (rightClick ? "right" : "left") &&
+                receipt["button"] as? String == "left" &&
                 receipt["actions"] as? Int == 1 &&
                 receipt["opens"] as? Int == 1 &&
                 receipt["closes"] as? Int == 1 &&
                 receipt["visible"] as? Bool == false
         }
         guard action.waitForExistence(timeout: 5) else {
-            // XCUITest can release a synthesized right-click directly over the
-            // newly opened native menu item. In that case AppKit completes the
-            // target action and closes the menu before XCUI publishes it. The
-            // target-process receipt remains exact proof of the full lifecycle.
-            if rightClick, completedReceipt() {
-                return
-            }
             XCTFail("The fixture did not expose its actual menu/popover action")
             return
         }
