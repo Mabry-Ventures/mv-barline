@@ -76,6 +76,42 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
         #expect(snapshot.items.filter { !$0.isBarlineControlItem }.allSatisfy { $0.section == .visible })
     }
 
+    @Test("Meaningful item labels distinguish multiple controls from one application")
+    func meaningfulItemLabels() throws {
+        let snapshot = try build([
+            observation(
+                bundle: "com.example.multiple",
+                title: "First Control",
+                x: 1460,
+                localizedApplicationName: "Example App"
+            ),
+            observation(
+                bundle: "com.example.multiple",
+                title: "Second Control",
+                x: 1500,
+                localizedApplicationName: "Example App"
+            ),
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 1550),
+        ])
+        #expect(snapshot.items.filter { !$0.isBarlineControlItem }.map(\.displayName) == [
+            "First Control", "Second Control",
+        ])
+    }
+
+    @Test("Generated fallback labels use the localized application name")
+    func unnamedItemLabel() throws {
+        let snapshot = try build([
+            observation(
+                bundle: "com.example.unnamed",
+                title: "Item-0",
+                x: 1500,
+                localizedApplicationName: "Example App"
+            ),
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 1550),
+        ])
+        #expect(snapshot.items.first { !$0.isBarlineControlItem }?.displayName == "Example App")
+    }
+
     private func build(
         _ observations: [GoldenGateMenuBarObservation],
         rememberedSections: [MenuBarItemID: MenuBarSection] = [:]
@@ -94,11 +130,12 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
     private func observation(
         bundle: String,
         title: String,
-        x: Double
+        x: Double,
+        localizedApplicationName: String? = nil
     ) -> GoldenGateMenuBarObservation {
         GoldenGateMenuBarObservation(
             bundleIdentifier: bundle,
-            localizedApplicationName: nil,
+            localizedApplicationName: localizedApplicationName,
             identifier: title,
             displayTitle: title,
             stableTitle: title,

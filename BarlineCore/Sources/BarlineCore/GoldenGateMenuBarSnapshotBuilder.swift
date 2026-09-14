@@ -89,8 +89,7 @@ public enum GoldenGateMenuBarSnapshotBuilder {
                     ? appSigningIdentifier
                     : observation.bundleIdentifier,
                 title: observation.stableTitle,
-                displayName: observation.localizedApplicationName
-                    ?? observation.displayTitle,
+                displayName: presentationName(for: observation),
                 ownerProcessIdentifier: observation.ownerProcessIdentifier,
                 sourceProcessIdentifier: observation.ownerProcessIdentifier,
                 bounds: observation.bounds,
@@ -190,6 +189,18 @@ public enum GoldenGateMenuBarSnapshotBuilder {
             isBentoBox: isBentoBox,
             isSystemClone: isSystemClone
         )
+    }
+
+    private static func presentationName(
+        for observation: GoldenGateMenuBarObservation
+    ) -> String {
+        let generatedPrefix = "Item-"
+        if observation.displayTitle.hasPrefix(generatedPrefix),
+           Int(observation.displayTitle.dropFirst(generatedPrefix.count)) != nil
+        {
+            return observation.localizedApplicationName ?? observation.displayTitle
+        }
+        return observation.displayTitle
     }
 
     private static func intersects(_ lhs: MenuBarRect, _ rhs: MenuBarRect) -> Bool {
