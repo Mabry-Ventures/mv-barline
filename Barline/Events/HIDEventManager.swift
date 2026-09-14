@@ -54,6 +54,10 @@ final class HIDEventManager: ObservableObject {
         mouseDownSequence &+= 1
         switch event.type {
         case .leftMouseDown:
+            schedulePrimaryControlActionRecovery(
+                with: event,
+                appState: appState
+            )
             handleShowOnClick(with: event, appState: appState, screen: screen)
             handleSmartRehide(with: event, appState: appState, screen: screen)
         case .rightMouseDown:
@@ -176,6 +180,23 @@ final class HIDEventManager: ObservableObject {
 // MARK: - Handler Methods
 
 extension HIDEventManager {
+    private func schedulePrimaryControlActionRecovery(
+        with event: NSEvent,
+        appState: AppState
+    ) {
+        guard
+            let click = event.cgEvent,
+            let control = appState.menuBarManager.controlItem(withName: .visible),
+            control.containsEventLocation(click.unflippedLocation)
+        else { return }
+
+        control.schedulePrimaryActionRecovery(
+            sequence: mouseDownSequence,
+            eventTimestamp: event.timestamp,
+            modifierFlags: event.modifierFlags
+        )
+    }
+
     // MARK: Handle Show On Click
 
     private func handleShowOnClick(with event: NSEvent, appState: AppState, screen: NSScreen) {

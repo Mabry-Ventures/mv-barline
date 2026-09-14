@@ -3,6 +3,7 @@
 //  Barline
 //
 
+import BarlineCore
 import Cocoa
 import Combine
 import OSLog
@@ -139,6 +140,11 @@ final class ControlItem {
 
     /// Privacy-safe lifecycle diagnostics for status-item action delivery.
     private let logger = Logger(category: "ControlItem")
+
+    /// Coordinates native target/action delivery with the bounded mouse-down
+    /// fallback used while a scene-backed status item reconnects.
+    private var actionRecoveryCoordinator = StatusItemActionRecoveryCoordinator()
+    private var actionRecoveryTask: Task<Void, Never>?
 
     /// The control item's underlying status item.
     private var statusItem: NSStatusItem {
@@ -341,6 +347,31 @@ final class ControlItem {
         button.sendAction(on: [.leftMouseDown, .rightMouseUp])
     }
 
+    /// Schedules a one-shot fallback for a primary click whose hosted status
+    /// window exists but whose AppKit target/action connection may not yet be live.
+    func schedulePrimaryActionRecovery(
+        sequence: UInt64,
+        eventTimestamp: TimeInterval,
+        modifierFlags: NSEvent.ModifierFlags
+    ) {
+        guard identifier == .visible,
+              actionRecoveryCoordinator.observeMouseDown(
+                  sequence: sequence,
+                  eventTimestamp: eventTimestamp
+              )
+        else { return }
+
+        actionRecoveryTask?.cancel()
+        actionRecoveryTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            guard !Task.isCancelled, let self,
+                  actionRecoveryCoordinator.claimFallback(sequence: sequence)
+            else { return }
+            logger.notice("Recovered a missing scene-backed status-item action")
+            performPrimaryAction(modifierFlags: modifierFlags)
+        }
+    }
+
     /// Updates the appearance of the status item using the current hiding state.
     private func updateStatusItem() {
         guard
@@ -481,10 +512,7 @@ final class ControlItem {
 
     /// Performs the control item's action.
     @objc private func performAction() {
-        guard
-            let menuBarManager = appState?.menuBarManager,
-            let event = NSApp.currentEvent
-        else {
+        guard appState != nil, let event = NSApp.currentEvent else {
             return
         }
 
@@ -505,35 +533,49 @@ final class ControlItem {
         // configured event mask above still emits only one primary action.
         case .leftMouseDown, .leftMouseUp:
             let modifierFlags = NSEvent.modifierFlags
-
-            // Running this from a Task seems to improve the visual
-            // responsiveness of the status item's button.
-            Task {
-                if modifierFlags == .control {
-                    showMenu()
+            if identifier == .visible {
+                guard actionRecoveryCoordinator.claimNativeAction(
+                    eventTimestamp: event.timestamp
+                ) else {
+                    logger.notice("Suppressed a late duplicate status-item action")
                     return
                 }
-
-                if
-                    modifierFlags == .option,
-                    let section = menuBarManager.section(withName: .alwaysHidden),
-                    section.isEnabled
-                {
-                    section.toggle()
-                    return
-                }
-
-                if
-                    let section = menuBarManager.section(withName: sectionName),
-                    section.isEnabled
-                {
-                    section.toggle()
-                }
+                actionRecoveryTask?.cancel()
             }
+            performPrimaryAction(modifierFlags: modifierFlags)
         case .rightMouseUp:
             showMenu()
         default:
             return
+        }
+    }
+
+    private func performPrimaryAction(modifierFlags: NSEvent.ModifierFlags) {
+        guard let menuBarManager = appState?.menuBarManager else { return }
+
+        // Running this from a Task improves the visual responsiveness of the
+        // status item's button and keeps native and recovered delivery identical.
+        Task {
+            if modifierFlags == .control {
+                showMenu()
+                return
+            }
+
+            if
+                modifierFlags == .option,
+                let section = menuBarManager.section(withName: .alwaysHidden),
+                section.isEnabled
+            {
+                section.toggle()
+                return
+            }
+
+            if
+                let section = menuBarManager.section(withName: sectionName),
+                section.isEnabled
+            {
+                section.toggle()
+            }
         }
     }
 
