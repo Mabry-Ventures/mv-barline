@@ -8,7 +8,7 @@ current release status. This page is a map of everything under `docs/`.
 | Document | What it covers |
 | --- | --- |
 | [Supported configurations](SUPPORTED_CONFIGURATIONS.md) | Menu bar, display, and Space configurations Barline is built for |
-| [Known limitations](KNOWN_LIMITATIONS.md) | Current boundaries of Barline 1.0.13 and what is not yet qualified |
+| [Known limitations](KNOWN_LIMITATIONS.md) | Current boundaries of Barline 1.0.14 and what is not yet qualified |
 | [Focus and App Intents](FOCUS_AND_APP_INTENTS.md) | How saved layouts integrate with Apple's Focus Filters and Shortcuts |
 | [Search and Apple Intelligence](SEARCH_AND_APPLE_INTELLIGENCE.md) | Local search, Spotlight indexing, and optional on-device interpretation |
 | [Accessibility](ACCESSIBILITY.md) | Accessibility implementation and validation lanes |

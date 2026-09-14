@@ -5,7 +5,7 @@ language about macOS 27 feature adoption or deferring its compatibility work.
 It does not supersede the source-bound qualification record of any candidate.
 
 The latest implementation and remaining feature gates are tracked in
-[FEATURE_QUALIFICATION.md](FEATURE_QUALIFICATION.md). Version 1.0.13 includes
+[FEATURE_QUALIFICATION.md](FEATURE_QUALIFICATION.md). Version 1.0.14 includes
 the authoring/rule/shortcut paths. Consult the qualification record for the
 installed candidate and exact source-bound results. Installed qualification remains
 separate from implementation. The user has conditionally
@@ -75,23 +75,17 @@ to accommodate a regression.
 
 ## macOS 27 compatibility, not feature adoption
 
-The available host was macOS 26.6.2 / Xcode 26.6 when this plan was created.
-There is no macOS 27 runtime certificate. Compilation alone does not establish
-support, and a green Xcode lane on macOS 26 must not publish macOS 27 runtime GO.
+Barline 1.0.14 was qualified on separate Apple Silicon macOS 26.6.2 and macOS
+27 RC 26A428 hosts. The same signed executable passed the native left/right,
+popover reuse, performance, and forced-helper-recovery receipt set on both.
+Compilation on an older host is still not accepted as runtime evidence.
 
-Use a separate Apple Silicon macOS 27 test host with an explicit Xcode 27 path;
-do not upgrade the user's daily Mac as a test setup step. Qualify the existing
-feature set across native menu hosting, left/right clicks, drag arrangement,
-Screen Recording denied/granted, Accessibility denied/granted, notch/overflow,
-multiple displays, sleep/wake, full screen, auto-hide fallback, Focus, update,
-launch at login, helper recovery, and accessibility. Re-run on release candidate
-and final OS builds. Record OS build, Xcode build, source SHA, executable hash,
-scenario results, latency distributions, and any unsupported configuration.
-
-macOS 27-specific features wait for a later release. Compatibility fixes may
-ship earlier after full regression proof. Any failing required scenario is a
-release blocker for that OS lane, not an excuse to advertise unverified day-one
-support. Local-only execution; no macOS/self-hosted GitHub Actions runners.
+macOS 27-specific features wait for a later release. Compatibility changes use
+the smallest OS-specific path and must preserve the established macOS 26 path.
+Future macOS 27 updates still require candidate-bound runtime regression across
+native menu hosting, permissions, displays, Spaces, Focus, update, recovery,
+and accessibility. Local-only execution remains mandatory; Barline uses no
+macOS or self-hosted GitHub Actions runners.
 
 ## Website and payment boundaries
 
@@ -107,7 +101,8 @@ support. Local-only execution; no macOS/self-hosted GitHub Actions runners.
 - Reconnect and select the correct Stripe account before any account-specific
   setup. Test mode and live mode remain explicitly separated.
 - Confirm Cloudflare account/project and domain ownership before deployment.
-- Public GitHub release and update feed remain staged for final approval.
+- The public GitHub release, signed update feed, and canonical download must
+  remain bound to the same qualified version and checksums.
 
 ## Historical initial checkpoint
 

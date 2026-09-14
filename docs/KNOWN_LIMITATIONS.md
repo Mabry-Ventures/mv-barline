@@ -41,28 +41,25 @@ validation requirements; see [search architecture](SEARCH_AND_APPLE_INTELLIGENCE
 
 ## Current reliability and distribution boundary
 
-Barline 1.0.13 (build 38) was published on September 13, 2026. Before
-publication it passed 380 Core tests, the fixture, recovery, privacy,
-accessibility, menu-bar, performance, Debug/Release, analysis, and repository
-hygiene lanes on macOS 26.6.2. Its Developer ID app and disk image were
-notarized, stapled, and accepted by Gatekeeper. The exact public disk image was
-hash-verified, installed over 1.0.12 on the maintainer Mac, and launch-checked.
-The XCUITest lane could not acquire macOS UI Automation authorization; separate
-Accessibility UI and performance lanes passed.
+Barline 1.0.14 (build 62) was published on September 14, 2026. Its exact
+Developer ID executable and disk image are notarized, stapled, Gatekeeper-
+accepted, and hash-bound to tag `v1.0.14`. Native left/right and popover journeys,
+20-cycle shelf performance, and forced helper recovery passed on macOS 26.6.2
+and macOS 27 RC 26A428 with zero timeouts. The signed update from public 1.0.13
+and a fresh public-asset download were verified separately.
 
-Clean installation on a Mac that has never run Barline has not been run. It is
-the only way to exercise the disk image install, the move-to-Applications offer,
-and the walkthrough's real permission grants. Installed click journeys against
-the signed app, physical configuration, accessibility, and release-duration soak
-also remain distinct open evidence classes. Historical failed attempts remain in
-local evidence and are not overwritten by later passes.
+One immediate macOS 26 fixture restoration attempt and one extra fresh
+synthetic post-upgrade restoration attempt did not restore position within the
+test deadline. Both were retained; the source-bound acceptance receipts later
+passed. The app preserves an interrupted temporary reveal in a local recovery
+journal instead of silently discarding the original position. Physical display
+transitions, release-duration soak, VoiceOver, and Full Keyboard Access remain
+separate open evidence classes.
 
-A click that closes the shelf within about 300 ms of opening it can be ignored
-when Barline's WindowServer confirmation for that presentation times out. The
-shelf stays open and the next click closes it. Automated rapid open/close
-testing observed this in about 1 of 300 cycles; ordinary click timing is
-expected to reach that window far less often. Its cause is still under
-investigation, and it is accepted as a known limitation through 1.0.13.
+A rare rapid-close miss was recorded in releases through 1.0.13. Build 62's
+candidate-bound performance receipts completed without a shelf-open timeout on
+either supported operating system, but that bounded result is not a claim that
+third-party status items or future macOS updates can never fail.
 
 The public support site and hosted Stripe checkout do not qualify the app and do
 not unlock features.

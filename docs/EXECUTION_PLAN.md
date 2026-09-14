@@ -1,5 +1,23 @@
 # Barline execution plan
 
+## Barline 1.0.14 macOS 27 compatibility release published — September 14, 2026
+
+Barline 1.0.14 (build 62), annotated tag `v1.0.14` at
+`d749eb63dfd114fcdb78f5e5a4e744cf7cca88be`, is public. The same exact signed
+executable passed the six-receipt installed suite on macOS 26.6.2 and macOS 27
+RC 26A428, including native left/right activation, popover reuse, 20-cycle
+performance, and forced helper recovery. The ZIP SHA-256 is
+`a4b2bf08300923a08cf5496356dc05288a996690b6a095b995d57b7977107e00`; the DMG
+SHA-256 is `fcbff754a6339ab33d5c830040d0950ab5a080cf9c09c9ff1ae0f1331e7f6e27`.
+
+The Developer ID app and DMG are notarized, stapled, and Gatekeeper-accepted.
+A signed Sparkle update from public 1.0.13 preserved preferences and recovery
+digests. Draft assets were downloaded again, checksum-verified, and assessed
+before publication; the live appcast and DMG then matched the qualified files.
+Gemini Flash 3.8 High, Muse Spark 1.3 Contributor xhigh, and GPT-6 Astra High
+returned GO with no P0-P2 findings. Retained transient restoration and host
+Xcode runner boundaries are documented in FEATURE_QUALIFICATION.md.
+
 ## Barline 1.0.13 discovery hotfix published — September 13, 2026
 
 Barline 1.0.13 (build 38), tag `v1.0.13` at `fa60b13`, is public. It replaces

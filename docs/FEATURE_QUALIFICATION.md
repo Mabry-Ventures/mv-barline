@@ -1,12 +1,12 @@
 # Reliability-first feature qualification
 
-Published release: **1.0.13, build 38** (September 13, 2026), tag `v1.0.13` at
-`fa60b13`. The release fixes unbounded menu-item discovery loading with explicit
-loading, loaded, empty, and failed states plus strictly bounded retry. Its exact
-public disk image was installed and launch-checked on the maintainer Mac. Clean
-installation on a Mac that has never run Barline and installed click journeys
-remain open.
-Installed build 36 is the update-source runtime evidence baseline.
+Published release: **1.0.14, build 62** (September 14, 2026), tag `v1.0.14` at
+`d749eb63dfd114fcdb78f5e5a4e744cf7cca88be`. Its exact signed executable passed
+the six-receipt installed suite on macOS 26.6.2 and macOS 27 RC 26A428. The
+public DMG, ZIP, source archive, SBOM, checksums, and appcast were downloaded
+again and matched the locally qualified artifacts. A signed Sparkle update from
+public 1.0.13 preserved preferences and recovery-state digests.
+Installed build 38 is the update-source runtime evidence baseline.
 Implementation is not a release certificate.
 Use the final source SHA and signed executable hash for every installed receipt.
 Failed attempts remain in local evidence; do not replace them with a later pass.
@@ -44,6 +44,26 @@ Failed attempts remain in local evidence; do not replace them with a later pass.
 | Distribution | Exact source, GPL notices, SBOM, signatures, notarization, staple, Gatekeeper, signed appcast | Clean install, update/rollback, published asset integrity and canonical site/download validation |
 
 ## Current boundary
+
+Build 62 passed 422 Core tests, fixture and independent Accessibility checks,
+Debug/Release build and analysis, privacy and permission checks, release
+topology, signing, notarization, stapling, Gatekeeper, and repository hygiene.
+On both supported operating systems, native left/right and popover left/reuse
+journeys, a 20-cycle performance receipt, and forced helper recovery passed with
+zero timeouts. Measured shelf p95 was 92.8 ms on macOS 26 and 121.4 ms on macOS
+27, below the 250 ms budget. A clean post-upgrade evidence-directory rerun also
+passed all six receipts at 125.1 ms p95.
+
+One immediate macOS 26 fixture restoration attempt and one additional fresh
+synthetic post-upgrade restoration attempt required recovery/retest. The failed
+attempts and test-only recovery journal remain retained; later passes do not
+erase them. The monolithic Xcode test-plan and XCUITest commands also encountered
+host runner-connection failures, while direct execution of the built unit and
+integration bundles passed. These are explicit evidence boundaries, not hidden
+green results. Physical display-transition, long soak, and manual assistive-
+technology scenarios remain separate from the shipped core qualification.
+
+### Historical candidate evidence
 
 Build 31 source `704276d1ebcf3aecf764e414b69a481f47dd7821` passed clean
 nonfocus qualification after UI Automation authorization: 358 package tests,
