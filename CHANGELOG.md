@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.13 (build 38) — September 13, 2026
+
+- Prevent Menu Bar Layout, search, and the shelf from remaining on an infinite
+  loading indicator when macOS temporarily cannot provide a complete menu bar
+  snapshot.
+
+- Retry transient discovery failures within a strict bound and retry again when
+  Barline's menu bar controls become available, without polling in the
+  background or replacing the last known-good item list.
+
+- Distinguish a verified empty menu bar from a discovery failure. Failed
+  discovery now ends with a clear error, a Try Again action, and access to
+  diagnostics instead of an indefinite spinner.
+
 ## 1.0.12 (build 37) — September 12, 2026
 
 - Download Barline as a disk image. Open it and drag Barline onto the

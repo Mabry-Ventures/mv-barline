@@ -9,10 +9,6 @@ struct MenuBarLayoutSettingsPane: View {
     @EnvironmentObject var appState: AppState
     @ObservedObject var itemManager: MenuBarItemManager
 
-    private var hasItems: Bool {
-        !itemManager.itemCache.managedItems.isEmpty
-    }
-
     var body: some View {
         if !appState.permissions.accessibility.hasPermission {
             missingAccessibilityPermission
@@ -23,7 +19,7 @@ struct MenuBarLayoutSettingsPane: View {
         } else {
             BarlineForm(spacing: 20) {
                 header
-                layoutBars
+                layoutContent
             }
         }
     }
@@ -53,18 +49,24 @@ struct MenuBarLayoutSettingsPane: View {
         }
     }
 
+    @ViewBuilder
+    private var layoutContent: some View {
+        switch itemManager.itemDiscoveryState {
+        case .idle, .loading:
+            loadingMenuBarItems
+        case .ready:
+            layoutBars
+        case .empty:
+            emptyMenuBarItems
+        case .failed:
+            failedMenuBarItems
+        }
+    }
+
     private var layoutBars: some View {
         VStack(spacing: 20) {
             ForEach(MenuBarSection.Name.allCases, id: \.self) { section in
                 layoutBar(for: section)
-            }
-        }
-        .opacity(hasItems ? 1 : 0.75)
-        .blur(radius: hasItems ? 0 : 5)
-        .allowsHitTesting(hasItems)
-        .overlay {
-            if !hasItems {
-                loadingMenuBarItems
             }
         }
     }
@@ -108,11 +110,48 @@ struct MenuBarLayoutSettingsPane: View {
     }
 
     private var loadingMenuBarItems: some View {
-        VStack {
+        VStack(spacing: 10) {
             Text("Loading menu bar items…")
             ProgressView()
         }
         .font(.title)
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .accessibilityIdentifier("Barline.Layout.Loading")
+    }
+
+    private var emptyMenuBarItems: some View {
+        VStack(spacing: 10) {
+            Text("No menu bar items found")
+                .font(.title2.bold())
+            Text("Barline found its controls, but there are no items available to arrange.")
+                .foregroundStyle(.secondary)
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .accessibilityIdentifier("Barline.Layout.Empty")
+    }
+
+    private var failedMenuBarItems: some View {
+        VStack(spacing: 12) {
+            Text("Menu bar items could not be loaded")
+                .font(.title2.bold())
+            Text("Your existing layout is unchanged. Try loading the menu bar again.")
+                .foregroundStyle(.secondary)
+            HStack {
+                Button("Try Again") {
+                    Task {
+                        await itemManager.cacheItemsRegardless()
+                    }
+                }
+                Button("Open Diagnostics") {
+                    appState.navigationState.settingsNavigationIdentifier = .advanced
+                }
+                .buttonStyle(.link)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .frame(maxWidth: .infinity, minHeight: 240)
+        .accessibilityIdentifier("Barline.Layout.LoadFailed")
     }
 
     @ViewBuilder

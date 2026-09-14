@@ -84,18 +84,32 @@ extension MenuBarItem {
         interactionID: UUID? = nil
     ) async -> [MenuBarItem] {
         do {
-            let snapshot = try await snapshotCoordinator.refresh(interactionID: interactionID)
-            let displayBounds = display.map(CGDisplayBounds)
-            return snapshot.items
-                .filter { descriptor in
-                    (!option.contains(.onScreen) || descriptor.isOnScreen) &&
-                        displayBounds.map { $0.intersects(CGRect(descriptor.bounds)) } != false
-                }
-                .sorted { $0.order < $1.order }
-                .map(MenuBarItem.init)
+            return try await loadMenuBarItems(
+                on: display,
+                option: option,
+                interactionID: interactionID
+            )
         } catch {
             return []
         }
+    }
+
+    /// Loads menu bar items while preserving discovery errors for callers that
+    /// need to distinguish a failed snapshot from a legitimate empty result.
+    static func loadMenuBarItems(
+        on display: CGDirectDisplayID? = nil,
+        option: ListOption,
+        interactionID: UUID? = nil
+    ) async throws -> [MenuBarItem] {
+        let snapshot = try await snapshotCoordinator.refresh(interactionID: interactionID)
+        let displayBounds = display.map(CGDisplayBounds)
+        return snapshot.items
+            .filter { descriptor in
+                (!option.contains(.onScreen) || descriptor.isOnScreen) &&
+                    displayBounds.map { $0.intersects(CGRect(descriptor.bounds)) } != false
+            }
+            .sorted { $0.order < $1.order }
+            .map(MenuBarItem.init)
     }
 }
 

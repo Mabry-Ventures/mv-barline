@@ -435,6 +435,21 @@ private struct MenuBarSearchContentView: View {
             SectionedList(selection: searchSelection, items: $model.displayedItems)
                 .contentPadding(8)
                 .scrollContentBackground(.hidden)
+        } else if itemManager.itemDiscoveryState == .failed {
+            VStack(spacing: 10) {
+                Text("Menu bar items could not be loaded")
+                    .font(.title2)
+                Button("Try Again") {
+                    Task {
+                        await itemManager.cacheItemsRegardless()
+                    }
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if itemManager.itemDiscoveryState == .empty {
+            Text("No menu bar items found")
+                .font(.title2)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             VStack {
                 Text("Loading menu bar items…")

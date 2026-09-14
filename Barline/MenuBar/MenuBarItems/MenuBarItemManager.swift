@@ -13,6 +13,7 @@ import OSLog
 final class MenuBarItemManager: ObservableObject {
     /// The current cache of menu bar items.
     @Published private(set) var itemCache = ItemCache(displayID: nil)
+    @Published private(set) var itemDiscoveryState = MenuBarItemDiscoveryState.idle
 
     @Published private(set) var activationNotice: String?
     @Published private(set) var isActivatingItem = false
@@ -44,6 +45,16 @@ final class MenuBarItemManager: ObservableObject {
 
     /// Monotonically increasing identifier for cache requests.
     private var cacheRequestSequence: UInt64 = 0
+
+    /// Cold launches can briefly observe the menu bar before AppKit has
+    /// published Barline's control items. Retry that bounded race without
+    /// turning item discovery into a polling loop.
+    private let itemDiscoveryRetryPolicy = RetryPolicy(
+        maximumAttempts: 4,
+        baseDelay: .milliseconds(150),
+        maximumDelay: .milliseconds(750),
+        maximumJitterPermille: 0
+    )
 
     /// Contexts for temporarily shown menu bar items.
     private var temporarilyShownItemContexts = [TemporarilyShownItemContext]()
@@ -115,6 +126,22 @@ final class MenuBarItemManager: ObservableObject {
         appState.navigationState.$settingsNavigationIdentifier
             .sink { [weak self] identifier in
                 guard let self, identifier == .menuBarLayout else {
+                    return
+                }
+                Task {
+                    await self.cacheItemsRegardless()
+                }
+            }
+            .store(in: &c)
+
+        let controlItemWindows = appState.menuBarManager.sections
+            .map(\.controlItem.$window)
+            .map { $0.eraseToAnyPublisher() }
+        Publishers.MergeMany(controlItemWindows)
+            .compactMap(\.self)
+            .debounce(for: 0.1, scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else {
                     return
                 }
                 Task {
@@ -400,6 +427,12 @@ extension MenuBarItemManager {
         }
     }
 
+    private enum CacheAttemptResult {
+        case success
+        case retryableFailure
+        case cancelled
+    }
+
     /// Caches the given menu bar items, without ensuring that the provided
     /// control items are correctly ordered.
     private func uncheckedCacheItems(
@@ -487,81 +520,41 @@ extension MenuBarItemManager {
         let requestID = cacheRequestSequence
 
         await cacheActor.runCacheTask(requestID: requestID) { [weak self] requestID in
-            guard let self, let settings = appState?.settings else {
+            guard let self else {
                 return
             }
-
-            guard
-                await cacheActor.isCurrent(requestID),
-                requestID == cacheRequestSequence
-            else {
-                return
+            let hadUsableSnapshot = itemDiscoveryState.hasUsableSnapshot
+            if !hadUsableSnapshot {
+                itemDiscoveryState = .loading
             }
 
-            guard !lastMoveOperationOccurred(within: .seconds(1)) else {
-                logger.debug("Skipping menu bar item cache due to recent item movement")
-                return
-            }
+            for attempt in 0 ..< itemDiscoveryRetryPolicy.maximumAttempts {
+                if attempt > 0 {
+                    do {
+                        try await Task.sleep(
+                            for: itemDiscoveryRetryPolicy.delay(forAttempt: attempt - 1)
+                        )
+                    } catch {
+                        return
+                    }
+                }
 
-            let environment = try? await BarlineMenuService.Connection.shared.environment()
-            let displayID = environment?.activeDisplayID.map { CGDirectDisplayID($0) } ??
-                NSScreen.main?.displayID
-            var items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
-            let reportedItemIDs = currentItemIDs ?? items.reversed().map(\.stableID)
-
-            guard
-                await cacheActor.isCurrent(requestID),
-                requestID == cacheRequestSequence
-            else {
-                return
-            }
-
-            let resolvedItemIDs = items.reversed().map(\.stableID)
-            guard
-                MenuBarRecoveryPolicy.snapshotIsComplete(
-                    reportedIDs: reportedItemIDs,
-                    resolvedIDs: resolvedItemIDs
+                let result = await cacheItemsAttempt(
+                    currentItemIDs: attempt == 0 ? currentItemIDs : nil,
+                    requestID: requestID
                 )
-            else {
-                logger.warning(
-                    "Incomplete menu bar snapshot (reported: \(reportedItemIDs.count, privacy: .public), resolved: \(resolvedItemIDs.count, privacy: .public)); keeping previous cache"
-                )
-                _ = await cacheActor.clearCachedItemIDs(for: requestID)
-                return
+                switch result {
+                case .success:
+                    itemDiscoveryState = .completed(
+                        managedItemCount: itemCache.managedItems.count
+                    )
+                    return
+                case .cancelled:
+                    return
+                case .retryableFailure:
+                    continue
+                }
             }
-
-            let hasVisibleControlItem = items.contains { $0.tag == .visibleControlItem }
-            guard let controlItems = ControlItemPair(items: &items) else {
-                // Menu bar windows can disappear briefly while Control Center
-                // reparents or relayouts status items. Keep the last known-good
-                // cache so the Barline Bar remains usable, but force a later retry.
-                logger.warning("Missing control item for hidden section, keeping previous menu bar item cache")
-                _ = await cacheActor.clearCachedItemIDs(for: requestID)
-                return
-            }
-
-            guard MenuBarRecoveryPolicy.hasRequiredControlItems(
-                hasVisibleControlItem: hasVisibleControlItem,
-                hasAlwaysHiddenControlItem: controlItems.alwaysHidden != nil,
-                requiresVisibleControlItem: settings.general.showBarlineIcon,
-                requiresAlwaysHiddenControlItem: settings.advanced.enableAlwaysHiddenSection
-            ) else {
-                logger.warning("Missing required control item, keeping previous menu bar item cache")
-                _ = await cacheActor.clearCachedItemIDs(for: requestID)
-                return
-            }
-
-            guard
-                await cacheActor.updateCachedItemIDs(
-                    reportedItemIDs,
-                    for: requestID
-                ),
-                requestID == cacheRequestSequence
-            else {
-                return
-            }
-
-            await enforceControlItemOrder(controlItems: controlItems)
 
             guard
                 await cacheActor.isCurrent(requestID),
@@ -569,14 +562,105 @@ extension MenuBarItemManager {
             else {
                 return
             }
-
-            await uncheckedCacheItems(
-                items: items,
-                controlItems: controlItems,
-                displayID: displayID,
-                requestID: requestID
-            )
+            itemDiscoveryState = hadUsableSnapshot
+                ? itemDiscoveryState.preservingUsableSnapshotOrFailure()
+                : .failed
+            logger.error("Menu bar item discovery exhausted its bounded retry budget")
         }
+    }
+
+    private func cacheItemsAttempt(
+        currentItemIDs: [MenuBarItemID]?,
+        requestID: UInt64
+    ) async -> CacheAttemptResult {
+        guard
+            let settings = appState?.settings,
+            await cacheActor.isCurrent(requestID),
+            requestID == cacheRequestSequence
+        else {
+            return .cancelled
+        }
+
+        guard !lastMoveOperationOccurred(within: .seconds(1)) else {
+            logger.debug("Deferring menu bar item cache due to recent item movement")
+            return .retryableFailure
+        }
+
+        let environment = try? await BarlineMenuService.Connection.shared.environment()
+        let displayID = environment?.activeDisplayID.map { CGDirectDisplayID($0) } ??
+            NSScreen.main?.displayID
+        let loadedItems: [MenuBarItem]
+        do {
+            loadedItems = try await MenuBarItem.loadMenuBarItems(option: .activeSpace)
+        } catch {
+            logger.warning(
+                "Menu bar snapshot failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+            )
+            return .retryableFailure
+        }
+        var items = loadedItems
+        let reportedItemIDs = currentItemIDs ?? items.reversed().map(\.stableID)
+
+        guard
+            await cacheActor.isCurrent(requestID),
+            requestID == cacheRequestSequence
+        else {
+            return .cancelled
+        }
+
+        let resolvedItemIDs = items.reversed().map(\.stableID)
+        guard MenuBarRecoveryPolicy.snapshotIsComplete(
+            reportedIDs: reportedItemIDs,
+            resolvedIDs: resolvedItemIDs
+        ) else {
+            logger.warning(
+                "Incomplete menu bar snapshot (reported: \(reportedItemIDs.count, privacy: .public), resolved: \(resolvedItemIDs.count, privacy: .public)); keeping previous cache"
+            )
+            _ = await cacheActor.clearCachedItemIDs(for: requestID)
+            return .retryableFailure
+        }
+
+        let hasVisibleControlItem = items.contains { $0.tag == .visibleControlItem }
+        guard let controlItems = ControlItemPair(items: &items) else {
+            logger.warning("Missing control item for hidden section, keeping previous menu bar item cache")
+            _ = await cacheActor.clearCachedItemIDs(for: requestID)
+            return .retryableFailure
+        }
+
+        guard MenuBarRecoveryPolicy.hasRequiredControlItems(
+            hasVisibleControlItem: hasVisibleControlItem,
+            hasAlwaysHiddenControlItem: controlItems.alwaysHidden != nil,
+            requiresVisibleControlItem: settings.general.showBarlineIcon,
+            requiresAlwaysHiddenControlItem: settings.advanced.enableAlwaysHiddenSection
+        ) else {
+            logger.warning("Missing required control item, keeping previous menu bar item cache")
+            _ = await cacheActor.clearCachedItemIDs(for: requestID)
+            return .retryableFailure
+        }
+
+        guard
+            await cacheActor.updateCachedItemIDs(reportedItemIDs, for: requestID),
+            requestID == cacheRequestSequence
+        else {
+            return .cancelled
+        }
+
+        await enforceControlItemOrder(controlItems: controlItems)
+
+        guard
+            await cacheActor.isCurrent(requestID),
+            requestID == cacheRequestSequence
+        else {
+            return .cancelled
+        }
+
+        await uncheckedCacheItems(
+            items: items,
+            controlItems: controlItems,
+            displayID: displayID,
+            requestID: requestID
+        )
+        return .success
     }
 
     /// Caches the current menu bar items, if the items have changed

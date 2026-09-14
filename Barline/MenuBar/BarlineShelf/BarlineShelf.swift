@@ -674,6 +674,11 @@ private struct BarlineShelfContentView: View {
         itemManager.itemsForBarlineShelf(in: section, on: screen)
     }
 
+    private var itemDiscoveryIsPending: Bool {
+        itemManager.itemDiscoveryState == .idle ||
+            itemManager.itemDiscoveryState == .loading
+    }
+
     private var presentation: ResolvedProfilePresentation? {
         guard let presentation = profileManager.activePresentation else { return nil }
         guard presentation.destinationDisplayID == nil
@@ -824,7 +829,22 @@ private struct BarlineShelfContentView: View {
         } else if menuBarManager.isMenuBarHiddenBySystemUserDefaults {
             Text("Barline cannot display menu bar items for automatically hidden menu bars")
                 .padding(.horizontal, 10)
-        } else if isPreparing || itemManager.itemCache.managedItems.isEmpty {
+        } else if itemManager.itemDiscoveryState == .failed {
+            HStack {
+                Text("Menu bar items could not be loaded")
+                Button("Try Again") {
+                    Task {
+                        await itemManager.cacheItemsRegardless()
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(.link)
+            }
+            .padding(.horizontal, 10)
+        } else if itemManager.itemDiscoveryState == .empty {
+            Text("No hidden menu bar items found")
+                .padding(.horizontal, 10)
+        } else if isPreparing || itemDiscoveryIsPending {
             HStack {
                 Text("Loading menu bar items…")
                 ProgressView()
