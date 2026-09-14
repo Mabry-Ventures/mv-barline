@@ -568,9 +568,9 @@ final class WindowServerClient: @unchecked Sendable {
                 "Menu bar item changed before activation"
             )
         }
-        for event in [down, up] {
-            event.flags = []
-        }
+        // Preserve CoreGraphics' system-supplied event flags. Clearing the
+        // non-coalesced flag prevents Golden Gate status items from receiving
+        // an otherwise valid HID click.
         down.setIntegerValueField(.mouseEventClickState, value: 1)
         up.setIntegerValueField(.mouseEventClickState, value: 0)
 

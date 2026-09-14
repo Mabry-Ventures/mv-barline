@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.14 (build 58) — September 14, 2026
+## 1.0.14 (build 59) — September 14, 2026
 
 - Route both macOS 26 status-item buttons through the same source-targeted
   WindowServer delivery path. Keep its session observation tap passive so
@@ -8,7 +8,8 @@
 
 - Keep the macOS 27 Accessibility click route independent, and guarantee that
   every posted physical mouse-down is paired with a release even when its task
-  is cancelled or fails between events.
+  is cancelled or fails between events. Preserve CoreGraphics' system event
+  flags so Golden Gate status items accept the physical-equivalent click.
 
 ## 1.0.14 (build 56) — September 14, 2026
 
