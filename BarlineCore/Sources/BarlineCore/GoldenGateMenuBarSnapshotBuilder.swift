@@ -47,6 +47,7 @@ public enum GoldenGateMenuBarSnapshotBuilder {
         activeDisplayID: MenuBarDisplayID,
         activeDisplayBounds: MenuBarRect,
         appSigningIdentifier: String,
+        rememberedSections: [MenuBarItemID: MenuBarSection] = [:],
         generation: UInt64,
         capturedAt: Date = Date()
     ) throws -> MenuBarSnapshot {
@@ -119,6 +120,9 @@ public enum GoldenGateMenuBarSnapshotBuilder {
                 default: .visible
                 }
             } else {
+                if let remembered = rememberedSections[descriptor.id] {
+                    return descriptor.replacingSection(remembered)
+                }
                 guard let classified = MenuBarDividerSectionClassifier.classify(
                     itemBounds: descriptor.bounds,
                     hiddenControlBounds: hiddenControl.bounds,
@@ -133,10 +137,28 @@ public enum GoldenGateMenuBarSnapshotBuilder {
             return descriptor.replacingSection(section)
         }
 
+        let configuration = MenuBarConcealmentConfiguration(
+            visibleItemIDs: descriptors.filter { $0.section == .visible }.map(\.id),
+            concealedItemIDs: descriptors.filter { $0.section != .visible }.map(\.id)
+        )
+        let supported = GoldenGateConcealmentPolicy.resolve(
+            configuration,
+            barlineBundleIdentifier: appSigningIdentifier
+        )
+        let normalizedDescriptors = descriptors.map { descriptor in
+            guard !descriptor.isBarlineControlItem,
+                  descriptor.section != .visible,
+                  !GoldenGateConcealmentPolicy.supportsConcealing(descriptor.id, in: supported)
+            else {
+                return descriptor
+            }
+            return descriptor.replacingSection(.visible)
+        }
+
         return MenuBarSnapshot(
             generation: generation,
             capturedAt: capturedAt,
-            items: descriptors,
+            items: normalizedDescriptors,
             displayIDs: displayIDs,
             displayIdentities: displayIdentities,
             activeSpaceIsValid: !displayIDs.isEmpty,

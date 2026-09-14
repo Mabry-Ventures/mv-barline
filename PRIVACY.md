@@ -18,6 +18,12 @@ commands use the Barline App Group container with atomic files, validation, and
 a previous-valid backup. Profile archives are accessed only after an explicit
 user import or export action.
 
+On macOS 27, Barline also stores a bounded set of stable item identifiers and
+their last verified visible or hidden section in `UserDefaults`. This allows a
+collapsed native divider to preserve the user's arrangement after relaunch.
+The data never leaves the Mac, is not included in support bundles, and new or
+ambiguous items default to visible.
+
 Search favorites and custom aliases are stored with stable item identifiers in
 the bounded `SearchItemPreferences.json` file in Barline's local Application
 Support directory. They are not sent to a server. You can remove a favorite or

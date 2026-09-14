@@ -78,4 +78,14 @@ public enum GoldenGateConcealmentPolicy {
         default: nil
         }
     }
+
+    public static func supportsConcealing(
+        _ item: MenuBarItemID,
+        in resolution: GoldenGateResolvedConcealment
+    ) -> Bool {
+        if let systemIdentifier = systemItemIdentifier(for: item) {
+            return !resolution.allowedSystemItemIdentifiers.contains(systemIdentifier)
+        }
+        return resolution.concealedBundleIdentifiers.contains(item.bundleIdentifier)
+    }
 }

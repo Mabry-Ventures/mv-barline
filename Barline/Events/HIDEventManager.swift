@@ -73,10 +73,10 @@ final class HIDEventManager: ObservableObject {
     private(set) lazy var mouseUpMonitor = EventMonitor.universal(
         for: .leftMouseUp
     ) { [weak self] event in
-        guard let self, isEnabled else {
+        guard let self, isEnabled, let appState else {
             return event
         }
-        handleMenuBarItemDragStop()
+        handleMenuBarItemDragStop(appState: appState)
         return event
     }
 
@@ -352,9 +352,15 @@ extension HIDEventManager {
 
     // MARK: Handle Menu Bar Item Drag Stop
 
-    private func handleMenuBarItemDragStop() {
-        if isDraggingMenuBarItem {
-            isDraggingMenuBarItem = false
+    private func handleMenuBarItemDragStop(appState: AppState) {
+        guard isDraggingMenuBarItem else { return }
+        isDraggingMenuBarItem = false
+        Task {
+            // AppKit publishes the final status-item frames just after mouse-up.
+            // Capture that verified native arrangement once, then the collapsed
+            // Golden Gate divider can reuse it without polling or flashing.
+            try? await Task.sleep(for: .milliseconds(200))
+            await appState.itemManager.cacheItemsRegardless(intent: .automatic)
         }
     }
 

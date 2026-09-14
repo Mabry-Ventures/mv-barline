@@ -49,8 +49,36 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
         #expect(duplicates.map(\.id.alias) == ["occurrence-0", "occurrence-1"])
     }
 
+    @Test("Uses remembered sections when the live divider is parked")
+    func rememberedSections() throws {
+        let item = observation(bundle: "com.example.hidden", title: "Hidden", x: 1600)
+        let itemID = MenuBarItemID(
+            bundleIdentifier: item.bundleIdentifier,
+            accessibilityIdentifier: item.identifier,
+            title: item.stableTitle,
+            alias: "occurrence-0",
+            fallbackFingerprint: item.fallbackFingerprint
+        )
+        let snapshot = try build([
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 10),
+            item,
+        ], rememberedSections: [itemID: .hidden])
+        #expect(snapshot.items.first { !$0.isBarlineControlItem }?.section == .hidden)
+    }
+
+    @Test("Mixed assignments for one application fail visible")
+    func mixedAssignmentsFailVisible() throws {
+        let snapshot = try build([
+            observation(bundle: "com.example.multiple", title: "Hidden", x: 1500),
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 1550),
+            observation(bundle: "com.example.multiple", title: "Visible", x: 1600),
+        ])
+        #expect(snapshot.items.filter { !$0.isBarlineControlItem }.allSatisfy { $0.section == .visible })
+    }
+
     private func build(
-        _ observations: [GoldenGateMenuBarObservation]
+        _ observations: [GoldenGateMenuBarObservation],
+        rememberedSections: [MenuBarItemID: MenuBarSection] = [:]
     ) throws -> MenuBarSnapshot {
         try GoldenGateMenuBarSnapshotBuilder.build(
             observations: observations,
@@ -58,6 +86,7 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
             activeDisplayID: displayID,
             activeDisplayBounds: displayBounds,
             appSigningIdentifier: appID,
+            rememberedSections: rememberedSections,
             generation: 7
         )
     }

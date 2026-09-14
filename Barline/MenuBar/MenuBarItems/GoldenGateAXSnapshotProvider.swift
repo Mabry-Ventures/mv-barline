@@ -14,6 +14,16 @@ import os
 /// embedded XPC service. Keep public AX inventory here in the trusted app and
 /// leave all private WindowServer access isolated in BarlineMenuService.
 actor GoldenGateAXSnapshotProvider {
+    private struct RememberedAssignment: Codable {
+        let itemID: MenuBarItemID
+        let section: BarlineCore.MenuBarSection
+    }
+
+    private struct RememberedAssignments: Codable {
+        let version: Int
+        let assignments: [RememberedAssignment]
+    }
+
     private struct ElementMetadata {
         let identifier: String?
         let accessibilityDescription: String?
@@ -25,11 +35,15 @@ actor GoldenGateAXSnapshotProvider {
     private static let duplicateTolerance: CGFloat = 1
     private static let cacheLifetimeNanoseconds: UInt64 = 100_000_000
     private static let menuBarAgentBundleIdentifier = "com.apple.MenuBarAgent"
+    private static let rememberedSectionsKey = "GoldenGateRememberedMenuBarSections"
+    private static let maximumRememberedBytes = 256 * 1024
+    private static let maximumRememberedAssignments = 512
 
     private let logger = Logger(category: "GoldenGateAXSnapshotProvider")
     private var generation: UInt64 = 0
     private var cachedAt: UInt64?
     private var cachedSnapshot: MenuBarSnapshot?
+    private var rememberedSections = GoldenGateAXSnapshotProvider.loadRememberedSections()
 
     var capabilities: MenuBarCapabilities {
         get async {
@@ -76,6 +90,18 @@ actor GoldenGateAXSnapshotProvider {
         }
         generation &+= 1
         let activeBounds = CGDisplayBounds(activeScreen.displayID)
+        let signingIdentifier = Bundle.main.bundleIdentifier
+            ?? "com.mabryventures.Barline"
+        let hiddenControlUsesLiveGeometry = observations.contains { observation in
+            observation.bundleIdentifier.caseInsensitiveCompare(signingIdentifier) == .orderedSame &&
+                observation.stableTitle == "Barline.ControlItem.Hidden" &&
+                activeBounds.intersects(CGRect(
+                    x: observation.bounds.x,
+                    y: observation.bounds.y,
+                    width: observation.bounds.width,
+                    height: observation.bounds.height
+                ))
+        }
         let result = try GoldenGateMenuBarSnapshotBuilder.build(
             observations: observations,
             displayIdentities: displayIdentities,
@@ -86,10 +112,13 @@ actor GoldenGateAXSnapshotProvider {
                 width: activeBounds.width,
                 height: activeBounds.height
             ),
-            appSigningIdentifier: Bundle.main.bundleIdentifier
-                ?? "com.mabryventures.Barline",
+            appSigningIdentifier: signingIdentifier,
+            rememberedSections: hiddenControlUsesLiveGeometry ? [:] : rememberedSections,
             generation: generation
         )
+        if hiddenControlUsesLiveGeometry {
+            rememberSections(from: result)
+        }
         cachedAt = now
         cachedSnapshot = result
         logger.info(
@@ -110,6 +139,43 @@ actor GoldenGateAXSnapshotProvider {
     func restart() {
         cachedAt = nil
         cachedSnapshot = nil
+    }
+
+    private static func loadRememberedSections() -> [MenuBarItemID: BarlineCore.MenuBarSection] {
+        guard let data = UserDefaults.standard.data(forKey: rememberedSectionsKey),
+              data.count <= maximumRememberedBytes,
+              let document = try? JSONDecoder().decode(RememberedAssignments.self, from: data),
+              document.version == 1,
+              document.assignments.count <= maximumRememberedAssignments
+        else {
+            return [:]
+        }
+        var result = [MenuBarItemID: BarlineCore.MenuBarSection]()
+        for assignment in document.assignments {
+            guard assignment.itemID.isPlausiblyStable,
+                  result.updateValue(assignment.section, forKey: assignment.itemID) == nil
+            else {
+                return [:]
+            }
+        }
+        return result
+    }
+
+    private func rememberSections(from snapshot: MenuBarSnapshot) {
+        let assignments = snapshot.items
+            .filter { !$0.isBarlineControlItem && $0.id.isPlausiblyStable }
+            .prefix(Self.maximumRememberedAssignments)
+            .map { RememberedAssignment(itemID: $0.id, section: $0.section) }
+        let document = RememberedAssignments(version: 1, assignments: assignments)
+        guard let data = try? JSONEncoder().encode(document),
+              data.count <= Self.maximumRememberedBytes
+        else {
+            return
+        }
+        rememberedSections = Dictionary(uniqueKeysWithValues: assignments.map {
+            ($0.itemID, $0.section)
+        })
+        UserDefaults.standard.set(data, forKey: Self.rememberedSectionsKey)
     }
 
     private func collectObservations() -> [GoldenGateMenuBarObservation] {
