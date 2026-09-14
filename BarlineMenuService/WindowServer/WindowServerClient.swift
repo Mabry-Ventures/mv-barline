@@ -448,6 +448,21 @@ final class WindowServerClient: @unchecked Sendable {
         guard item.isOnScreen else {
             throw MenuBarBackendError.operationFailed("Menu bar item must be revealed before activation")
         }
+        if button == .right {
+            guard let bounds = WindowInfo(windowID: item.identifier)?.currentBounds() else {
+                throw MenuBarBackendError.staleItem(itemID)
+            }
+            try await synthesizePhysicalClick(
+                initialBounds: bounds,
+                button: button
+            ) {
+                guard let confirmed = WindowInfo(windowID: item.identifier)?.currentBounds() else {
+                    throw MenuBarBackendError.staleItem(itemID)
+                }
+                return confirmed
+            }
+            return
+        }
         try await synthesizeClick(item: item, pid: resolvedEventPID(for: item), button: button)
     }
 
@@ -463,21 +478,43 @@ final class WindowServerClient: @unchecked Sendable {
         try Task.checkCancellation()
         try requireSafeMenuTracking()
         let initial = try GoldenGateAXInventory.resolve(itemID)
-        guard initial.ownerPID > 0,
-              let displays = activeDisplayBounds(),
+        guard initial.ownerPID > 0 else {
+            throw MenuBarBackendError.operationFailed(
+                "Accessibility menu bar item has no valid owner"
+            )
+        }
+        try await synthesizePhysicalClick(
+            initialBounds: initial.bounds,
+            button: button
+        ) {
+            GoldenGateAXInventory.invalidateCache()
+            let confirmed = try GoldenGateAXInventory.resolve(itemID)
+            guard confirmed.ownerPID == initial.ownerPID else {
+                throw MenuBarBackendError.staleItem(itemID)
+            }
+            return confirmed.bounds
+        }
+    }
+
+    private func synthesizePhysicalClick(
+        initialBounds: CGRect,
+        button: MenuBarMouseButton,
+        confirmBounds: () throws -> CGRect
+    ) async throws {
+        guard let displays = activeDisplayBounds(),
               MenuBarVisibilityPolicy.isClickable(
                   reportedVisible: true,
                   itemBounds: MenuBarRect(
-                      x: initial.bounds.minX,
-                      y: initial.bounds.minY,
-                      width: initial.bounds.width,
-                      height: initial.bounds.height
+                      x: initialBounds.minX,
+                      y: initialBounds.minY,
+                      width: initialBounds.width,
+                      height: initialBounds.height
                   ),
                   displayBounds: displays
               )
         else {
             throw MenuBarBackendError.operationFailed(
-                "Accessibility menu bar item is outside the active displays"
+                "Menu bar item is outside the active displays"
             )
         }
 
@@ -496,7 +533,7 @@ final class WindowServerClient: @unchecked Sendable {
         case .right: .rightMouseUp
         case .other: .otherMouseUp
         }
-        let point = CGPoint(x: initial.bounds.midX, y: initial.bounds.midY)
+        let point = CGPoint(x: initialBounds.midX, y: initialBounds.midY)
         guard let moved = CGEvent(
             mouseEventSource: nil,
             mouseType: .mouseMoved,
@@ -523,14 +560,12 @@ final class WindowServerClient: @unchecked Sendable {
         moved.post(tap: .cghidEventTap)
         try await Task.sleep(for: .milliseconds(50))
         try Task.checkCancellation()
-        GoldenGateAXInventory.invalidateCache()
-        let confirmed = try GoldenGateAXInventory.resolve(itemID)
+        let confirmedBounds = try confirmBounds()
         let tolerance: CGFloat = 2
-        guard confirmed.ownerPID == initial.ownerPID,
-              abs(confirmed.bounds.midX - initial.bounds.midX) <= tolerance,
-              abs(confirmed.bounds.midY - initial.bounds.midY) <= tolerance,
-              abs(confirmed.bounds.width - initial.bounds.width) <= tolerance,
-              abs(confirmed.bounds.height - initial.bounds.height) <= tolerance,
+        guard abs(confirmedBounds.midX - initialBounds.midX) <= tolerance,
+              abs(confirmedBounds.midY - initialBounds.midY) <= tolerance,
+              abs(confirmedBounds.width - initialBounds.width) <= tolerance,
+              abs(confirmedBounds.height - initialBounds.height) <= tolerance,
               let down = CGEvent(
                   mouseEventSource: nil,
                   mouseType: downType,
@@ -545,7 +580,7 @@ final class WindowServerClient: @unchecked Sendable {
               )
         else {
             throw MenuBarBackendError.operationFailed(
-                "Accessibility menu bar item changed before activation"
+                "Menu bar item changed before activation"
             )
         }
         down.post(tap: .cghidEventTap)

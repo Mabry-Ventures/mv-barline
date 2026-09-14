@@ -1158,7 +1158,7 @@ The September 14 macOS 27 runtime lane exposed two additional activation
 boundaries after discovery succeeded. A nonactivating shelf panel did not
 receive pointer events until it explicitly set `ignoresMouseEvents` to false,
 and the helper tried to begin interface observation through the obsolete
-per-status-item WindowServer inventory. Build 55 routes pointer, keyboard, and
+per-status-item WindowServer inventory. Build 56 routes pointer, keyboard, and
 Accessibility activation through one native shelf button; resolves Golden Gate
 items through the shared public Accessibility identity builder; binds interface
 observation to the uniquely resolved owner process; and rejects ambiguous

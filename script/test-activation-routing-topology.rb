@@ -47,6 +47,10 @@ unless helper_backend.match?(/func activate\(_ item: MenuBarItemID.*?client\.act
   abort('Golden Gate activation falls back to the retired per-window item lookup')
 end
 
+unless helper_client.match?(/if button == \.right.*?synthesizePhysicalClick/m)
+  abort('secondary activation can fall back to hosted event retargeting')
+end
+
 unless shelf.match?(/modifierFlags\.contains\(\.control\).*?suppressLeftMouseUp = true.*?rightClickAction\(\)/m) &&
        shelf.match?(/guard !suppressLeftMouseUp else \{.*?return/m)
   abort('control-click can fall through to duplicate left activation')

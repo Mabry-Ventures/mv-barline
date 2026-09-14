@@ -1,11 +1,15 @@
 # Changelog
 
-## 1.0.14 (build 55) — September 14, 2026
+## 1.0.14 (build 56) — September 14, 2026
 
 - Deliver macOS 27 status-item activation at the freshly resolved public
   Accessibility bounds instead of falling back to the retired per-item
   WindowServer inventory. Left- and right-clicks use the same guarded,
   physical-equivalent route and still require independent interface evidence.
+
+- Deliver secondary clicks through a guarded physical-equivalent route on
+  macOS 26 as well, preventing hosted status items from remaining in menu
+  tracking without receiving their right-click action.
 
 - Keep the hidden-item shelf interactive on macOS 27 by explicitly accepting
   pointer events in its nonactivating panel. Physical, keyboard, and
