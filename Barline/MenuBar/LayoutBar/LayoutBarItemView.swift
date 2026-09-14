@@ -3,6 +3,7 @@
 //  Barline
 //
 
+import BarlineCore
 import Cocoa
 import Combine
 
@@ -13,6 +14,13 @@ final class LayoutBarItemView: NSView {
     private weak var appState: AppState?
 
     private var cancellables = Set<AnyCancellable>()
+
+    /// macOS 27 does not expose per-item WindowServer previews. Prefer the
+    /// source application's icon so the fallback remains useful, then use a
+    /// deterministic symbol for system items without an application icon.
+    private lazy var fallbackImage: NSImage? = item.sourceApplication?.icon
+        ?? item.owningApplication?.icon
+        ?? NSImage(systemSymbolName: "app.dashed", accessibilityDescription: item.displayName)
 
     /// The item that the view represents.
     let item: MenuBarItem
@@ -69,6 +77,8 @@ final class LayoutBarItemView: NSView {
         unregisterDraggedTypes()
 
         toolTip = item.displayName
+        setAccessibilityElement(true)
+        setAccessibilityLabel(item.displayName)
         isEnabled = item.isMovable
 
         configureCancellables()
@@ -116,15 +126,20 @@ final class LayoutBarItemView: NSView {
 
     override func draw(_: NSRect) {
         if !isDraggingPlaceholder {
-            let image = cachedImage?.nsImage ?? NSImage(
-                systemSymbolName: "app.dashed", accessibilityDescription: item.displayName
-            )
-            image?.draw(
-                in: bounds,
-                from: .zero,
-                operation: .sourceOver,
-                fraction: isEnabled ? 1.0 : 0.67
-            )
+            if let image = cachedImage?.nsImage {
+                draw(image, in: bounds)
+            } else if let image = fallbackImage {
+                let rect = MenuBarFallbackArtworkLayout.drawingRect(
+                    imageWidth: image.size.width,
+                    imageHeight: image.size.height,
+                    boundsWidth: bounds.width,
+                    boundsHeight: bounds.height
+                )
+                draw(
+                    image,
+                    in: CGRect(x: rect.x, y: rect.y, width: rect.width, height: rect.height)
+                )
+            }
             if !item.isResponsive {
                 let warningImage = NSImage.warning
                 let width: CGFloat = 15
@@ -143,6 +158,18 @@ final class LayoutBarItemView: NSView {
                 )
             }
         }
+    }
+
+    private func draw(_ image: NSImage, in rect: CGRect) {
+        guard !rect.isEmpty else { return }
+        image.draw(
+            in: rect,
+            from: .zero,
+            operation: .sourceOver,
+            fraction: isEnabled ? 1.0 : 0.67,
+            respectFlipped: true,
+            hints: [.interpolation: NSImageInterpolation.high]
+        )
     }
 
     override func mouseDragged(with event: NSEvent) {

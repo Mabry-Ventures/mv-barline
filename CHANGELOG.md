@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.15 (build 63) — September 14, 2026
+
+- Keep macOS 27 menu bar item fallbacks at native icon size instead of
+  stretching generic artwork across each item's measured width. Prefer the
+  source application's icon when available while preserving the real layout
+  geometry and accessible item label.
+
 ## 1.0.14 (build 62) — September 14, 2026
 
 - Keep the macOS 27 native-concealment bridge compile-time linked through the

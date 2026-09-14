@@ -141,6 +141,48 @@ public struct MenuBarRect: Codable, Hashable, Sendable {
     }
 }
 
+/// Keeps replacement artwork legible without misrepresenting an item's measured
+/// menu bar geometry. This is used when the OS cannot provide a per-item preview.
+public enum MenuBarFallbackArtworkLayout {
+    public static func drawingRect(
+        imageWidth: Double,
+        imageHeight: Double,
+        boundsWidth: Double,
+        boundsHeight: Double,
+        maximumDimension: Double = 18
+    ) -> MenuBarRect {
+        guard imageWidth.isFinite,
+              imageHeight.isFinite,
+              boundsWidth.isFinite,
+              boundsHeight.isFinite,
+              maximumDimension.isFinite,
+              imageWidth > 0,
+              imageHeight > 0,
+              boundsWidth > 0,
+              boundsHeight > 0,
+              maximumDimension > 0
+        else {
+            return .zero
+        }
+
+        let scale = min(
+            1,
+            maximumDimension / imageWidth,
+            maximumDimension / imageHeight,
+            boundsWidth / imageWidth,
+            boundsHeight / imageHeight
+        )
+        let width = imageWidth * scale
+        let height = imageHeight * scale
+        return MenuBarRect(
+            x: (boundsWidth - width) / 2,
+            y: (boundsHeight - height) / 2,
+            width: width,
+            height: height
+        )
+    }
+}
+
 /// The source application is distinct from the WindowServer host. On macOS 26,
 /// Control Center hosts third-party items; an unresolved host is not a system item.
 public enum MenuBarSourceOwnership: String, Codable, Hashable, Sendable {
