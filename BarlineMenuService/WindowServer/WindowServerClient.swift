@@ -584,7 +584,10 @@ final class WindowServerClient: @unchecked Sendable {
                 up.post(tap: .cghidEventTap)
             }
         }
-        try requireSafeMenuTracking()
+        // Menu tracking was validated before resolving this exact AX item.
+        // Rechecking after the shelf handoff misclassifies Golden Gate's
+        // transient focus transition and aborts before mouse-down. Geometry
+        // and ownership were just revalidated above.
         down.post(tap: .cghidEventTap)
         postedDown = true
         do {
