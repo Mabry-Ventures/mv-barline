@@ -267,6 +267,7 @@ public enum MenuBarServiceRequest: Codable, Equatable, Sendable {
     case captureBackground(displayID: UInt32, sampleHeight: Double?)
     case environment
     case configureCursorInBackground(Bool)
+    case configureConcealment(MenuBarConcealmentConfiguration)
     case pointContext(MenuBarPoint)
     case shelfPresentationObservation(MenuBarShelfPresentationProbe)
     case beginRevealObservation(MenuBarItemID)
@@ -304,6 +305,7 @@ public protocol MenuBarBackend: Sendable {
     func captureBackground(displayID: UInt32, sampleHeight: Double?) async throws -> MenuBarBackgroundCapture
     func environment() async throws -> MenuBarEnvironmentSnapshot
     func pointContext(_ point: MenuBarPoint) async throws -> MenuBarPointContext
+    func configureConcealment(_ configuration: MenuBarConcealmentConfiguration) async throws
     func beginRevealObservation(_ item: MenuBarItemID) async throws -> MenuBarRevealObservationToken
     func revealObservationIsVisible(_ token: MenuBarRevealObservationToken) async throws -> Bool
     func endRevealObservation(_ token: MenuBarRevealObservationToken) async
@@ -327,6 +329,10 @@ public extension MenuBarBackend {
 
     func pointContext(_: MenuBarPoint) async throws -> MenuBarPointContext {
         throw MenuBarBackendError.unavailableCapability("point context")
+    }
+
+    func configureConcealment(_: MenuBarConcealmentConfiguration) async throws {
+        throw MenuBarBackendError.unavailableCapability("native concealment")
     }
 
     func beginRevealObservation(_: MenuBarItemID) async throws -> MenuBarRevealObservationToken {

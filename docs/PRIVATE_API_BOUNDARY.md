@@ -6,8 +6,11 @@ contained compatibility exception, not a general application dependency.
 
 ## Enforced now
 
-- There are no `@_silgen_name` declarations.
-- Private entry points are resolved through guarded `dlopen` and `dlsym`.
+- Private system entry points are resolved through guarded `dlopen`, Objective-C
+  runtime lookup, and `dlsym`; there is no static private-framework linkage.
+- The helper's Swift-to-Objective-C bridge uses private C declarations only for
+  Barline-owned functions. No private system symbol is declared with
+  `@_silgen_name`.
 - Missing symbols return unavailable capabilities or typed errors rather than
   preventing app launch.
 - The app target excludes the helper's direct compatibility implementation.
@@ -16,6 +19,11 @@ contained compatibility exception, not a general application dependency.
   `MenuBarBackend`.
 - Typed capability, snapshot, health, restart, and error values cross XPC.
 - WindowServer enumeration for the typed snapshot runs in the helper.
+- On macOS 27, the helper uses the dynamically resolved menu-bar assessment
+  assertion to apply a complete native allowlist. Unsupported classes,
+  selectors, or activation failures leave items visible. The assertion is
+  invalidated when the helper exits and its last desired state is replayed
+  after a bounded helper reconnection.
 - `MenuBarItemID` is the only item identity outside the helper.
 - Image/background capture, point queries, event synthesis, and ephemeral
   interface observation execute in the helper through semantic requests.

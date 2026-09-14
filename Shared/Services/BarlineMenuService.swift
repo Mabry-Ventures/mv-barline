@@ -39,6 +39,7 @@ extension BarlineMenuService {
         case captureBackground(displayID: UInt32, sampleHeight: Double?)
         case environment
         case configureCursorInBackground(Bool)
+        case configureConcealment(MenuBarConcealmentConfiguration)
         case pointContext(MenuBarPoint)
         case shelfPresentationObservation(MenuBarShelfPresentationProbe)
         case beginRevealObservation(MenuBarItemID)

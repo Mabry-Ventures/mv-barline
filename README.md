@@ -35,9 +35,10 @@ for configuration-specific boundaries.
 ## Compatibility and permissions
 
 The current target is **macOS 26 and macOS 27 on Apple Silicon (`arm64`)**.
-Intel Macs are not supported. On macOS 27, Barline uses public Accessibility
-inventory for discovery and keeps arrangement in macOS's native
-**Command-drag** path; the layout pane explains that boundary in place.
+Intel Macs are not supported. On macOS 27, Barline uses Accessibility inventory
+for discovery, a guarded native restriction for supported hidden items, and
+macOS's **Command-drag** path for arrangement; the layout pane explains that
+boundary in place.
 
 The secondary shelf and graphical layout editor require an always-visible
 system menu bar. Automatically hidden menu bars use a native reveal fallback.

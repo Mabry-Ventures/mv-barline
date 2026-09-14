@@ -205,6 +205,7 @@ final class MenuBarSection {
             Task {
                 let didShow = await panel.show(presentation, on: screen)
                 if didShow {
+                    appState?.itemManager.scheduleGoldenGateConcealmentSync()
                     if keyboardFocus {
                         panel.focusItemsForKeyboard()
                     }
@@ -231,6 +232,7 @@ final class MenuBarSection {
         }
 
         startRehideChecks()
+        appState?.itemManager.scheduleGoldenGateConcealmentSync()
     }
 
     /// User-selected recovery route that does not change the saved shelf or
@@ -273,6 +275,7 @@ final class MenuBarSection {
         }
 
         stopRehideChecks()
+        appState?.itemManager.scheduleGoldenGateConcealmentSync()
     }
 
     /// Toggles the visibility of the section.

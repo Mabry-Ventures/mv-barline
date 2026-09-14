@@ -27,8 +27,10 @@ final class MenuBarItemManager: ObservableObject {
 
     private var isRestoringItems = false
     private var visibleInterfaceTasks = [MenuBarRevealObservationToken: Task<Void, Never>]()
+    private var goldenGateConcealmentSyncTask: Task<Void, Never>?
 
     deinit {
+        goldenGateConcealmentSyncTask?.cancel()
         for task in visibleInterfaceTasks.values {
             task.cancel()
         }
@@ -124,6 +126,11 @@ final class MenuBarItemManager: ObservableObject {
                 guard let self else {
                     return
                 }
+                // Refresh the native running-application allowlist immediately.
+                // Discovery may transiently fail while a new app is still
+                // publishing its status item; failing visible is safer than
+                // withholding that app until another lifecycle event arrives.
+                scheduleGoldenGateConcealmentSync()
                 Task {
                     await self.cacheItemsIfNeeded(intent: .automatic)
                 }
@@ -561,11 +568,57 @@ extension MenuBarItemManager {
 
         guard itemCache != context.cache else {
             logger.debug("Not updating menu bar item cache, as items haven't changed")
+            scheduleGoldenGateConcealmentSync()
             return
         }
 
         itemCache = context.cache
+        scheduleGoldenGateConcealmentSync()
         logger.debug("Updated menu bar item cache")
+    }
+
+    func scheduleGoldenGateConcealmentSync() {
+        guard #available(macOS 27.0, *) else { return }
+        goldenGateConcealmentSyncTask?.cancel()
+        goldenGateConcealmentSyncTask = Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(50))
+            guard !Task.isCancelled, let self, let appState else { return }
+
+            var visible = [MenuBarItemID]()
+            var concealed = [MenuBarItemID]()
+            for sectionName in MenuBarSection.Name.allCases {
+                let itemIDs = itemCache[sectionName]
+                    .filter { !$0.isControlItem }
+                    .map(\.stableID)
+                let shelfOwnsPresentation = MenuBarPresentationPolicy.usesShelf(
+                    requestedShelf: appState.settings.general.useBarlineShelf,
+                    systemAutoHideEnabled: appState.menuBarManager.isMenuBarHiddenBySystemUserDefaults
+                )
+                // The shelf is a separate presentation surface. Opening it
+                // must never reveal a second native copy in the system bar.
+                let shouldConceal = sectionName != .visible && (
+                    shelfOwnsPresentation ||
+                        appState.menuBarManager.section(withName: sectionName)?.isHidden == true
+                )
+                if shouldConceal {
+                    concealed.append(contentsOf: itemIDs)
+                } else {
+                    visible.append(contentsOf: itemIDs)
+                }
+            }
+            do {
+                try await BarlineMenuService.Connection.shared.configureConcealment(
+                    MenuBarConcealmentConfiguration(
+                        visibleItemIDs: visible,
+                        concealedItemIDs: concealed
+                    )
+                )
+            } catch {
+                logger.error(
+                    "Golden Gate concealment sync failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+                )
+            }
+        }
     }
 
     /// Caches the current menu bar items, regardless of whether the

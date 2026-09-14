@@ -165,6 +165,17 @@ extension BarlineMenuService {
             _ = await send(.configureCursorInBackground(enabled))
         }
 
+        func configureConcealment(
+            _ configuration: MenuBarConcealmentConfiguration
+        ) async throws {
+            guard case let .activation(result) = await send(
+                .configureConcealment(configuration)
+            ) else {
+                throw MenuBarBackendError.interrupted
+            }
+            _ = try result.value()
+        }
+
         func pointContext(at point: CGPoint) async throws -> MenuBarPointContext {
             guard case let .pointContext(result) = await send(
                 .pointContext(MenuBarPoint(x: point.x, y: point.y))
@@ -319,6 +330,7 @@ extension BarlineMenuService {
             qos: .userInteractive,
             attributes: .concurrent
         )
+        private let latestConcealmentRequest = OSAllocatedUnfairLock<Request?>(initialState: nil)
         private let recoveryScheduled = OSAllocatedUnfairLock(initialState: false)
         private let logger: Logger
 
@@ -339,10 +351,13 @@ extension BarlineMenuService {
         }
 
         func send(request: Request) -> Response? {
+            if case .configureConcealment = request {
+                latestConcealmentRequest.withLock { $0 = request }
+            }
             let semaphore = DispatchSemaphore(value: 0)
             let result = OSAllocatedUnfairLock<Response?>(initialState: nil)
             transportQueue.async { [self] in
-                let response = performSend(request: request)
+                let response = performSendReplayingConcealmentIfNeeded(request: request)
                 result.withLock { $0 = response }
                 semaphore.signal()
             }
@@ -363,6 +378,19 @@ extension BarlineMenuService {
                 return nil
             }
             return result.withLock { $0.take() }
+        }
+
+        private func performSendReplayingConcealmentIfNeeded(request: Request) -> Response? {
+            let response = performSend(request: request)
+            guard case .start? = response,
+                  let concealmentRequest = latestConcealmentRequest.withLock({ $0 })
+            else {
+                return response
+            }
+            // A replacement helper owns a new assessment assertion. Reapply
+            // the last complete desired state before reporting recovery.
+            _ = performSend(request: concealmentRequest)
+            return response
         }
 
         private func performSend(request: Request) -> Response? {
@@ -431,7 +459,7 @@ extension BarlineMenuService {
             let delay = 0.1 * pow(2, Double(boundedAttempt))
             transportQueue.asyncAfter(deadline: .now() + delay) { [weak self] in
                 guard let self else { return }
-                if case .start? = performSend(request: .start) {
+                if case .start? = performSendReplayingConcealmentIfNeeded(request: .start) {
                     recoveryScheduled.withLock { $0 = false }
                     logger.notice("Compatibility service recovered after interruption")
                 } else if boundedAttempt < 3 {

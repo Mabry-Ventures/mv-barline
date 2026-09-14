@@ -53,6 +53,12 @@ responses cannot become authoritative.
    shared session. Failed commits retry once and then roll back the logical
    section; later AppKit order-out also reconciles the logical presentation
    state.
+9. On macOS 27, the app sends the helper a complete visible/concealed identity
+   partition. A pure policy converts that state into native system-item and
+   application allowlists. Mixed assignments for one application and unknown
+   Apple items fail visible. Shelf activation temporarily widens the allowlist
+   for the selected application's interface and restores it after the observed
+   interface closes.
 
 Recurring 1–10 second refresh and image-capture timers have been removed.
 Refreshes are driven by application, workspace, wake, active-space, display,

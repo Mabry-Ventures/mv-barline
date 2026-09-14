@@ -40,6 +40,7 @@ struct MenuBarServiceCodecTests {
             .captureBackground(displayID: 1, sampleHeight: 1),
             .environment,
             .configureCursorInBackground(true),
+            .configureConcealment(.init(visibleItemIDs: [], concealedItemIDs: [itemID])),
             .pointContext(MenuBarPoint(x: 10, y: 20)),
             .shelfPresentationObservation(shelfProbe),
             .beginRevealObservation(itemID),

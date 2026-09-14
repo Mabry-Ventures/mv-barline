@@ -92,16 +92,22 @@ actor TahoeMenuBarBackend: MenuBarBackend {
 @available(macOS 27.0, *)
 actor GoldenGateMenuBarBackend: MenuBarBackend {
     private let client: WindowServerClient
+    private let concealmentController = GoldenGateConcealmentController()
+    private var revealedItemsByObservation = [MenuBarRevealObservationToken: MenuBarItemID]()
     private var capabilityCache = MenuBarCapabilityProbeCache()
 
     var capabilities: MenuBarCapabilities {
         capabilityCache.resolve(at: DispatchTime.now().uptimeNanoseconds) {
             let canSnapshot = client.goldenGateBehavioralProbe()
+            let canActivate = canSnapshot && concealmentController.isAvailable && client.eventSynthesisProbe()
             return MenuBarCapabilities(
                 canSnapshot: canSnapshot,
                 canMove: false,
+                // Golden Gate supports the app's guarded click flow by widening
+                // the native allowlist around activation. It still cannot honor
+                // the public mutation-style `reveal` contract.
                 canReveal: false,
-                canActivate: false,
+                canActivate: canActivate,
                 canRestore: false,
                 canCapture: false
             )
@@ -127,8 +133,9 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
         throw MenuBarBackendError.unavailableCapability("Golden Gate reveal")
     }
 
-    func activate(_: MenuBarItemID, button _: MenuBarMouseButton) async throws {
-        throw MenuBarBackendError.unavailableCapability("Golden Gate activation")
+    func activate(_ item: MenuBarItemID, button: MenuBarMouseButton) async throws {
+        try await Task.sleep(for: .milliseconds(100))
+        try await client.activate(item, button: button)
     }
 
     func capture(_: [MenuBarItemID]) throws -> [MenuBarCapturedImage] {
@@ -151,7 +158,15 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
     }
 
     func beginRevealObservation(_ item: MenuBarItemID) throws -> MenuBarRevealObservationToken {
-        try client.beginRevealObservation(item)
+        let token = try client.beginRevealObservation(item)
+        do {
+            try concealmentController.beginTemporaryReveal(item)
+            revealedItemsByObservation[token] = item
+            return token
+        } catch {
+            client.endRevealObservation(token)
+            throw error
+        }
     }
 
     func revealObservationIsVisible(_ token: MenuBarRevealObservationToken) -> Bool {
@@ -160,6 +175,13 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
 
     func endRevealObservation(_ token: MenuBarRevealObservationToken) {
         client.endRevealObservation(token)
+        if let item = revealedItemsByObservation.removeValue(forKey: token) {
+            concealmentController.endTemporaryReveal(item)
+        }
+    }
+
+    func configureConcealment(_ configuration: MenuBarConcealmentConfiguration) throws {
+        try concealmentController.configure(configuration)
     }
 
     func restore(_: MenuBarSnapshot) async throws -> MenuBarMutationResult {
@@ -174,7 +196,9 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
         )
     }
 
-    func restart() {}
+    func restart() {
+        concealmentController.invalidate()
+    }
 }
 
 actor FallbackMenuBarBackend: MenuBarBackend {
