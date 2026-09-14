@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.14 (build 41) — September 14, 2026
+## 1.0.14 (build 42) — September 14, 2026
 
 - Restore menu bar discovery on macOS 27, where WindowServer now exposes one
   composite menu bar surface instead of one window per status item. Barline

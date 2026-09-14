@@ -465,13 +465,14 @@ final class ControlItem {
             let isDragging = appState.isDraggingMenuBarItem
 
             let shouldShow = showOnDrag && isDragging
-            // Golden Gate parks a zero-length status item below the physical
-            // display. Keep one transparent point in the menu-bar row so the
-            // public Accessibility inventory retains the divider geometry
+            // Golden Gate parks status items shorter than the native divider
+            // floor below the physical display. Keep three transparent points
+            // in the menu-bar row so the public Accessibility inventory retains
+            // the divider geometry
             // required to classify hidden items. Earlier releases continue to
             // use the established zero-length behavior.
             let collapsedLength: CGFloat = if #available(macOS 27.0, *) {
-                1
+                3
             } else {
                 0
             }
