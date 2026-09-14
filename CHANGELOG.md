@@ -1,6 +1,11 @@
 # Changelog
 
-## 1.0.14 (build 48) — September 14, 2026
+## 1.0.14 (build 49) — September 14, 2026
+
+- Activate macOS 27 shelf items through their exact Accessibility identity,
+  avoiding stale WindowServer coordinates after native concealment changes.
+  An indeterminate Accessibility acknowledgement is never retried, preventing
+  duplicate actions while Barline independently verifies the opened interface.
 
 - Use macOS 27's native menu-bar assessment restriction to conceal supported
   hidden items while keeping Barline's shelf responsive. Shelf presentation no
