@@ -4,37 +4,7 @@ import OSLog
 
 @available(macOS 27.0, *)
 final class GoldenGateConcealmentController: @unchecked Sendable {
-    private typealias Create = @convention(c) () -> UnsafeMutableRawPointer?
-    private typealias Apply = @convention(c) (
-        UnsafeMutableRawPointer,
-        CFArray,
-        CFArray
-    ) -> Bool
-    private typealias Invalidate = @convention(c) (UnsafeMutableRawPointer) -> Void
-    private typealias Destroy = @convention(c) (UnsafeMutableRawPointer) -> Void
-
-    private struct Bridge: @unchecked Sendable {
-        let create: Create
-        let apply: Apply
-        let invalidate: Invalidate
-        let destroy: Destroy
-
-        init?() {
-            let resolver = DynamicSymbolResolver(libraryPaths: [], includesProcessImage: true)
-            guard let create = resolver.resolve("BLNGoldenGateAssessmentCreate", as: Create.self),
-                  let apply = resolver.resolve("BLNGoldenGateAssessmentApply", as: Apply.self),
-                  let invalidate = resolver.resolve("BLNGoldenGateAssessmentInvalidate", as: Invalidate.self),
-                  let destroy = resolver.resolve("BLNGoldenGateAssessmentDestroy", as: Destroy.self)
-            else { return nil }
-            self.create = create
-            self.apply = apply
-            self.invalidate = invalidate
-            self.destroy = destroy
-        }
-    }
-
     private let logger = Logger(category: "GoldenGateConcealmentController")
-    private let bridge: Bridge?
     private let opaqueController: UnsafeMutableRawPointer?
     private var desiredConfiguration = MenuBarConcealmentConfiguration(
         visibleItemIDs: [], concealedItemIDs: []
@@ -43,15 +13,13 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     private var appliedResolution: GoldenGateResolvedConcealment?
 
     init() {
-        let bridge = Bridge()
-        self.bridge = bridge
-        opaqueController = bridge?.create()
+        opaqueController = BLNGoldenGateAssessmentCreate()
     }
 
     deinit {
         if let opaqueController {
-            bridge?.invalidate(opaqueController)
-            bridge?.destroy(opaqueController)
+            BLNGoldenGateAssessmentInvalidate(opaqueController)
+            BLNGoldenGateAssessmentDestroy(opaqueController)
         }
     }
 
@@ -89,7 +57,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
 
     func invalidate() {
         guard let opaqueController else { return }
-        bridge?.invalidate(opaqueController)
+        BLNGoldenGateAssessmentInvalidate(opaqueController)
         appliedResolution = nil
     }
 
@@ -110,7 +78,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         )
         let bundles = resolved.concealedBundleIdentifiers.sorted() as CFArray
         let systemItems = resolved.allowedSystemItemIdentifiers.sorted().map(NSNumber.init) as CFArray
-        guard bridge?.apply(opaqueController, bundles, systemItems) == true else {
+        guard BLNGoldenGateAssessmentApply(opaqueController, bundles, systemItems) else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
         }
         appliedResolution = resolved

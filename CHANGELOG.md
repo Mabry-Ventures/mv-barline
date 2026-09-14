@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.14 (build 62) — September 14, 2026
+
+- Keep the macOS 27 native-concealment bridge compile-time linked through the
+  helper target's Objective-C bridging header. Release dead-code stripping can
+  no longer remove the bridge entry points and make shelf activation fail
+  before its click is delivered.
+
 ## 1.0.14 (build 61) — September 14, 2026
 
 - Route both macOS 26 status-item buttons through the same source-targeted

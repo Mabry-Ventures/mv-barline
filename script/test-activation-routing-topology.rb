@@ -7,6 +7,8 @@ shelf = File.read('Barline/MenuBar/BarlineShelf/BarlineShelf.swift')
 helper_backend = File.read('BarlineMenuService/Backends/CompatibilityBackends.swift')
 helper_inventory = File.read('BarlineMenuService/WindowServer/GoldenGateAXInventory.swift')
 helper_client = File.read('BarlineMenuService/WindowServer/WindowServerClient.swift')
+concealment = File.read('BarlineMenuService/Backends/GoldenGateConcealmentController.swift')
+bridge_header = File.read('BarlineMenuService/BarlineMenuService-Bridging-Header.h')
 click_delivery = helper_client.split('private func deliverClick', 2).last
   .split('private enum MovePlacement', 2).first
 session_delivery = click_delivery.split('let sessionTap', 2).last
@@ -49,6 +51,14 @@ end
 unless helper_backend.match?(/func activate\(_ item: MenuBarItemID.*?client\.activateGoldenGate\(item/m) &&
        helper_client.match?(/func activateGoldenGate\(.*?moved\.post\(tap: \.cghidEventTap\).*?down\.post\(tap: \.cghidEventTap\).*?up\.post\(tap: \.cghidEventTap\)/m)
   abort('Golden Gate activation falls back to the retired per-window item lookup')
+end
+
+unless concealment.include?('BLNGoldenGateAssessmentCreate()') &&
+       concealment.include?('BLNGoldenGateAssessmentApply(') &&
+       bridge_header.include?('BLNGoldenGateAssessmentCreate') &&
+       bridge_header.include?('BLNGoldenGateAssessmentApply') &&
+       !concealment.include?('resolve("BLNGoldenGateAssessment')
+  abort('Golden Gate concealment bridge is not compile-time linked')
 end
 
 unless helper_client.match?(/func activate\(_ itemID:.*?synthesizeClick\(item: item, pid: resolvedEventPID/m) &&
