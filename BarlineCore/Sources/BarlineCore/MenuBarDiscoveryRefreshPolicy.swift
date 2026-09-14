@@ -22,6 +22,17 @@ public enum MenuBarDiscoveryRefreshPolicy {
             !discoveryIsInFlight
         }
     }
+
+    /// Determines whether an inventory observation requires a full discovery.
+    /// A cold manager must always establish a terminal snapshot even when the
+    /// observed inventory happens to match the actor's initially empty cache.
+    public static func shouldRunDiscovery(
+        inventoryChanged: Bool,
+        displayChanged: Bool,
+        hasUsableSnapshot: Bool
+    ) -> Bool {
+        inventoryChanged || displayChanged || !hasUsableSnapshot
+    }
 }
 
 /// Main-actor-owned admission state for bounded discovery refresh bursts.

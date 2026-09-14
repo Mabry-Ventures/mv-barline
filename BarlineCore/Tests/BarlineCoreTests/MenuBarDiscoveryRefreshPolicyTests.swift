@@ -26,6 +26,38 @@ struct MenuBarDiscoveryRefreshPolicyTests {
         ))
     }
 
+    @Test("Cold state always performs discovery even when inventory is unchanged")
+    func coldStateRunsDiscovery() {
+        #expect(MenuBarDiscoveryRefreshPolicy.shouldRunDiscovery(
+            inventoryChanged: false,
+            displayChanged: false,
+            hasUsableSnapshot: false
+        ))
+    }
+
+    @Test("Usable unchanged state skips redundant discovery")
+    func usableUnchangedStateSkipsDiscovery() {
+        #expect(!MenuBarDiscoveryRefreshPolicy.shouldRunDiscovery(
+            inventoryChanged: false,
+            displayChanged: false,
+            hasUsableSnapshot: true
+        ))
+    }
+
+    @Test("Inventory or display changes refresh a usable snapshot")
+    func changedStateRunsDiscovery() {
+        #expect(MenuBarDiscoveryRefreshPolicy.shouldRunDiscovery(
+            inventoryChanged: true,
+            displayChanged: false,
+            hasUsableSnapshot: true
+        ))
+        #expect(MenuBarDiscoveryRefreshPolicy.shouldRunDiscovery(
+            inventoryChanged: false,
+            displayChanged: true,
+            hasUsableSnapshot: true
+        ))
+    }
+
     @Test("Discovery diagnostics contain only bounded counters and outcome codes")
     func discoveryDiagnostics() {
         var diagnostics = MenuBarItemDiscoveryDiagnostics()

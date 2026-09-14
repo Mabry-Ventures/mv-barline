@@ -762,10 +762,25 @@ extension MenuBarItemManager {
         let environment = try? await BarlineMenuService.Connection.shared.environment()
         let displayID = environment?.activeDisplayID.map { CGDirectDisplayID($0) } ??
             NSScreen.main?.displayID
-        if
-            await cacheActor.cachedItemIDs != itemIDs ||
-            itemCache.displayID != displayID
-        {
+
+        // The inventory and environment calls suspend. An authoritative
+        // request may have superseded this automatic request while either was
+        // in flight, so never let stale work enter discovery or discard newer
+        // restoration state.
+        guard requestID == cacheRequestSequence else {
+            return
+        }
+
+        let cachedItemIDs = await cacheActor.cachedItemIDs
+        guard requestID == cacheRequestSequence else {
+            return
+        }
+
+        if MenuBarDiscoveryRefreshPolicy.shouldRunDiscovery(
+            inventoryChanged: cachedItemIDs != itemIDs,
+            displayChanged: itemCache.displayID != displayID,
+            hasUsableSnapshot: itemDiscoveryState.hasUsableSnapshot
+        ) {
             await discardSupersededRestorations()
             await runCacheDiscovery(currentItemIDs: itemIDs, requestID: requestID)
         }
