@@ -7,6 +7,10 @@ import Foundation
 /// an enormous off-screen divider frame.
 public enum MenuBarDividerSectionClassifier {
     private static let maximumPhysicalDividerWidth = 256.0
+    // Golden Gate's AX status-item frame includes the two-point trailing
+    // attachment inset occupied by the adjacent divider. Treat that measured
+    // seam as adjacency, while larger overlaps remain ambiguous and fail safe.
+    private static let dividerAttachmentTolerance = 2.0
 
     public static func classify(
         itemBounds: MenuBarRect,
@@ -24,18 +28,18 @@ public enum MenuBarDividerSectionClassifier {
         if let alwaysHiddenControlBounds {
             guard valid(alwaysHiddenControlBounds) else { return nil }
             if rowsOverlap(itemBounds, alwaysHiddenControlBounds),
-               itemMaxX <= alwaysHiddenControlBounds.x
+               itemMaxX <= alwaysHiddenControlBounds.x + dividerAttachmentTolerance
             {
                 return .alwaysHidden
             }
         }
-        if itemMaxX <= hiddenControlBounds.x {
+        if itemMaxX <= hiddenControlBounds.x + dividerAttachmentTolerance {
             return .hidden
         }
         let hiddenControlMaxX = hiddenControlBounds.width > maximumPhysicalDividerWidth
             ? hiddenControlBounds.x
             : hiddenControlBounds.x + hiddenControlBounds.width
-        if itemBounds.x >= hiddenControlMaxX {
+        if itemBounds.x + dividerAttachmentTolerance >= hiddenControlMaxX {
             return .visible
         }
         return nil

@@ -23,6 +23,28 @@ struct MenuBarDividerSectionClassifierTests {
         ) == .visible)
     }
 
+    @Test("Golden Gate's two-point divider attachment inset remains classifiable")
+    func goldenGateAttachmentInset() {
+        let divider = MenuBarRect(x: 1564, y: 3, width: 5, height: 24)
+        #expect(classify(
+            MenuBarRect(x: 1474, y: 3, width: 92, height: 24),
+            hidden: divider
+        ) == .hidden)
+        #expect(classify(
+            MenuBarRect(x: 1567, y: 3, width: 34, height: 24),
+            hidden: divider
+        ) == .visible)
+    }
+
+    @Test("An overlap beyond the measured attachment inset stays ambiguous")
+    func overlapBeyondAttachmentInset() {
+        let divider = MenuBarRect(x: 1564, y: 3, width: 5, height: 24)
+        #expect(classify(
+            MenuBarRect(x: 1473, y: 3, width: 94, height: 24),
+            hidden: divider
+        ) == nil)
+    }
+
     @Test("An expanded sentinel frame still uses its leading edge as the divider")
     func sentinelDivider() {
         let divider = MenuBarRect(x: 1681, y: 3, width: 5002, height: 24)

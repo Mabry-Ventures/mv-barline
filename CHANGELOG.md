@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.14 (build 45) — September 14, 2026
+## 1.0.14 (build 46) — September 14, 2026
 
 - Use macOS 27's native menu-bar assessment restriction to conceal supported
   hidden items while keeping Barline's shelf responsive. Shelf presentation no
@@ -17,6 +17,9 @@
 - Remember the last verified macOS 27 section assignment locally after a native
   Command-drag. Relaunches can restore hiding without flashing the divider;
   new, changed, mixed, or ambiguous items remain visible until verified.
+
+- Accept macOS 27's measured two-point Accessibility attachment inset at a
+  status-item divider seam while keeping larger overlaps fail-safe.
 
 - Restore menu bar discovery on macOS 27, where WindowServer now exposes one
   composite menu bar surface instead of one window per status item. Barline
