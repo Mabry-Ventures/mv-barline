@@ -9,6 +9,8 @@ helper_inventory = File.read('BarlineMenuService/WindowServer/GoldenGateAXInvent
 helper_client = File.read('BarlineMenuService/WindowServer/WindowServerClient.swift')
 click_delivery = helper_client.split('private func deliverClick', 2).last
   .split('private enum MovePlacement', 2).first
+session_delivery = click_delivery.split('let sessionTap', 2).last
+  .split('do {', 2).first
 item_projection = shelf.split('private struct BarlineShelfItemView', 2).last
   .split('// MARK: - BarlineShelfItemClickView', 2).first
 
@@ -51,9 +53,9 @@ end
 
 unless helper_client.match?(/func activate\(_ itemID:.*?synthesizeClick\(item: item, pid: resolvedEventPID/m) &&
        helper_client.include?('location: .session,') &&
-       helper_client.include?('options: .defaultTap') &&
-       !click_delivery.include?('options: .listenOnly')
-  abort('macOS 26 activation does not use an active, source-bound session route')
+       session_delivery.include?('options: .listenOnly') &&
+       !session_delivery.include?('options: .defaultTap')
+  abort('macOS 26 activation does not use the passive, source-bound session route')
 end
 
 unless shelf.match?(/modifierFlags\.contains\(\.control\).*?suppressLeftMouseUp = true.*?rightClickAction\(\)/m) &&

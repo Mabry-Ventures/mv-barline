@@ -1279,14 +1279,15 @@ final class WindowServerClient: @unchecked Sendable {
             type: event.type,
             location: .session,
             placement: .tailAppendEventTap,
-            // This tap must be active: its sole purpose is to replace the
-            // matching session event's target PID before dispatch. A
-            // listen-only tap can observe the marker but CoreGraphics ignores
-            // every mutation it makes to the event.
-            options: .defaultTap,
+            // The event is targeted before it enters the session stream. This
+            // tap is only an ordering acknowledgement; making it active and
+            // disabling it from its own callback can drop the matching event
+            // on macOS 26 before AppKit receives it.
+            options: .listenOnly,
             handler: { tap, received in
-                // Retain baseline source routing before acknowledging the session
-                // event. An exit marker alone does not prove target consumption.
+                // Reassert the existing target for parity with the established
+                // transport contract, then acknowledge observation. Activation
+                // still requires independent target-interface evidence.
                 if HelperClickRouting.restoreTarget(of: received, matching: event, to: pid) {
                     tap.disable()
                     exit.postToPid(pid)

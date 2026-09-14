@@ -1,10 +1,10 @@
 # Changelog
 
-## 1.0.14 (build 57) — September 14, 2026
+## 1.0.14 (build 58) — September 14, 2026
 
-- Route macOS 26 status-item clicks through an active, narrowly matched
-  WindowServer session filter. The helper now applies the intended source PID
-  before dispatch instead of attempting to mutate events from a passive tap.
+- Route both macOS 26 status-item buttons through the same source-targeted
+  WindowServer delivery path. Keep its session observation tap passive so
+  disabling the acknowledgement cannot swallow the click before AppKit sees it.
 
 - Keep the macOS 27 Accessibility click route independent, and guarantee that
   every posted physical mouse-down is paired with a release even when its task
