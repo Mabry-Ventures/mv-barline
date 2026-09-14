@@ -23,7 +23,7 @@ struct MenuBarDividerSectionClassifierTests {
         ) == .visible)
     }
 
-    @Test("Golden Gate's two-point divider attachment inset remains classifiable")
+    @Test("Golden Gate's measured divider attachment seams remain classifiable")
     func goldenGateAttachmentInset() {
         let divider = MenuBarRect(x: 1564, y: 3, width: 5, height: 24)
         #expect(classify(
@@ -31,7 +31,7 @@ struct MenuBarDividerSectionClassifierTests {
             hidden: divider
         ) == .hidden)
         #expect(classify(
-            MenuBarRect(x: 1567, y: 3, width: 34, height: 24),
+            MenuBarRect(x: 1568, y: 2, width: 42, height: 26),
             hidden: divider
         ) == .visible)
     }
@@ -40,7 +40,7 @@ struct MenuBarDividerSectionClassifierTests {
     func overlapBeyondAttachmentInset() {
         let divider = MenuBarRect(x: 1564, y: 3, width: 5, height: 24)
         #expect(classify(
-            MenuBarRect(x: 1473, y: 3, width: 94, height: 24),
+            MenuBarRect(x: 1473, y: 3, width: 97, height: 24),
             hidden: divider
         ) == nil)
     }
@@ -73,7 +73,7 @@ struct MenuBarDividerSectionClassifierTests {
     func ambiguousGeometry() {
         let divider = MenuBarRect(x: 1711, y: 3, width: 5, height: 24)
         #expect(classify(
-            MenuBarRect(x: 1710, y: 3, width: 4, height: 24),
+            MenuBarRect(x: 1704, y: 3, width: 13, height: 24),
             hidden: divider
         ) == nil)
         #expect(classify(

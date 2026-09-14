@@ -7,10 +7,11 @@ import Foundation
 /// an enormous off-screen divider frame.
 public enum MenuBarDividerSectionClassifier {
     private static let maximumPhysicalDividerWidth = 256.0
-    // Golden Gate's AX status-item frame includes the two-point trailing
-    // attachment inset occupied by the adjacent divider. Treat that measured
-    // seam as adjacency, while larger overlaps remain ambiguous and fail safe.
-    private static let dividerAttachmentTolerance = 2.0
+    // Golden Gate's AX status-item frames include the adjacent divider's
+    // attachment seam: two points on the hidden side and up to the divider's
+    // five-point physical width on the visible side. Larger overlaps remain
+    // ambiguous and fail safe.
+    private static let dividerAttachmentTolerance = 5.0
 
     public static func classify(
         itemBounds: MenuBarRect,
