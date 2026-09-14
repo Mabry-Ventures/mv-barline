@@ -1092,11 +1092,15 @@ extension MenuBarItemManager {
             let snapshot = try await appState.compatibilityCoordinator.refresh(
                 interactionID: interactionID
             )
-            guard snapshot.items.contains(where: { $0.id == item.stableID }) else {
+            let candidateIDs = snapshot.items.map(\.id)
+            guard let resolvedID = GoldenGateMenuBarIdentityResolver.resolve(
+                item.stableID,
+                among: candidateIDs
+            ) else {
                 throw MenuBarBackendError.staleItem(item.stableID)
             }
             _ = try await appState.compatibilityCoordinator.perform(
-                .activate(item.stableID, button),
+                .activate(resolvedID, button),
                 expectedGeneration: snapshot.generation,
                 interactionID: interactionID
             )
@@ -1138,7 +1142,13 @@ extension MenuBarItemManager {
         guard !snapshot.menuTrackingIsActive else {
             throw MenuBarBackendError.unsafeMenuTracking
         }
-        guard let descriptor = snapshot.items.first(where: { $0.id == itemID }) else {
+        let candidateIDs = snapshot.items.map(\.id)
+        guard let resolvedID = GoldenGateMenuBarIdentityResolver.resolve(
+            itemID,
+            among: candidateIDs
+        ),
+            let descriptor = snapshot.items.first(where: { $0.id == resolvedID })
+        else {
             throw MenuBarBackendError.staleItem(itemID)
         }
         let item = MenuBarItem(descriptor: descriptor)
@@ -1147,7 +1157,7 @@ extension MenuBarItemManager {
         }
         let interfaceObserved: Bool
         if item.isOnScreen {
-            let token = try await BarlineMenuService.Connection.shared.beginRevealObservation(for: itemID)
+            let token = try await BarlineMenuService.Connection.shared.beginRevealObservation(for: item.stableID)
             do {
                 try await click(item: item, with: button, interactionID: interactionID)
                 interfaceObserved = try await waitForInterface(token)

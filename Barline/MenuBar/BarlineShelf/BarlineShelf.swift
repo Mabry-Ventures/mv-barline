@@ -119,6 +119,7 @@ final class BarlineShelfPanel: NSPanel {
         isFloatingPanel = true
         hidesOnDeactivate = false
         canHide = false
+        ignoresMouseEvents = false
         animationBehavior = .none
         backgroundColor = .clear
         hasShadow = false
@@ -650,6 +651,40 @@ private final class BarlineShelfHostingView: NSHostingView<BarlineShelfContentVi
     override func acceptsFirstMouse(for _: NSEvent?) -> Bool {
         true
     }
+
+    override func accessibilityChildren() -> [Any]? {
+        let inherited = super.accessibilityChildren() ?? []
+        let nativeButtons = descendantShelfItemButtons()
+        nativeButtons.forEach { $0.setAccessibilityParent(self) }
+        return inherited + nativeButtons.filter { button in
+            !inherited.contains { ($0 as AnyObject) === button }
+        }
+    }
+
+    override func accessibilityHitTest(_ point: NSPoint) -> Any? {
+        guard let window else { return super.accessibilityHitTest(point) }
+        let windowPoint = window.convertPoint(fromScreen: point)
+        var candidate = hitTest(convert(windowPoint, from: nil))
+        while let view = candidate {
+            if let button = view as? BarlineShelfItemClickView.Represented {
+                return button
+            }
+            candidate = view.superview
+        }
+        return super.accessibilityHitTest(point)
+    }
+
+    private func descendantShelfItemButtons() -> [BarlineShelfItemClickView.Represented] {
+        var result = [BarlineShelfItemClickView.Represented]()
+        var pending = subviews
+        while let view = pending.popLast() {
+            if let button = view as? BarlineShelfItemClickView.Represented {
+                result.append(button)
+            }
+            pending.append(contentsOf: view.subviews)
+        }
+        return result
+    }
 }
 
 // MARK: - BarlineShelfContentView
@@ -1044,20 +1079,15 @@ private struct BarlineShelfItemView: View {
             width: image?.size.width ?? max(24, item.bounds.width),
             height: image?.size.height ?? 24
         )
-        // Publish one discoverable control for SwiftUI's representable while
-        // the native NSButton below owns pointer, keyboard and AX execution.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(item.displayName)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction { leftClickAction() }
-        .accessibilityAction(named: Text("Open context menu")) { rightClickAction() }
     }
 }
 
 // MARK: - BarlineShelfItemClickView
 
-private struct BarlineShelfItemClickView: NSViewRepresentable {
-    private final class Represented: NSButton {
+// SwiftUI's hosting view must identify this representable's native control.
+// swiftlint:disable:next private_over_fileprivate
+fileprivate struct BarlineShelfItemClickView: NSViewRepresentable {
+    fileprivate final class Represented: NSButton {
         private let logger = Logger(category: "BarlineShelfItemButton")
         private var suppressLeftMouseUp = false
         var leftClickAction: () -> Void
@@ -1083,6 +1113,7 @@ private struct BarlineShelfItemClickView: NSViewRepresentable {
             toolTip = item.displayName
             setAccessibilityLabel(item.displayName)
             setAccessibilityElement(true)
+            setAccessibilityRole(.button)
         }
 
         @available(*, unavailable)
@@ -1183,5 +1214,6 @@ private struct BarlineShelfItemClickView: NSViewRepresentable {
         button.image = image
         button.toolTip = item.displayName
         button.setAccessibilityLabel(item.displayName)
+        button.setAccessibilityRole(.button)
     }
 }

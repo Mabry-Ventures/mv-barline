@@ -157,7 +157,12 @@ actor GoldenGateAXSnapshotProvider {
         let identifiers = GoldenGateMenuBarSnapshotBuilder.identifiers(
             for: entries.map(\.observation)
         )
-        guard let entry = zip(entries, identifiers).first(where: { $0.1 == itemID })?.0 else {
+        guard let resolvedID = GoldenGateMenuBarIdentityResolver.resolve(
+            itemID,
+            among: identifiers
+        ),
+            let entry = zip(entries, identifiers).first(where: { $0.1 == resolvedID })?.0
+        else {
             throw MenuBarBackendError.staleItem(itemID)
         }
         AXUIElementSetMessagingTimeout(entry.element, 0.25)

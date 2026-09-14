@@ -218,11 +218,10 @@ final class WindowServerClient: @unchecked Sendable {
             forInfoDictionaryKey: "BarlineAppSigningIdentifier"
         ) as? String ?? "com.mabryventures.Barline"
 
-        var occurrenceBySemanticKey = [String: Int]()
-        let preliminary = observations.enumerated().map { order, observation in
-            let semanticKey = "\(observation.bundleIdentifier.lowercased())|\(observation.stableTitle.lowercased())"
-            let occurrence = occurrenceBySemanticKey[semanticKey, default: 0]
-            occurrenceBySemanticKey[semanticKey] = occurrence + 1
+        let identifiers = GoldenGateAXInventory.identifiers(for: observations)
+        let preliminary = zip(observations.indices, zip(observations, identifiers)).map {
+            order, pair in
+            let (observation, itemID) = pair
             let isControlItem = observation.bundleIdentifier.caseInsensitiveCompare(
                 appSigningIdentifier
             ) == .orderedSame && observation.stableTitle.hasPrefix("Barline.ControlItem.")
@@ -233,16 +232,6 @@ final class WindowServerClient: @unchecked Sendable {
                 namespace: observation.bundleIdentifier,
                 title: observation.stableTitle,
                 isControlItem: isControlItem
-            )
-            let itemID = MenuBarItemID(
-                bundleIdentifier: observation.bundleIdentifier,
-                accessibilityIdentifier: observation.identifier,
-                title: observation.stableTitle,
-                alias: "occurrence-\(occurrence)",
-                fallbackFingerprint: GoldenGateAXInventory.fallbackFingerprint(
-                    bundleIdentifier: observation.bundleIdentifier,
-                    stableTitle: observation.stableTitle
-                )
             )
             return MenuBarItemDescriptor(
                 id: itemID,
@@ -600,11 +589,15 @@ final class WindowServerClient: @unchecked Sendable {
             throw MenuBarBackendError.staleItem(itemID)
         }
         let pid = try resolvedEventPID(for: item)
+        return beginRevealObservation(sourcePID: pid)
+    }
+
+    func beginRevealObservation(sourcePID: pid_t) -> MenuBarRevealObservationToken {
         let existing = Set(WindowInfo.createWindows(option: .onScreen).map(\.windowID))
         let token = MenuBarRevealObservationToken()
         revealObservations.withLock { observations in
             observations[token] = RevealObservation(
-                sourcePID: pid,
+                sourcePID: sourcePID,
                 preexistingWindowIDs: existing,
                 interfaceWindowID: nil
             )

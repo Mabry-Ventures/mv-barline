@@ -158,10 +158,11 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
     }
 
     func beginRevealObservation(_ item: MenuBarItemID) throws -> MenuBarRevealObservationToken {
-        let token = try client.beginRevealObservation(item)
+        let resolved = try GoldenGateAXInventory.resolve(item)
+        let token = client.beginRevealObservation(sourcePID: resolved.ownerPID)
         do {
-            try concealmentController.beginTemporaryReveal(item)
-            revealedItemsByObservation[token] = item
+            try concealmentController.beginTemporaryReveal(resolved.id)
+            revealedItemsByObservation[token] = resolved.id
             return token
         } catch {
             client.endRevealObservation(token)

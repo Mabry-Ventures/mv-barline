@@ -9,6 +9,11 @@ import os
 /// public source of item identity, ownership, geometry, and order.
 @available(macOS 27.0, *)
 enum GoldenGateAXInventory {
+    struct ResolvedItem {
+        let id: MenuBarItemID
+        let ownerPID: pid_t
+    }
+
     struct Observation {
         let bundleIdentifier: String
         let localizedApplicationName: String?
@@ -54,6 +59,45 @@ enum GoldenGateAXInventory {
             state = (capturedAt: now, observations: observations)
         }
         return observations
+    }
+
+    static func identifiers(for observations: [Observation]) -> [MenuBarItemID] {
+        GoldenGateMenuBarSnapshotBuilder.identifiers(
+            for: observations.map { observation in
+                GoldenGateMenuBarObservation(
+                    bundleIdentifier: observation.bundleIdentifier,
+                    localizedApplicationName: observation.localizedApplicationName,
+                    identifier: observation.identifier,
+                    displayTitle: observation.displayTitle,
+                    stableTitle: observation.stableTitle,
+                    fallbackFingerprint: fallbackFingerprint(
+                        bundleIdentifier: observation.bundleIdentifier,
+                        stableTitle: observation.stableTitle
+                    ),
+                    bounds: MenuBarRect(
+                        x: observation.bounds.minX,
+                        y: observation.bounds.minY,
+                        width: observation.bounds.width,
+                        height: observation.bounds.height
+                    ),
+                    ownerProcessIdentifier: observation.ownerPID
+                )
+            }
+        )
+    }
+
+    static func resolve(_ itemID: MenuBarItemID) throws -> ResolvedItem {
+        let observations = try collect()
+        let identifiers = identifiers(for: observations)
+        guard let resolvedID = GoldenGateMenuBarIdentityResolver.resolve(
+            itemID,
+            among: identifiers
+        ),
+            let index = identifiers.firstIndex(of: resolvedID)
+        else {
+            throw MenuBarBackendError.staleItem(itemID)
+        }
+        return ResolvedItem(id: resolvedID, ownerPID: observations[index].ownerPID)
     }
 
     private static func collectFresh() throws -> [Observation] {

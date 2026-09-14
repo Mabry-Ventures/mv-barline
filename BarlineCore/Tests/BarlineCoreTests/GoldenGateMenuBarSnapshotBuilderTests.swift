@@ -49,6 +49,33 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
         #expect(duplicates.map(\.id.alias) == ["occurrence-0", "occurrence-1"])
     }
 
+    @Test("Rebinds a uniquely identified item after its occurrence alias changes")
+    func rebindsChangedOccurrenceAlias() {
+        let requested = itemID(bundle: "com.example.item", title: "Status", alias: "occurrence-1")
+        let current = itemID(bundle: "com.example.item", title: "Status", alias: "occurrence-0")
+
+        #expect(GoldenGateMenuBarIdentityResolver.resolve(requested, among: [current]) == current)
+    }
+
+    @Test("Identity rebinding fails closed for ambiguous semantic duplicates")
+    func ambiguousRebindingFailsClosed() {
+        let requested = itemID(bundle: "com.example.item", title: "Status", alias: "occurrence-2")
+        let candidates = [
+            itemID(bundle: "com.example.item", title: "Status", alias: "occurrence-0"),
+            itemID(bundle: "com.example.item", title: "Status", alias: "occurrence-1"),
+        ]
+
+        #expect(GoldenGateMenuBarIdentityResolver.resolve(requested, among: candidates) == nil)
+    }
+
+    @Test("Identity rebinding does not cross semantic identities")
+    func semanticMismatchFailsClosed() {
+        let requested = itemID(bundle: "com.example.item", title: "Status", alias: "occurrence-1")
+        let candidate = itemID(bundle: "com.example.item", title: "Other", alias: "occurrence-0")
+
+        #expect(GoldenGateMenuBarIdentityResolver.resolve(requested, among: [candidate]) == nil)
+    }
+
     @Test("Uses remembered sections when the live divider is parked")
     func rememberedSections() throws {
         let item = observation(bundle: "com.example.hidden", title: "Hidden", x: 1600)
@@ -142,6 +169,17 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
             fallbackFingerprint: "fingerprint-\(bundle)-\(title)",
             bounds: MenuBarRect(x: x, y: 3, width: 30, height: 24),
             ownerProcessIdentifier: 42
+        )
+    }
+
+
+    private func itemID(bundle: String, title: String, alias: String) -> MenuBarItemID {
+        MenuBarItemID(
+            bundleIdentifier: bundle,
+            accessibilityIdentifier: title,
+            title: title,
+            alias: alias,
+            fallbackFingerprint: "fingerprint-\(bundle)-\(title)"
         )
     }
 }

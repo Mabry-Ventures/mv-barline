@@ -219,3 +219,24 @@ public enum GoldenGateMenuBarSnapshotBuilder {
             lhs.y < rhs.y + rhs.height && rhs.y < lhs.y + lhs.height
     }
 }
+
+/// Rebinds an item after a temporary menu-bar move changes only its
+/// order-derived occurrence alias. Every semantic identity field must still
+/// agree, and ambiguous duplicates fail closed.
+public enum GoldenGateMenuBarIdentityResolver {
+    public static func resolve(
+        _ requestedID: MenuBarItemID,
+        among candidateIDs: [MenuBarItemID]
+    ) -> MenuBarItemID? {
+        if candidateIDs.contains(requestedID) {
+            return requestedID
+        }
+        let semanticMatches = candidateIDs.filter { candidateID in
+            candidateID.bundleIdentifier == requestedID.bundleIdentifier &&
+                candidateID.accessibilityIdentifier == requestedID.accessibilityIdentifier &&
+                candidateID.title == requestedID.title &&
+                candidateID.fallbackFingerprint == requestedID.fallbackFingerprint
+        }
+        return semanticMatches.count == 1 ? semanticMatches[0] : nil
+    }
+}

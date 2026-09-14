@@ -1,6 +1,15 @@
 # Changelog
 
-## 1.0.14 (build 53) — September 14, 2026
+## 1.0.14 (build 54) — September 14, 2026
+
+- Keep the hidden-item shelf interactive on macOS 27 by explicitly accepting
+  pointer events in its nonactivating panel. Physical, keyboard, and
+  Accessibility activation now share the same native button path.
+
+- Observe temporarily revealed macOS 27 items through their public
+  Accessibility owner rather than the legacy per-status-item WindowServer
+  inventory. Order-only identity changes are rebound only when the semantic
+  match is unique; ambiguous targets continue to fail closed.
 
 - Activate macOS 27 shelf items through their exact Accessibility identity,
   avoiding stale WindowServer coordinates after native concealment changes.

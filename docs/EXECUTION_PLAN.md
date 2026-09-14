@@ -1154,6 +1154,18 @@ journey has opened the shelf but has not yet established target activation.
 These are explicit pending gates, not a production GO or permission to bypass
 the protected local check. Updated signing/install validation continues locally.
 
+The September 14 macOS 27 runtime lane exposed two additional activation
+boundaries after discovery succeeded. A nonactivating shelf panel did not
+receive pointer events until it explicitly set `ignoresMouseEvents` to false,
+and the helper tried to begin interface observation through the obsolete
+per-status-item WindowServer inventory. Build 54 routes pointer, keyboard, and
+Accessibility activation through one native shelf button; resolves Golden Gate
+items through the shared public Accessibility identity builder; binds interface
+observation to the uniquely resolved owner process; and rejects ambiguous
+identity changes. Signed diagnostic fixtures have exercised native-menu and
+popover activation on macOS 27, but exact-SHA release packaging and both OS
+qualification lanes remain required before release.
+
 | Milestone | Owner | Status | Dependencies | Evidence |
 | --- | --- | --- | --- | --- |
 | 0. Import and provenance | Lead; delegated audit | Complete | none | Exact history, remotes, ancestor proof, vendor tag, license/provenance records |
@@ -1169,8 +1181,11 @@ the protected local check. Updated signing/install validation continues locally.
 
 ## External boundaries currently known
 
-- Xcode 27 beta 6 / Swift 6.4 is not installed.
-- No macOS 27 runtime host is available, so runtime compatibility cannot be claimed.
+- The local build host uses Xcode 26.6 with the macOS 26.5 SDK. macOS 27
+  compilation does not depend on an unavailable Xcode 27 toolchain.
+- An Apple Silicon macOS 27.0 runtime host is available for installed-candidate
+  qualification. Diagnostic execution is iteration evidence until rebound to
+  the exact signed and notarized release candidate.
 - The canonical `Mabry-Ventures/mv-barline` repository, `origin`, protected ruleset,
   and pull request exist; the protected local macOS check is published from the
   exact candidate full gate.
