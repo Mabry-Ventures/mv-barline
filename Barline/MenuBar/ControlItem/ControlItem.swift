@@ -477,11 +477,12 @@ final class ControlItem {
                 0
             }
 
+            let effectiveLength: CGFloat = shouldShow ? 3 : collapsedLength
             constraint?.isActive = false
-            statusItem.length = shouldShow ? 3 : collapsedLength
+            statusItem.length = effectiveLength
 
             if let window {
-                let size = withMutableCopy(of: window.frame.size) { $0.width = shouldShow ? 3 : 1 }
+                let size = withMutableCopy(of: window.frame.size) { $0.width = max(effectiveLength, 1) }
                 window.setContentSize(size)
             }
         }
