@@ -3,6 +3,7 @@
 
 manager = File.read('Barline/MenuBar/MenuBarItems/MenuBarItemManager.swift')
 backend = File.read('Barline/MenuBar/MenuBarItems/XPCMenuBarBackend.swift')
+shelf = File.read('Barline/MenuBar/BarlineShelf/BarlineShelf.swift')
 
 abort('shelf activation bypasses the compatibility coordinator') if
   manager.include?('BarlineMenuService.Connection.shared.activate')
@@ -15,4 +16,18 @@ unless backend.match?(/#available\(macOS 27\.0, \*\).*goldenGateProvider\.activa
   abort('Golden Gate activation is not routed through the trusted app provider')
 end
 
-puts 'PASS: shelf activation routes through the trusted app on macOS 27'
+if shelf.match?(/BarlineShelfItemClickView\(.*?\.accessibilityElement\(children: \.ignore\)/m)
+  abort('shelf item activation is shadowed by a SwiftUI accessibility wrapper')
+end
+
+unless shelf.match?(/override func mouseUp\(with event: NSEvent\).*?leftClickAction\(\)/m) &&
+       shelf.match?(/override func accessibilityPerformPress\(\) -> Bool.*?leftClickAction\(\)/m)
+  abort('shelf item does not own pointer and Accessibility activation')
+end
+
+unless shelf.match?(/modifierFlags\.contains\(\.control\).*?suppressLeftMouseUp = true.*?rightClickAction\(\)/m) &&
+       shelf.match?(/guard !suppressLeftMouseUp else \{.*?return/m)
+  abort('control-click can fall through to duplicate left activation')
+end
+
+puts 'PASS: shelf activation has one native control and routes through the trusted app on macOS 27'

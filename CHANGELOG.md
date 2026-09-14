@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.14 (build 51) — September 14, 2026
+## 1.0.14 (build 52) — September 14, 2026
 
 - Activate macOS 27 shelf items through their exact Accessibility identity,
   avoiding stale WindowServer coordinates after native concealment changes.

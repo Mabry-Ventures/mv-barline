@@ -790,6 +790,7 @@ private struct BarlineShelfContentView: View {
                     .inset(by: configuration.current.borderWidth / 2)
                     .stroke(lineWidth: configuration.current.borderWidth)
                     .foregroundStyle(Color(cgColor: configuration.current.borderColor))
+                    .allowsHitTesting(false)
             }
         }
         .padding(5)
@@ -1043,14 +1044,6 @@ private struct BarlineShelfItemView: View {
             width: image?.size.width ?? max(24, item.bounds.width),
             height: image?.size.height ?? 24
         )
-        // SwiftUI's representable wrapper can expose a layout-only AX node
-        // instead of forwarding the image-only NSButton's semantics. Own one
-        // accessible control here while AppKit retains native pointer tracking.
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(item.displayName)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityAction { leftClickAction() }
-        .accessibilityAction(named: Text("Open context menu")) { rightClickAction() }
     }
 }
 
@@ -1058,6 +1051,8 @@ private struct BarlineShelfItemView: View {
 
 private struct BarlineShelfItemClickView: NSViewRepresentable {
     private final class Represented: NSButton {
+        private let logger = Logger(category: "BarlineShelfItemButton")
+        private var suppressLeftMouseUp = false
         var leftClickAction: () -> Void
         var rightClickAction: () -> Void
 
@@ -1089,7 +1084,15 @@ private struct BarlineShelfItemClickView: NSViewRepresentable {
         }
 
         @objc private func activateItem() {
+            logger.debug("Shelf item activated by keyboard")
             leftClickAction()
+        }
+
+        override func accessibilityPerformPress() -> Bool {
+            guard isEnabled else { return false }
+            logger.debug("Shelf item activated by Accessibility")
+            leftClickAction()
+            return true
         }
 
         override func acceptsFirstMouse(for _: NSEvent?) -> Bool {
@@ -1117,10 +1120,30 @@ private struct BarlineShelfItemClickView: NSViewRepresentable {
 
         override func mouseDown(with event: NSEvent) {
             if event.modifierFlags.contains(.control) {
+                suppressLeftMouseUp = true
                 rightClickAction()
             } else {
-                super.mouseDown(with: event)
+                suppressLeftMouseUp = false
+                highlight(true)
             }
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            highlight(bounds.contains(convert(event.locationInWindow, from: nil)))
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            guard !suppressLeftMouseUp else {
+                suppressLeftMouseUp = false
+                return
+            }
+            let shouldActivate = isEnabled && bounds.contains(
+                convert(event.locationInWindow, from: nil)
+            )
+            highlight(false)
+            guard shouldActivate else { return }
+            logger.debug("Shelf item activated by pointer")
+            leftClickAction()
         }
 
         override func rightMouseDown(with _: NSEvent) {}
