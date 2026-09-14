@@ -135,7 +135,7 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
 
     func activate(_ item: MenuBarItemID, button: MenuBarMouseButton) async throws {
         try await Task.sleep(for: .milliseconds(100))
-        try await client.activate(item, button: button)
+        try await client.activateGoldenGate(item, button: button)
     }
 
     func capture(_: [MenuBarItemID]) throws -> [MenuBarCapturedImage] {

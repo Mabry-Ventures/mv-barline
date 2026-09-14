@@ -6,6 +6,7 @@ backend = File.read('Barline/MenuBar/MenuBarItems/XPCMenuBarBackend.swift')
 shelf = File.read('Barline/MenuBar/BarlineShelf/BarlineShelf.swift')
 helper_backend = File.read('BarlineMenuService/Backends/CompatibilityBackends.swift')
 helper_inventory = File.read('BarlineMenuService/WindowServer/GoldenGateAXInventory.swift')
+helper_client = File.read('BarlineMenuService/WindowServer/WindowServerClient.swift')
 item_projection = shelf.split('private struct BarlineShelfItemView', 2).last
   .split('// MARK: - BarlineShelfItemClickView', 2).first
 
@@ -39,6 +40,11 @@ end
 unless helper_backend.match?(/GoldenGateAXInventory\.resolve\(item\).*?beginRevealObservation\(sourcePID: resolved\.ownerPID\)/m) &&
        helper_inventory.match?(/static func resolve\(_ itemID: MenuBarItemID\).*?GoldenGateMenuBarIdentityResolver\.resolve/m)
   abort('Golden Gate reveal observation is not bound to the Accessibility item owner')
+end
+
+unless helper_backend.match?(/func activate\(_ item: MenuBarItemID.*?client\.activateGoldenGate\(item/m) &&
+       helper_client.match?(/func activateGoldenGate\(.*?moved\.post\(tap: \.cghidEventTap\).*?down\.post\(tap: \.cghidEventTap\).*?up\.post\(tap: \.cghidEventTap\)/m)
+  abort('Golden Gate activation falls back to the retired per-window item lookup')
 end
 
 unless shelf.match?(/modifierFlags\.contains\(\.control\).*?suppressLeftMouseUp = true.*?rightClickAction\(\)/m) &&

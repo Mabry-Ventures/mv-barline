@@ -12,6 +12,7 @@ enum GoldenGateAXInventory {
     struct ResolvedItem {
         let id: MenuBarItemID
         let ownerPID: pid_t
+        let bounds: CGRect
     }
 
     struct Observation {
@@ -61,6 +62,12 @@ enum GoldenGateAXInventory {
         return observations
     }
 
+    static func invalidateCache() {
+        cache.withLock { state in
+            state = (capturedAt: nil, observations: [])
+        }
+    }
+
     static func identifiers(for observations: [Observation]) -> [MenuBarItemID] {
         GoldenGateMenuBarSnapshotBuilder.identifiers(
             for: observations.map { observation in
@@ -97,7 +104,11 @@ enum GoldenGateAXInventory {
         else {
             throw MenuBarBackendError.staleItem(itemID)
         }
-        return ResolvedItem(id: resolvedID, ownerPID: observations[index].ownerPID)
+        return ResolvedItem(
+            id: resolvedID,
+            ownerPID: observations[index].ownerPID,
+            bounds: observations[index].bounds
+        )
     }
 
     private static func collectFresh() throws -> [Observation] {

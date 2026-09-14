@@ -451,6 +451,109 @@ final class WindowServerClient: @unchecked Sendable {
         try await synthesizeClick(item: item, pid: resolvedEventPID(for: item), button: button)
     }
 
+    /// macOS 27 exposes status items through Accessibility instead of one
+    /// WindowServer window per item. Deliver a physical-equivalent click at
+    /// the freshly resolved AX bounds; the caller independently observes the
+    /// target interface before treating activation as successful.
+    @available(macOS 27.0, *)
+    func activateGoldenGate(
+        _ itemID: MenuBarItemID,
+        button: MenuBarMouseButton
+    ) async throws {
+        try Task.checkCancellation()
+        try requireSafeMenuTracking()
+        let initial = try GoldenGateAXInventory.resolve(itemID)
+        guard initial.ownerPID > 0,
+              let displays = activeDisplayBounds(),
+              MenuBarVisibilityPolicy.isClickable(
+                  reportedVisible: true,
+                  itemBounds: MenuBarRect(
+                      x: initial.bounds.minX,
+                      y: initial.bounds.minY,
+                      width: initial.bounds.width,
+                      height: initial.bounds.height
+                  ),
+                  displayBounds: displays
+              )
+        else {
+            throw MenuBarBackendError.operationFailed(
+                "Accessibility menu bar item is outside the active displays"
+            )
+        }
+
+        let mouseButton: CGMouseButton = switch button {
+        case .left: .left
+        case .right: .right
+        case .other: .center
+        }
+        let downType: CGEventType = switch button {
+        case .left: .leftMouseDown
+        case .right: .rightMouseDown
+        case .other: .otherMouseDown
+        }
+        let upType: CGEventType = switch button {
+        case .left: .leftMouseUp
+        case .right: .rightMouseUp
+        case .other: .otherMouseUp
+        }
+        let point = CGPoint(x: initial.bounds.midX, y: initial.bounds.midY)
+        guard let moved = CGEvent(
+            mouseEventSource: nil,
+            mouseType: .mouseMoved,
+            mouseCursorPosition: point,
+            mouseButton: .left
+        ) else {
+            throw MenuBarBackendError.unavailableCapability("menu bar event synthesis")
+        }
+
+        let cursorLocation = CGEvent(source: nil)?.location
+        let cursorHidden = CGDisplayHideCursor(CGMainDisplayID()) == .success
+        defer {
+            if let cursorLocation {
+                CGWarpMouseCursorPosition(cursorLocation)
+            }
+            if cursorHidden {
+                CGDisplayShowCursor(CGMainDisplayID())
+            }
+        }
+        guard CGWarpMouseCursorPosition(point) == .success else {
+            throw MenuBarBackendError.operationFailed("Could not position the menu bar pointer")
+        }
+        permitLocalEvents()
+        moved.post(tap: .cghidEventTap)
+        try await Task.sleep(for: .milliseconds(50))
+        try Task.checkCancellation()
+        GoldenGateAXInventory.invalidateCache()
+        let confirmed = try GoldenGateAXInventory.resolve(itemID)
+        let tolerance: CGFloat = 2
+        guard confirmed.ownerPID == initial.ownerPID,
+              abs(confirmed.bounds.midX - initial.bounds.midX) <= tolerance,
+              abs(confirmed.bounds.midY - initial.bounds.midY) <= tolerance,
+              abs(confirmed.bounds.width - initial.bounds.width) <= tolerance,
+              abs(confirmed.bounds.height - initial.bounds.height) <= tolerance,
+              let down = CGEvent(
+                  mouseEventSource: nil,
+                  mouseType: downType,
+                  mouseCursorPosition: point,
+                  mouseButton: mouseButton
+              ),
+              let up = CGEvent(
+                  mouseEventSource: nil,
+                  mouseType: upType,
+                  mouseCursorPosition: point,
+                  mouseButton: mouseButton
+              )
+        else {
+            throw MenuBarBackendError.operationFailed(
+                "Accessibility menu bar item changed before activation"
+            )
+        }
+        down.post(tap: .cghidEventTap)
+        try await Task.sleep(for: .milliseconds(80))
+        up.post(tap: .cghidEventTap)
+        try Task.checkCancellation()
+    }
+
     func capture(_ itemIDs: [MenuBarItemID]) throws -> [MenuBarCapturedImage] {
         guard !itemIDs.isEmpty, itemIDs.count <= 512 else {
             throw MenuBarBackendError.operationFailed("Invalid capture item count")
