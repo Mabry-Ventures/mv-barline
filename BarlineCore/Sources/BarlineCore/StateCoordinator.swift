@@ -216,6 +216,10 @@ public actor MenuBarStateCoordinator {
         state: .unavailable
     )
 
+    public var capabilities: MenuBarCapabilities {
+        get async { await backend.capabilities }
+    }
+
     private let backend: any MenuBarBackend
     private let validator: SnapshotValidator
     private let retryPolicy: RetryPolicy

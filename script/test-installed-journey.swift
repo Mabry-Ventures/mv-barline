@@ -417,14 +417,38 @@ do {
         return sameFrame(rect, original) && displays.contains { $0.intersects(rect) }
     }) else { throw JourneyError.failed("fixture_target_must_be_placed_in_hidden_section_first") }
     guard let sourceBar = extras(app) else { throw JourneyError.failed("barline_source_extras_unavailable") }
-    let sourceFrames = (attribute(sourceBar, kAXChildrenAttribute) as? [AXUIElement] ?? []).compactMap(frame)
+    let sourceItems = (attribute(sourceBar, kAXChildrenAttribute) as? [AXUIElement] ?? []).filter {
+        (attribute($0, "AXIdentifier") as? String) == "Barline.ControlItem.Visible" &&
+            (attribute($0, kAXRoleAttribute) as? String) == kAXMenuBarItemRole
+    }
+    guard sourceItems.count == 1, let sourceControl = sourceItems.first.flatMap(frame),
+          sourceControl.width > 0, sourceControl.width < 100, sourceControl.height > 0 else {
+        throw JourneyError.failed("status_control_source_unverified")
+    }
     let controls = windows().filter { $0[kCGWindowName as String] as? String == "Barline.ControlItem.Visible" }
     let verifiedControls = controls.filter { row in
         guard let rect = bounds(row), let owner = (row[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value else { return false }
         let validHost = owner == appPID || NSRunningApplication(processIdentifier: owner)?.bundleIdentifier == "com.apple.controlcenter"
-        return validHost && sourceFrames.contains { sameFrame($0, rect) }
+        return validHost && sameFrame(sourceControl, rect)
     }
-    guard verifiedControls.count == 1, let control = verifiedControls.first.flatMap(bounds) else {
+    let compositedMenuBars = windows().filter { row in
+        guard row[kCGWindowName as String] as? String == "Menubar",
+              (row[kCGWindowLayer as String] as? NSNumber)?.intValue == 24,
+              let rect = bounds(row), rect.width > 0, rect.height > 0 else { return false }
+        return rect.contains(CGPoint(x: sourceControl.midX, y: sourceControl.midY))
+    }
+    let control: CGRect
+    let controlHostProof: String
+    if verifiedControls.count == 1, let hosted = verifiedControls.first.flatMap(bounds) {
+        control = hosted
+        controlHostProof = "named_status_window"
+    } else if verifiedControls.isEmpty, compositedMenuBars.count == 1 {
+        // macOS 27 composites status items into WindowServer's single Menubar
+        // surface. The exact app-owned AX item and its on-screen composite must
+        // both agree before a physical click is permitted.
+        control = sourceControl
+        controlHostProof = "composited_menubar_with_exact_ax_source"
+    } else {
         throw JourneyError.failed("status_control_source_host_relationship_unverified")
     }
     guard let originalPointer = CGEvent(source: nil)?.location else {
@@ -508,6 +532,7 @@ do {
         "schema": 1, "verdict": shelfAXTraversalPassed ? "PASS" : "FAIL",
         "interactionVerdict": "PASS", "shelfAXTraversalPassed": shelfAXTraversalPassed,
         "fixtureHostedAliasVerified": shelfLabels.count == 2,
+        "statusControlHostProof": controlHostProof,
         "targetResolution": shelfAXTraversalPassed ? "shelf_ax_tree" : "scoped_shelf_ax_hit_test",
         "target": target, "button": right ? "right" : "left",
         "physicalEventPath": true, "shelfObserved": true, "targetReceiptObserved": true,

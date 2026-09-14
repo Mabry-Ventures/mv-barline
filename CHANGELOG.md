@@ -1,11 +1,15 @@
 # Changelog
 
-## 1.0.14 (build 39) — September 13, 2026
+## 1.0.14 (build 40) — September 14, 2026
 
 - Restore menu bar discovery on macOS 27, where WindowServer now exposes one
   composite menu bar surface instead of one window per status item. Barline
   uses a bounded, read-only Accessibility inventory and preserves native
   Command-drag as the arrangement path on macOS 27.
+
+- Run the macOS 27 Accessibility inventory in Barline's signed application
+  process, matching macOS's process-bound permission model instead of asking
+  the embedded helper to read an authorization it cannot inherit.
 
 - Classify macOS 27 section geometry across live, parked, and expanded divider
   states without allowing ambiguous or missing controls to replace the last

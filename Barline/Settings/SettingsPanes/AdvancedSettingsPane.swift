@@ -204,7 +204,7 @@ struct AdvancedSettingsPane: View {
             do {
                 let health = await appState.compatibilityCoordinator.backendHealth
                 let snapshot = await appState.compatibilityCoordinator.currentSnapshot
-                let capabilities = await (try? BarlineMenuService.Connection.shared.capabilities()) ?? .fallback
+                let capabilities = await appState.compatibilityCoordinator.capabilities
                 let preview = try await SupportBundleExporter().preview(
                     permissions: .init(
                         accessibility: appState.permissions.accessibility.hasPermission,

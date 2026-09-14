@@ -881,7 +881,7 @@ extension MenuBarItemManager {
     }
 
     private nonisolated func getCurrentBounds(for item: MenuBarItem) async throws -> CGRect {
-        let snapshot = try await BarlineMenuService.Connection.shared.snapshot()
+        let snapshot = try await MenuBarItem.snapshotCoordinator.refreshOnce()
         guard let descriptor = snapshot.items.first(where: { $0.id == item.stableID }) else {
             throw EventError.missingItemBounds(item)
         }

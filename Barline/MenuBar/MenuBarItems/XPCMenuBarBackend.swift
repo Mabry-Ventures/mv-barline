@@ -8,15 +8,22 @@ import Foundation
 
 actor XPCMenuBarBackend: MenuBarBackend {
     private let connection = BarlineMenuService.Connection.shared
+    private let goldenGateProvider = GoldenGateAXSnapshotProvider()
 
     var capabilities: MenuBarCapabilities {
         get async {
-            await (try? connection.capabilities()) ?? .fallback
+            if #available(macOS 27.0, *) {
+                return await goldenGateProvider.capabilities
+            }
+            return await (try? connection.capabilities()) ?? .fallback
         }
     }
 
     func snapshot() async throws -> MenuBarSnapshot {
-        try await connection.snapshot()
+        if #available(macOS 27.0, *) {
+            return try await goldenGateProvider.snapshot()
+        }
+        return try await connection.snapshot()
     }
 
     func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
@@ -70,10 +77,16 @@ actor XPCMenuBarBackend: MenuBarBackend {
     }
 
     func health() async -> MenuBarBackendHealth {
-        await connection.health()
+        if #available(macOS 27.0, *) {
+            return await goldenGateProvider.health()
+        }
+        return await connection.health()
     }
 
     func restart() async {
+        if #available(macOS 27.0, *) {
+            await goldenGateProvider.restart()
+        }
         await connection.restart()
     }
 }

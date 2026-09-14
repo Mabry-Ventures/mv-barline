@@ -89,7 +89,7 @@ private enum ProbeError: Error, CustomStringConvertible, Sendable {
         case .settingsBaselineTimedOut:
             "The Settings window did not reach the hidden reopen-probe baseline"
         case .barlineIconNotFound:
-            "No on-screen Barline.ControlItem.Visible window was found"
+            "No uniquely verified on-screen Barline control item was found"
         case .unableToCloseBaseline:
             "The Barline Bar could not be closed before measurement"
         case .unableToSynthesizeClick:
@@ -281,9 +281,64 @@ private func barlineIconCenter() throws -> CGPoint {
         }) {
             return CGPoint(x: icon.bounds.midX, y: icon.bounds.midY)
         }
+        if candidates.isEmpty,
+           let source = sourceVisibleStatusFrame(processIdentifier: expectedProcessIdentifier)
+        {
+            let compositedMenuBars = windowSnapshots().filter {
+                $0.windowName == "Menubar" && $0.layer == 24 &&
+                    $0.bounds.width > 0 && $0.bounds.height > 0 &&
+                    $0.bounds.contains(CGPoint(x: source.midX, y: source.midY))
+            }
+            if compositedMenuBars.count == 1 {
+                // macOS 27 no longer publishes one named CGWindow per status
+                // item. Require the exact app-owned AX control to lie within
+                // the one visible WindowServer Menubar composite.
+                return CGPoint(x: source.midX, y: source.midY)
+            }
+        }
         usleep(Configuration.pollingIntervalMicroseconds)
     }
     throw ProbeError.barlineIconNotFound
+}
+
+private func sourceVisibleStatusFrame(processIdentifier: pid_t) -> CGRect? {
+    let application = AXUIElementCreateApplication(processIdentifier)
+    AXUIElementSetMessagingTimeout(application, 0.2)
+    var rawBar: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(application, "AXExtrasMenuBar" as CFString, &rawBar) == .success,
+          let rawBar, CFGetTypeID(rawBar) == AXUIElementGetTypeID() else { return nil }
+    let bar = unsafeDowncast(rawBar, to: AXUIElement.self)
+    var rawChildren: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(bar, kAXChildrenAttribute as CFString, &rawChildren) == .success,
+          let children = rawChildren as? [AXUIElement] else { return nil }
+    let matches = children.compactMap { child -> CGRect? in
+        var rawIdentifier: CFTypeRef?
+        var rawRole: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(child, kAXIdentifierAttribute as CFString, &rawIdentifier) == .success,
+              AXUIElementCopyAttributeValue(child, kAXRoleAttribute as CFString, &rawRole) == .success,
+              rawIdentifier as? String == "Barline.ControlItem.Visible",
+              rawRole as? String == kAXMenuBarItemRole else { return nil }
+        return sourceStatusFrame(child)
+    }
+    guard matches.count == 1, let match = matches.first,
+          match.width > 0, match.width < 100, match.height > 0 else { return nil }
+    return match
+}
+
+private func sourceStatusFrame(_ child: AXUIElement) -> CGRect? {
+    var rawPosition: CFTypeRef?
+    var rawSize: CFTypeRef?
+    guard AXUIElementCopyAttributeValue(child, kAXPositionAttribute as CFString, &rawPosition) == .success,
+          AXUIElementCopyAttributeValue(child, kAXSizeAttribute as CFString, &rawSize) == .success,
+          let rawPosition, let rawSize,
+          CFGetTypeID(rawPosition) == AXValueGetTypeID(), CFGetTypeID(rawSize) == AXValueGetTypeID()
+    else { return nil }
+    var point = CGPoint.zero
+    var size = CGSize.zero
+    guard AXValueGetValue(unsafeDowncast(rawPosition, to: AXValue.self), .cgPoint, &point),
+          AXValueGetValue(unsafeDowncast(rawSize, to: AXValue.self), .cgSize, &size)
+    else { return nil }
+    return CGRect(origin: point, size: size)
 }
 
 private func sourceStatusFrames(processIdentifier: pid_t) -> [CGRect] {
