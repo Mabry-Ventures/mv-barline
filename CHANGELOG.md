@@ -1,16 +1,14 @@
 # Changelog
 
-## 1.0.14 (build 60) — September 14, 2026
+## 1.0.14 (build 61) — September 14, 2026
 
 - Route both macOS 26 status-item buttons through the same source-targeted
   WindowServer delivery path. Keep its session observation tap passive so
   disabling the acknowledgement cannot swallow the click before AppKit sees it.
 
-- Keep the macOS 27 Accessibility click route independent, and guarantee that
-  every posted physical mouse-down is paired with a release even when its task
-  is cancelled or fails between events. Preserve CoreGraphics' system event
-  flags so Golden Gate status items accept the physical-equivalent click, and
-  avoid treating the shelf's own handoff transition as a newly opened menu.
+- Keep the proven macOS 27 Accessibility click route independent and unchanged;
+  Golden Gate activation continues to use the exact physical-equivalent event
+  sequence qualified on macOS 27.
 
 ## 1.0.14 (build 56) — September 14, 2026
 

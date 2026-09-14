@@ -568,37 +568,9 @@ final class WindowServerClient: @unchecked Sendable {
                 "Menu bar item changed before activation"
             )
         }
-        // Preserve CoreGraphics' system-supplied event flags. Clearing the
-        // non-coalesced flag prevents Golden Gate status items from receiving
-        // an otherwise valid HID click.
-        down.setIntegerValueField(.mouseEventClickState, value: 1)
-        up.setIntegerValueField(.mouseEventClickState, value: 0)
-
-        var postedDown = false
-        var postedUp = false
-        defer {
-            // Cancellation and task failure must never strand a physical
-            // press. Posting a release is safe even if the target vanished;
-            // replaying mouse-down is not.
-            if postedDown, !postedUp {
-                up.post(tap: .cghidEventTap)
-            }
-        }
-        // Menu tracking was validated before resolving this exact AX item.
-        // Rechecking after the shelf handoff misclassifies Golden Gate's
-        // transient focus transition and aborts before mouse-down. Geometry
-        // and ownership were just revalidated above.
         down.post(tap: .cghidEventTap)
-        postedDown = true
-        do {
-            try await Task.sleep(for: .milliseconds(80))
-        } catch {
-            up.post(tap: .cghidEventTap)
-            postedUp = true
-            throw error
-        }
+        try await Task.sleep(for: .milliseconds(80))
         up.post(tap: .cghidEventTap)
-        postedUp = true
         try Task.checkCancellation()
     }
 
