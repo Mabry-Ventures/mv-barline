@@ -2,22 +2,39 @@ import BarlineCore
 import Foundation
 import OSLog
 
-@_silgen_name("BLNGoldenGateAssessmentCreate")
-private func assessmentCreate() -> UnsafeMutableRawPointer?
-@_silgen_name("BLNGoldenGateAssessmentApply")
-private func assessmentApply(
-    _ controller: UnsafeMutableRawPointer,
-    _ concealedBundleIdentifiers: CFArray,
-    _ allowedSystemItemIdentifiers: CFArray
-) -> Bool
-@_silgen_name("BLNGoldenGateAssessmentInvalidate")
-private func assessmentInvalidate(_ controller: UnsafeMutableRawPointer)
-@_silgen_name("BLNGoldenGateAssessmentDestroy")
-private func assessmentDestroy(_ controller: UnsafeMutableRawPointer)
-
 @available(macOS 27.0, *)
 final class GoldenGateConcealmentController: @unchecked Sendable {
+    private typealias Create = @convention(c) () -> UnsafeMutableRawPointer?
+    private typealias Apply = @convention(c) (
+        UnsafeMutableRawPointer,
+        CFArray,
+        CFArray
+    ) -> Bool
+    private typealias Invalidate = @convention(c) (UnsafeMutableRawPointer) -> Void
+    private typealias Destroy = @convention(c) (UnsafeMutableRawPointer) -> Void
+
+    private struct Bridge: @unchecked Sendable {
+        let create: Create
+        let apply: Apply
+        let invalidate: Invalidate
+        let destroy: Destroy
+
+        init?() {
+            let resolver = DynamicSymbolResolver(libraryPaths: [], includesProcessImage: true)
+            guard let create = resolver.resolve("BLNGoldenGateAssessmentCreate", as: Create.self),
+                  let apply = resolver.resolve("BLNGoldenGateAssessmentApply", as: Apply.self),
+                  let invalidate = resolver.resolve("BLNGoldenGateAssessmentInvalidate", as: Invalidate.self),
+                  let destroy = resolver.resolve("BLNGoldenGateAssessmentDestroy", as: Destroy.self)
+            else { return nil }
+            self.create = create
+            self.apply = apply
+            self.invalidate = invalidate
+            self.destroy = destroy
+        }
+    }
+
     private let logger = Logger(category: "GoldenGateConcealmentController")
+    private let bridge: Bridge?
     private let opaqueController: UnsafeMutableRawPointer?
     private var desiredConfiguration = MenuBarConcealmentConfiguration(
         visibleItemIDs: [], concealedItemIDs: []
@@ -26,13 +43,15 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     private var appliedResolution: GoldenGateResolvedConcealment?
 
     init() {
-        opaqueController = assessmentCreate()
+        let bridge = Bridge()
+        self.bridge = bridge
+        opaqueController = bridge?.create()
     }
 
     deinit {
         if let opaqueController {
-            assessmentInvalidate(opaqueController)
-            assessmentDestroy(opaqueController)
+            bridge?.invalidate(opaqueController)
+            bridge?.destroy(opaqueController)
         }
     }
 
@@ -70,7 +89,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
 
     func invalidate() {
         guard let opaqueController else { return }
-        assessmentInvalidate(opaqueController)
+        bridge?.invalidate(opaqueController)
         appliedResolution = nil
     }
 
@@ -91,7 +110,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         )
         let bundles = resolved.concealedBundleIdentifiers.sorted() as CFArray
         let systemItems = resolved.allowedSystemItemIdentifiers.sorted().map(NSNumber.init) as CFArray
-        guard assessmentApply(opaqueController, bundles, systemItems) else {
+        guard bridge?.apply(opaqueController, bundles, systemItems) == true else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
         }
         appliedResolution = resolved

@@ -13,9 +13,14 @@ final class DynamicSymbolResolver: @unchecked Sendable {
 
     private let storage = OSAllocatedUnfairLock(initialState: Storage())
     private let libraryPaths: [String]
+    private let includesProcessImage: Bool
 
-    init(libraryPaths: [String] = DynamicSymbolResolver.defaultLibraryPaths) {
+    init(
+        libraryPaths: [String] = DynamicSymbolResolver.defaultLibraryPaths,
+        includesProcessImage: Bool = false
+    ) {
         self.libraryPaths = libraryPaths
+        self.includesProcessImage = includesProcessImage
     }
 
     deinit {
@@ -54,9 +59,14 @@ final class DynamicSymbolResolver: @unchecked Sendable {
             }
 
             if storage.handles.isEmpty {
+                if includesProcessImage,
+                   let handle = dlopen(nil, RTLD_NOW | RTLD_LOCAL)
+                {
+                    storage.handles.append(UInt(bitPattern: handle))
+                }
                 storage.handles = libraryPaths.compactMap { path in
                     dlopen(path, RTLD_NOW | RTLD_LOCAL).map { UInt(bitPattern: $0) }
-                }
+                } + storage.handles
             }
 
             for address in storage.handles {

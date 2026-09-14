@@ -448,21 +448,6 @@ final class WindowServerClient: @unchecked Sendable {
         guard item.isOnScreen else {
             throw MenuBarBackendError.operationFailed("Menu bar item must be revealed before activation")
         }
-        if button == .right {
-            guard let bounds = WindowInfo(windowID: item.identifier)?.currentBounds() else {
-                throw MenuBarBackendError.staleItem(itemID)
-            }
-            try await synthesizePhysicalClick(
-                initialBounds: bounds,
-                button: button
-            ) {
-                guard let confirmed = WindowInfo(windowID: item.identifier)?.currentBounds() else {
-                    throw MenuBarBackendError.staleItem(itemID)
-                }
-                return confirmed
-            }
-            return
-        }
         try await synthesizeClick(item: item, pid: resolvedEventPID(for: item), button: button)
     }
 
@@ -583,9 +568,34 @@ final class WindowServerClient: @unchecked Sendable {
                 "Menu bar item changed before activation"
             )
         }
+        for event in [down, up] {
+            event.flags = []
+        }
+        down.setIntegerValueField(.mouseEventClickState, value: 1)
+        up.setIntegerValueField(.mouseEventClickState, value: 0)
+
+        var postedDown = false
+        var postedUp = false
+        defer {
+            // Cancellation and task failure must never strand a physical
+            // press. Posting a release is safe even if the target vanished;
+            // replaying mouse-down is not.
+            if postedDown, !postedUp {
+                up.post(tap: .cghidEventTap)
+            }
+        }
+        try requireSafeMenuTracking()
         down.post(tap: .cghidEventTap)
-        try await Task.sleep(for: .milliseconds(80))
+        postedDown = true
+        do {
+            try await Task.sleep(for: .milliseconds(80))
+        } catch {
+            up.post(tap: .cghidEventTap)
+            postedUp = true
+            throw error
+        }
         up.post(tap: .cghidEventTap)
+        postedUp = true
         try Task.checkCancellation()
     }
 
@@ -1269,16 +1279,21 @@ final class WindowServerClient: @unchecked Sendable {
             type: event.type,
             location: .session,
             placement: .tailAppendEventTap,
-            options: .listenOnly
-        ) { tap, received in
-            // Retain baseline source routing before acknowledging the session
-            // event. An exit marker alone does not prove target consumption.
-            if HelperClickRouting.restoreTarget(of: received, matching: event, to: pid) {
-                tap.disable()
-                exit.postToPid(pid)
+            // This tap must be active: its sole purpose is to replace the
+            // matching session event's target PID before dispatch. A
+            // listen-only tap can observe the marker but CoreGraphics ignores
+            // every mutation it makes to the event.
+            options: .defaultTap,
+            handler: { tap, received in
+                // Retain baseline source routing before acknowledging the session
+                // event. An exit marker alone does not prove target consumption.
+                if HelperClickRouting.restoreTarget(of: received, matching: event, to: pid) {
+                    tap.disable()
+                    exit.postToPid(pid)
+                }
+                return received
             }
-            return received
-        }
+        )
         do {
             try await delivery.run(taps: [barrierTap, sessionTap], timeout: .milliseconds(500)) {
                 entry.postToPid(pid)

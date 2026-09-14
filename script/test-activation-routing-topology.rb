@@ -7,6 +7,8 @@ shelf = File.read('Barline/MenuBar/BarlineShelf/BarlineShelf.swift')
 helper_backend = File.read('BarlineMenuService/Backends/CompatibilityBackends.swift')
 helper_inventory = File.read('BarlineMenuService/WindowServer/GoldenGateAXInventory.swift')
 helper_client = File.read('BarlineMenuService/WindowServer/WindowServerClient.swift')
+click_delivery = helper_client.split('private func deliverClick', 2).last
+  .split('private enum MovePlacement', 2).first
 item_projection = shelf.split('private struct BarlineShelfItemView', 2).last
   .split('// MARK: - BarlineShelfItemClickView', 2).first
 
@@ -47,8 +49,11 @@ unless helper_backend.match?(/func activate\(_ item: MenuBarItemID.*?client\.act
   abort('Golden Gate activation falls back to the retired per-window item lookup')
 end
 
-unless helper_client.match?(/if button == \.right.*?synthesizePhysicalClick/m)
-  abort('secondary activation can fall back to hosted event retargeting')
+unless helper_client.match?(/func activate\(_ itemID:.*?synthesizeClick\(item: item, pid: resolvedEventPID/m) &&
+       helper_client.include?('location: .session,') &&
+       helper_client.include?('options: .defaultTap') &&
+       !click_delivery.include?('options: .listenOnly')
+  abort('macOS 26 activation does not use an active, source-bound session route')
 end
 
 unless shelf.match?(/modifierFlags\.contains\(\.control\).*?suppressLeftMouseUp = true.*?rightClickAction\(\)/m) &&
