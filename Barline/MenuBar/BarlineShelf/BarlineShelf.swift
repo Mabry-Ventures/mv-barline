@@ -1044,6 +1044,13 @@ private struct BarlineShelfItemView: View {
             width: image?.size.width ?? max(24, item.bounds.width),
             height: image?.size.height ?? 24
         )
+        // Publish one discoverable control for SwiftUI's representable while
+        // the native NSButton below owns pointer, keyboard and AX execution.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(item.displayName)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { leftClickAction() }
+        .accessibilityAction(named: Text("Open context menu")) { rightClickAction() }
     }
 }
 

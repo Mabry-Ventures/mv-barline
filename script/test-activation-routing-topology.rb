@@ -16,13 +16,13 @@ unless backend.match?(/#available\(macOS 27\.0, \*\).*goldenGateProvider\.activa
   abort('Golden Gate activation is not routed through the trusted app provider')
 end
 
-if shelf.match?(/BarlineShelfItemClickView\(.*?\.accessibilityElement\(children: \.ignore\)/m)
-  abort('shelf item activation is shadowed by a SwiftUI accessibility wrapper')
-end
-
 unless shelf.match?(/override func mouseUp\(with event: NSEvent\).*?leftClickAction\(\)/m) &&
        shelf.match?(/override func accessibilityPerformPress\(\) -> Bool.*?leftClickAction\(\)/m)
   abort('shelf item does not own pointer and Accessibility activation')
+end
+
+unless shelf.match?(/\.accessibilityElement\(children: \.ignore\).*?\.accessibilityLabel\(item\.displayName\)/m)
+  abort('shelf item is not discoverable through its SwiftUI accessibility projection')
 end
 
 unless shelf.match?(/modifierFlags\.contains\(\.control\).*?suppressLeftMouseUp = true.*?rightClickAction\(\)/m) &&
