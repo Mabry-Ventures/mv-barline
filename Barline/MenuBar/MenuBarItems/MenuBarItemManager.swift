@@ -46,6 +46,13 @@ final class MenuBarItemManager: ObservableObject {
     /// Monotonically increasing identifier for cache requests.
     private var cacheRequestSequence: UInt64 = 0
 
+    /// Synchronously reserves discovery before any MainActor suspension and
+    /// bounds a lifecycle burst to one current pass plus one trailing pass.
+    private var itemDiscoveryRefreshGate = MenuBarDiscoveryRefreshGate()
+
+    /// Payload-free evidence for diagnosing OS-specific lifecycle churn.
+    private(set) var itemDiscoveryDiagnostics = MenuBarItemDiscoveryDiagnostics()
+
     /// Cold launches can briefly observe the menu bar before AppKit has
     /// published Barline's control items. Retry that bounded race without
     /// turning item discovery into a polling loop.
@@ -118,7 +125,7 @@ final class MenuBarItemManager: ObservableObject {
                     return
                 }
                 Task {
-                    await self.cacheItemsIfNeeded()
+                    await self.cacheItemsIfNeeded(intent: .automatic)
                 }
             }
             .store(in: &c)
@@ -129,7 +136,7 @@ final class MenuBarItemManager: ObservableObject {
                     return
                 }
                 Task {
-                    await self.cacheItemsRegardless()
+                    await self.cacheItemsRegardless(intent: .automatic)
                 }
             }
             .store(in: &c)
@@ -145,7 +152,7 @@ final class MenuBarItemManager: ObservableObject {
                     return
                 }
                 Task {
-                    await self.cacheItemsRegardless()
+                    await self.cacheItemsRegardless(intent: .automatic)
                 }
             }
             .store(in: &c)
@@ -166,6 +173,48 @@ final class MenuBarItemManager: ObservableObject {
 // MARK: - Item Cache
 
 extension MenuBarItemManager {
+    private func beginDiscoveryRequest(
+        intent: MenuBarDiscoveryRefreshIntent
+    ) -> UInt64? {
+        guard itemDiscoveryRefreshGate.begin(intent: intent) else {
+            itemDiscoveryDiagnostics.recordCoalescedAutomaticRequest()
+            logger.debug("Coalescing automatic menu bar discovery refresh")
+            return nil
+        }
+
+        // Reserve synchronously on MainActor before the first suspension point.
+        // This closes the check-then-await race during AppKit event storms.
+        cacheRequestSequence += 1
+        itemDiscoveryDiagnostics.recordStartedRequest(intent: intent)
+        return cacheRequestSequence
+    }
+
+    private func finishDiscoveryRequest(
+        requestID: UInt64,
+        allowsTrailingAutomaticRefresh: Bool
+    ) {
+        // A newer authoritative request owns the state after superseding this
+        // one. Only the newest accepted request may clear or consume it.
+        guard requestID == cacheRequestSequence else {
+            return
+        }
+
+        let shouldRunTrailingRefresh = itemDiscoveryRefreshGate.finish(
+            allowsTrailingAutomaticRefresh: allowsTrailingAutomaticRefresh,
+            reachedUsableTerminalState: itemDiscoveryState != .failed
+        )
+
+        guard shouldRunTrailingRefresh else {
+            return
+        }
+        Task { [weak self] in
+            await self?.cacheItemsRegardless(
+                intent: .automatic,
+                allowsTrailingAutomaticRefresh: false
+            )
+        }
+    }
+
     /// An actor that manages menu bar item cache operations.
     private final actor CacheActor {
         /// Stored task for the current cache operation.
@@ -429,7 +478,7 @@ extension MenuBarItemManager {
 
     private enum CacheAttemptResult {
         case success
-        case retryableFailure
+        case retryableFailure(MenuBarItemDiscoveryFailureCode)
         case cancelled
     }
 
@@ -514,11 +563,29 @@ extension MenuBarItemManager {
     /// Before caching, this method ensures that the control items for
     /// the hidden and always-hidden sections are correctly ordered,
     /// arranging them into valid positions if needed.
-    func cacheItemsRegardless(_ currentItemIDs: [MenuBarItemID]? = nil) async {
+    func cacheItemsRegardless(
+        _ currentItemIDs: [MenuBarItemID]? = nil,
+        intent: MenuBarDiscoveryRefreshIntent = .authoritative,
+        allowsTrailingAutomaticRefresh: Bool = true
+    ) async {
+        guard let requestID = beginDiscoveryRequest(intent: intent) else {
+            return
+        }
+        defer {
+            finishDiscoveryRequest(
+                requestID: requestID,
+                allowsTrailingAutomaticRefresh: allowsTrailingAutomaticRefresh
+            )
+        }
         await discardSupersededRestorations()
-        cacheRequestSequence += 1
-        let requestID = cacheRequestSequence
 
+        await runCacheDiscovery(currentItemIDs: currentItemIDs, requestID: requestID)
+    }
+
+    private func runCacheDiscovery(
+        currentItemIDs: [MenuBarItemID]?,
+        requestID: UInt64
+    ) async {
         await cacheActor.runCacheTask(requestID: requestID) { [weak self] requestID in
             guard let self else {
                 return
@@ -548,10 +615,15 @@ extension MenuBarItemManager {
                     itemDiscoveryState = .completed(
                         managedItemCount: itemCache.managedItems.count
                     )
+                    itemDiscoveryDiagnostics.recordCompletion(
+                        attemptCount: attempt + 1,
+                        managedItemCount: itemCache.managedItems.count
+                    )
                     return
                 case .cancelled:
                     return
-                case .retryableFailure:
+                case let .retryableFailure(failure):
+                    itemDiscoveryDiagnostics.recordAttemptFailure(code: failure)
                     continue
                 }
             }
@@ -565,6 +637,9 @@ extension MenuBarItemManager {
             itemDiscoveryState = hadUsableSnapshot
                 ? itemDiscoveryState.preservingUsableSnapshotOrFailure()
                 : .failed
+            itemDiscoveryDiagnostics.recordFailure(
+                attemptCount: itemDiscoveryRetryPolicy.maximumAttempts
+            )
             logger.error("Menu bar item discovery exhausted its bounded retry budget")
         }
     }
@@ -583,7 +658,7 @@ extension MenuBarItemManager {
 
         guard !lastMoveOperationOccurred(within: .seconds(1)) else {
             logger.debug("Deferring menu bar item cache due to recent item movement")
-            return .retryableFailure
+            return .retryableFailure(.recentMovement)
         }
 
         let environment = try? await BarlineMenuService.Connection.shared.environment()
@@ -596,7 +671,7 @@ extension MenuBarItemManager {
             logger.warning(
                 "Menu bar snapshot failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
             )
-            return .retryableFailure
+            return .retryableFailure(.snapshotUnavailable)
         }
         var items = loadedItems
         let reportedItemIDs = currentItemIDs ?? items.reversed().map(\.stableID)
@@ -617,14 +692,14 @@ extension MenuBarItemManager {
                 "Incomplete menu bar snapshot (reported: \(reportedItemIDs.count, privacy: .public), resolved: \(resolvedItemIDs.count, privacy: .public)); keeping previous cache"
             )
             _ = await cacheActor.clearCachedItemIDs(for: requestID)
-            return .retryableFailure
+            return .retryableFailure(.incompleteSnapshot)
         }
 
         let hasVisibleControlItem = items.contains { $0.tag == .visibleControlItem }
         guard let controlItems = ControlItemPair(items: &items) else {
             logger.warning("Missing control item for hidden section, keeping previous menu bar item cache")
             _ = await cacheActor.clearCachedItemIDs(for: requestID)
-            return .retryableFailure
+            return .retryableFailure(.missingControlItems)
         }
 
         guard MenuBarRecoveryPolicy.hasRequiredControlItems(
@@ -635,7 +710,7 @@ extension MenuBarItemManager {
         ) else {
             logger.warning("Missing required control item, keeping previous menu bar item cache")
             _ = await cacheActor.clearCachedItemIDs(for: requestID)
-            return .retryableFailure
+            return .retryableFailure(.missingRequiredControlItems)
         }
 
         guard
@@ -669,7 +744,19 @@ extension MenuBarItemManager {
     /// Before caching, this method ensures that the control items for
     /// the hidden and always-hidden sections are correctly ordered,
     /// arranging them into valid positions if needed.
-    func cacheItemsIfNeeded() async {
+    func cacheItemsIfNeeded(
+        intent: MenuBarDiscoveryRefreshIntent = .automatic
+    ) async {
+        guard let requestID = beginDiscoveryRequest(intent: intent) else {
+            return
+        }
+        defer {
+            finishDiscoveryRequest(
+                requestID: requestID,
+                allowsTrailingAutomaticRefresh: true
+            )
+        }
+
         let items = await MenuBarItem.getMenuBarItems(option: .activeSpace)
         let itemIDs = items.reversed().map(\.stableID)
         let environment = try? await BarlineMenuService.Connection.shared.environment()
@@ -679,7 +766,8 @@ extension MenuBarItemManager {
             await cacheActor.cachedItemIDs != itemIDs ||
             itemCache.displayID != displayID
         {
-            await cacheItemsRegardless(itemIDs)
+            await discardSupersededRestorations()
+            await runCacheDiscovery(currentItemIDs: itemIDs, requestID: requestID)
         }
     }
 }

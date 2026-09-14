@@ -38,6 +38,7 @@ struct DiagnosticBundle: Codable, Sendable {
     let permissions: Permissions
     let compatibility: Compatibility
     let capabilityFlags: MenuBarCapabilities
+    let itemDiscovery: MenuBarItemDiscoveryDiagnostics
     let lastSnapshotAgeSeconds: Int?
     let lastSnapshotRejectionCode: String?
     let searchAvailabilityCode: String
@@ -71,6 +72,7 @@ actor SupportBundleExporter {
         permissions: DiagnosticBundle.Permissions,
         compatibility: MenuBarBackendHealth,
         capabilities: MenuBarCapabilities,
+        itemDiscovery: MenuBarItemDiscoveryDiagnostics,
         lastSnapshotAt: Date?,
         lastSnapshotRejectionCode: String?,
         searchAvailabilityCode: String,
@@ -87,7 +89,7 @@ actor SupportBundleExporter {
             return value
         }
         let bundle = DiagnosticBundle(
-            schemaVersion: 1,
+            schemaVersion: 2,
             generatedAt: now,
             application: .init(
                 version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
@@ -100,6 +102,7 @@ actor SupportBundleExporter {
             permissions: permissions,
             compatibility: .init(backendCode: backendCode, state: compatibility.state),
             capabilityFlags: capabilities,
+            itemDiscovery: itemDiscovery,
             lastSnapshotAgeSeconds: lastSnapshotAt.map {
                 max(0, Int(now.timeIntervalSince($0).rounded()))
             },
@@ -111,7 +114,7 @@ actor SupportBundleExporter {
         return SupportBundlePreview(
             suggestedFilename: "Barline-Support-\(Self.filenameDate(now)).json",
             data: data,
-            summary: "Barline and macOS versions, permission state, compatibility health, and bounded error codes"
+            summary: "Barline and macOS versions, permission state, compatibility health, discovery counters, and bounded error codes"
         )
     }
 

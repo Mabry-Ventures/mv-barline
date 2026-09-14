@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.14 (build 39) — September 13, 2026
+
+- Coalesce repeated AppKit lifecycle and status-item window notifications while
+  menu bar discovery is already running. One bounded trailing refresh preserves
+  the latest inventory without allowing an operating-system event storm to
+  restart discovery indefinitely.
+
+- Add privacy-bounded discovery counters and closed failure codes to support
+  bundles so empty inventories, incomplete snapshots, missing controls, and
+  lifecycle churn can be distinguished without collecting item names, process
+  lists, screen content, or paths.
+
 ## 1.0.13 (build 38) — September 13, 2026
 
 - Prevent Menu Bar Layout, search, and the shelf from remaining on an infinite

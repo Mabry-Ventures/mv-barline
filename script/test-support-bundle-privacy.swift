@@ -48,6 +48,7 @@ struct SupportBundlePrivacyTests {
                 permissions: permissions,
                 compatibility: .init(backendName: "Tahoe", state: .degraded),
                 capabilities: capabilities,
+                itemDiscovery: .init(),
                 lastSnapshotAt: nil,
                 lastSnapshotRejectionCode: nil,
                 searchAvailabilityCode: "fallback",
@@ -66,6 +67,7 @@ struct SupportBundlePrivacyTests {
                 message: "failed while reading \(privatePath) for \(privateName)"
             ),
             capabilities: capabilities,
+            itemDiscovery: .init(),
             lastSnapshotAt: Date(timeIntervalSince1970: 90),
             lastSnapshotRejectionCode: "snapshot.stale",
             searchAvailabilityCode: "fallback",
@@ -83,7 +85,8 @@ struct SupportBundlePrivacyTests {
         }
         guard
             let object = try JSONSerialization.jsonObject(with: preview.data) as? [String: Any],
-            object["schemaVersion"] as? Int == 1,
+            object["schemaVersion"] as? Int == 2,
+            object["itemDiscovery"] as? [String: Any] != nil,
             (object["recentErrorCodes"] as? [String])?.count == 25,
             preview.data.count < 64 * 1024
         else {

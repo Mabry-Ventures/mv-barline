@@ -13,7 +13,10 @@ Every bundle must be created only after an explicit user action and shown
 for review before sharing. It may contain the Barline version/build, macOS
 version/build, hardware family and architecture, permission states, compatibility
 backend/capability status, bounded recent redacted logs, and validation/error
-codes useful for diagnosis.
+codes useful for diagnosis. Discovery diagnostics are payload-free counters,
+the last bounded attempt count and managed-item count, and one closed outcome
+or failure code. They distinguish lifecycle churn, unavailable snapshots,
+incomplete inventories, and missing Barline controls without naming any item.
 
 It must exclude screen images, menu item titles, private profile names or
 contents, raw process inventories/PIDs, usernames, full paths, home-directory
