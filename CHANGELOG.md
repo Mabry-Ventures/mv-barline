@@ -1,11 +1,15 @@
 # Changelog
 
-## 1.0.15 (build 63) — September 14, 2026
+## 1.0.15 (build 64) — September 14, 2026
 
 - Keep macOS 27 menu bar item fallbacks at native icon size instead of
   stretching generic artwork across each item's measured width. Prefer the
   source application's icon when available while preserving the real layout
   geometry and accessible item label.
+- Keep standalone release probes compatible with both the Xcode 26 and Xcode
+  27 SwiftPM product layouts.
+- Handle cancellation inside delayed UI tasks explicitly so the production app
+  builds cleanly with the Swift 6.3 diagnostics in Xcode 27.
 
 ## 1.0.14 (build 62) — September 14, 2026
 

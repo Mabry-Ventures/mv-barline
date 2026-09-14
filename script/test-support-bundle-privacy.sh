@@ -66,18 +66,16 @@ fi
 if ((failures == 0)); then
     swift build --package-path "$ROOT/BarlineCore"
     BIN_PATH="$(swift build --package-path "$ROOT/BarlineCore" --show-bin-path)"
-    core_objects=("$BIN_PATH"/BarlineCore.build/*.swift.o)
-    if [[ ! -e "${core_objects[0]}" ]]; then
-        printf 'error: BarlineCore object files are unavailable for privacy harness\n' >&2
+    if ! barline_resolve_core_build_products "$BIN_PATH"; then
         failures=$((failures + 1))
     else
         mkdir -p "$MODULE_CACHE"
         if ! xcrun swiftc \
             -module-cache-path "$MODULE_CACHE" \
-            -I "$BIN_PATH/Modules" \
+            -I "$BARLINE_CORE_MODULE_PATH" \
             "$ROOT/Barline/Platform/Diagnostics/SupportBundleExporter.swift" \
             "$ROOT/script/test-support-bundle-privacy.swift" \
-            "${core_objects[@]}" \
+            "${BARLINE_CORE_OBJECTS[@]}" \
             -o "$BINARY"; then
             failures=$((failures + 1))
         elif ! "$BINARY"; then

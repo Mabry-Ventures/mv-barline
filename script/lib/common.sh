@@ -95,3 +95,28 @@ barline_xcode_developer_dir() {
     fi
     xcode-select -p
 }
+
+# SwiftPM in Xcode 27 emits a single product object and places the module next
+# to it. Earlier toolchains emit per-source objects under BarlineCore.build and
+# keep importable modules in a Modules directory. Resolve either layout so the
+# standalone runtime probes test the same production sources on both OS lanes.
+barline_resolve_core_build_products() {
+    local bin_path="$1"
+    BARLINE_CORE_OBJECTS=()
+    BARLINE_CORE_MODULE_PATH=""
+
+    if [[ -f "$bin_path/BarlineCore.o" && -d "$bin_path/BarlineCore.swiftmodule" ]]; then
+        BARLINE_CORE_OBJECTS=("$bin_path/BarlineCore.o")
+        BARLINE_CORE_MODULE_PATH="$bin_path"
+    else
+        shopt -s nullglob
+        BARLINE_CORE_OBJECTS=("$bin_path"/BarlineCore.build/*.swift.o)
+        shopt -u nullglob
+        if ((${#BARLINE_CORE_OBJECTS[@]})) && [[ -d "$bin_path/Modules" ]]; then
+            BARLINE_CORE_MODULE_PATH="$bin_path/Modules"
+        fi
+    fi
+
+    ((${#BARLINE_CORE_OBJECTS[@]})) && [[ -n "$BARLINE_CORE_MODULE_PATH" ]] ||
+        barline_die "BarlineCore build products are unavailable for a standalone probe"
+}

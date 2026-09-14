@@ -292,7 +292,11 @@ extension HIDEventManager {
                 return
             }
             // Give the window under the mouse a chance to focus.
-            try await Task.sleep(for: .milliseconds(250))
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
 
             // Don't bother checking the window if the click caused
             // a space change.
@@ -345,7 +349,11 @@ extension HIDEventManager {
                 return
             }
             // Delay prevents the menu from immediately closing.
-            try await Task.sleep(for: .milliseconds(100))
+            do {
+                try await Task.sleep(for: .milliseconds(100))
+            } catch {
+                return
+            }
             appState.menuBarManager.showSecondaryContextMenu(at: mouseLocation)
         }
     }
@@ -407,7 +415,11 @@ extension HIDEventManager {
                 return
             }
             Task {
-                try await Task.sleep(for: .seconds(delay))
+                do {
+                    try await Task.sleep(for: .seconds(delay))
+                } catch {
+                    return
+                }
                 // Make sure the mouse is still inside.
                 guard isMouseInsideEmptyMenuBarSpace(appState: appState, screen: screen) else {
                     return
@@ -423,7 +435,11 @@ extension HIDEventManager {
             }
             let lease = appState.menuBarManager.barlineShelfPanel.dismissalLease
             Task {
-                try await Task.sleep(for: .seconds(delay))
+                do {
+                    try await Task.sleep(for: .seconds(delay))
+                } catch {
+                    return
+                }
                 // Make sure the mouse is still outside.
                 guard
                     !isMouseInsideMenuBar(appState: appState, screen: screen),
