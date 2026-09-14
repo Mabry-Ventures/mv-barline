@@ -134,12 +134,8 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
     }
 
     func activate(_ item: MenuBarItemID, button: MenuBarMouseButton) async throws {
-        if button == .left {
-            try Task.checkCancellation()
-            try GoldenGateAXInventory.activate(item, button: button)
-        } else {
-            try await client.activate(item, button: button)
-        }
+        try await Task.sleep(for: .milliseconds(100))
+        try await client.activate(item, button: button)
     }
 
     func capture(_: [MenuBarItemID]) throws -> [MenuBarCapturedImage] {

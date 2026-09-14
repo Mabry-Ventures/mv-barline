@@ -234,9 +234,15 @@ final class WindowServerClient: @unchecked Sendable {
                 title: observation.stableTitle,
                 isControlItem: isControlItem
             )
-            let itemID = GoldenGateAXInventory.identifier(
-                for: observation,
-                occurrence: occurrence
+            let itemID = MenuBarItemID(
+                bundleIdentifier: observation.bundleIdentifier,
+                accessibilityIdentifier: observation.identifier,
+                title: observation.stableTitle,
+                alias: "occurrence-\(occurrence)",
+                fallbackFingerprint: GoldenGateAXInventory.fallbackFingerprint(
+                    bundleIdentifier: observation.bundleIdentifier,
+                    stableTitle: observation.stableTitle
+                )
             )
             return MenuBarItemDescriptor(
                 id: itemID,

@@ -41,6 +41,24 @@ public struct GoldenGateMenuBarObservation: Equatable, Sendable {
 /// Converts app-process Accessibility observations into the same stable domain
 /// snapshot consumed by Barline on earlier macOS releases.
 public enum GoldenGateMenuBarSnapshotBuilder {
+    public static func identifiers(
+        for observations: [GoldenGateMenuBarObservation]
+    ) -> [MenuBarItemID] {
+        var occurrenceBySemanticKey = [String: Int]()
+        return observations.map { observation in
+            let semanticKey = "\(observation.bundleIdentifier.lowercased())|\(observation.stableTitle.lowercased())"
+            let occurrence = occurrenceBySemanticKey[semanticKey, default: 0]
+            occurrenceBySemanticKey[semanticKey] = occurrence + 1
+            return MenuBarItemID(
+                bundleIdentifier: observation.bundleIdentifier,
+                accessibilityIdentifier: observation.identifier,
+                title: observation.stableTitle,
+                alias: "occurrence-\(occurrence)",
+                fallbackFingerprint: observation.fallbackFingerprint
+            )
+        }
+    }
+
     public static func build(
         observations: [GoldenGateMenuBarObservation],
         displayIdentities: [MenuBarDisplayIdentity],
@@ -56,11 +74,10 @@ public enum GoldenGateMenuBarSnapshotBuilder {
             throw MenuBarBackendError.unavailableCapability("active menu bar display")
         }
 
-        var occurrenceBySemanticKey = [String: Int]()
-        let preliminary = observations.enumerated().map { order, observation in
-            let semanticKey = "\(observation.bundleIdentifier.lowercased())|\(observation.stableTitle.lowercased())"
-            let occurrence = occurrenceBySemanticKey[semanticKey, default: 0]
-            occurrenceBySemanticKey[semanticKey] = occurrence + 1
+        let identifiers = identifiers(for: observations)
+        let preliminary = zip(observations.indices, zip(observations, identifiers)).map {
+            order, pair in
+            let (observation, itemID) = pair
             let isControlItem = observation.bundleIdentifier.caseInsensitiveCompare(
                 appSigningIdentifier
             ) == .orderedSame && observation.stableTitle.hasPrefix("Barline.ControlItem.")
@@ -72,13 +89,7 @@ public enum GoldenGateMenuBarSnapshotBuilder {
                 title: observation.stableTitle
             )
             return MenuBarItemDescriptor(
-                id: MenuBarItemID(
-                    bundleIdentifier: observation.bundleIdentifier,
-                    accessibilityIdentifier: observation.identifier,
-                    title: observation.stableTitle,
-                    alias: "occurrence-\(occurrence)",
-                    fallbackFingerprint: observation.fallbackFingerprint
-                ),
+                id: itemID,
                 section: .visible,
                 order: order,
                 displayID: activeDisplayID,

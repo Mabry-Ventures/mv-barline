@@ -35,7 +35,12 @@ actor XPCMenuBarBackend: MenuBarBackend {
     }
 
     func activate(_ item: MenuBarItemID, button: MenuBarMouseButton) async throws {
-        try await connection.activate(item, button: button)
+        if #available(macOS 27.0, *), button == .left {
+            try Task.checkCancellation()
+            try await goldenGateProvider.activate(item, button: button)
+        } else {
+            try await connection.activate(item, button: button)
+        }
     }
 
     func capture(_ items: [MenuBarItemID]) async throws -> [MenuBarCapturedImage] {

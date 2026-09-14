@@ -4,6 +4,7 @@
 //
 
 @preconcurrency import AppKit
+@preconcurrency import AXSwift
 import BarlineCore
 import CoreGraphics
 import CryptoKit
@@ -29,6 +30,11 @@ actor GoldenGateAXSnapshotProvider {
         let accessibilityDescription: String?
         let title: String?
         let bounds: CGRect?
+    }
+
+    private struct Entry {
+        let observation: GoldenGateMenuBarObservation
+        let element: AXUIElement
     }
 
     private static let maximumItemHeight: CGFloat = 40
@@ -72,7 +78,7 @@ actor GoldenGateAXSnapshotProvider {
         guard AXHelpers.isProcessTrusted() else {
             throw MenuBarBackendError.unavailableCapability("Accessibility menu bar inventory")
         }
-        let observations = collectObservations()
+        let observations = collectEntries().map(\.observation)
         guard !observations.isEmpty else {
             throw MenuBarBackendError.unavailableCapability("Accessibility menu bar inventory")
         }
@@ -136,6 +142,38 @@ actor GoldenGateAXSnapshotProvider {
         )
     }
 
+    func activate(_ itemID: MenuBarItemID, button: MenuBarMouseButton) throws {
+        guard button == .left else {
+            throw MenuBarBackendError.unavailableCapability(
+                "Golden Gate Accessibility activation for non-left click"
+            )
+        }
+        guard AXHelpers.isProcessTrusted() else {
+            throw MenuBarBackendError.unavailableCapability(
+                "Accessibility menu bar activation"
+            )
+        }
+        let entries = collectEntries()
+        let identifiers = GoldenGateMenuBarSnapshotBuilder.identifiers(
+            for: entries.map(\.observation)
+        )
+        guard let entry = zip(entries, identifiers).first(where: { $0.1 == itemID })?.0 else {
+            throw MenuBarBackendError.staleItem(itemID)
+        }
+        AXUIElementSetMessagingTimeout(entry.element, 0.25)
+        let result = AXUIElementPerformAction(entry.element, kAXPressAction as CFString)
+        switch GoldenGateAXActivationPolicy.disposition(forAXError: result.rawValue) {
+        case .delivered, .deliveredIndeterminately:
+            // `cannotComplete` can arrive after the target handled the action.
+            // Never retry it; the caller independently observes the interface.
+            return
+        case .failed:
+            throw MenuBarBackendError.operationFailed(
+                "Golden Gate Accessibility activation failed"
+            )
+        }
+    }
+
     func restart() {
         cachedAt = nil
         cachedSnapshot = nil
@@ -178,8 +216,8 @@ actor GoldenGateAXSnapshotProvider {
         UserDefaults.standard.set(data, forKey: Self.rememberedSectionsKey)
     }
 
-    private func collectObservations() -> [GoldenGateMenuBarObservation] {
-        var observations = [GoldenGateMenuBarObservation]()
+    private func collectEntries() -> [Entry] {
+        var entries = [Entry]()
         for runningApplication in NSWorkspace.shared.runningApplications
             where !runningApplication.isTerminated
         {
@@ -237,34 +275,37 @@ actor GoldenGateAXSnapshotProvider {
                     continue
                 }
 
-                observations.append(
-                    GoldenGateMenuBarObservation(
-                        bundleIdentifier: bundleIdentifier,
-                        localizedApplicationName: runningApplication.localizedName,
-                        identifier: identifier,
-                        displayTitle: displayTitle,
-                        stableTitle: stableTitle,
-                        fallbackFingerprint: fallbackFingerprint(
+                entries.append(
+                    Entry(
+                        observation: GoldenGateMenuBarObservation(
                             bundleIdentifier: bundleIdentifier,
-                            stableTitle: stableTitle
+                            localizedApplicationName: runningApplication.localizedName,
+                            identifier: identifier,
+                            displayTitle: displayTitle,
+                            stableTitle: stableTitle,
+                            fallbackFingerprint: fallbackFingerprint(
+                                bundleIdentifier: bundleIdentifier,
+                                stableTitle: stableTitle
+                            ),
+                            bounds: MenuBarRect(
+                                x: semanticBounds.minX,
+                                y: semanticBounds.minY,
+                                width: semanticBounds.width,
+                                height: semanticBounds.height
+                            ),
+                            ownerProcessIdentifier: AXHelpers.pid(for: child)
+                                ?? runningApplication.processIdentifier
                         ),
-                        bounds: MenuBarRect(
-                            x: semanticBounds.minX,
-                            y: semanticBounds.minY,
-                            width: semanticBounds.width,
-                            height: semanticBounds.height
-                        ),
-                        ownerProcessIdentifier: AXHelpers.pid(for: child)
-                            ?? runningApplication.processIdentifier
+                        element: child.element
                     )
                 )
             }
         }
-        return deduplicatingMenuBarAgentRevends(observations).sorted {
-            if abs($0.bounds.y - $1.bounds.y) > Self.duplicateTolerance {
-                return $0.bounds.y < $1.bounds.y
+        return deduplicatingMenuBarAgentRevends(entries).sorted {
+            if abs($0.observation.bounds.y - $1.observation.bounds.y) > Self.duplicateTolerance {
+                return $0.observation.bounds.y < $1.observation.bounds.y
             }
-            return $0.bounds.x < $1.bounds.x
+            return $0.observation.bounds.x < $1.observation.bounds.x
         }
     }
 
@@ -324,14 +365,15 @@ actor GoldenGateAXSnapshotProvider {
     }
 
     private func deduplicatingMenuBarAgentRevends(
-        _ observations: [GoldenGateMenuBarObservation]
-    ) -> [GoldenGateMenuBarObservation] {
-        let directOrigins = observations
-            .filter { $0.bundleIdentifier != Self.menuBarAgentBundleIdentifier }
-            .map { ($0.bounds.x, $0.bounds.y) }
-        guard !directOrigins.isEmpty else { return observations }
+        _ entries: [Entry]
+    ) -> [Entry] {
+        let directOrigins = entries
+            .filter { $0.observation.bundleIdentifier != Self.menuBarAgentBundleIdentifier }
+            .map { ($0.observation.bounds.x, $0.observation.bounds.y) }
+        guard !directOrigins.isEmpty else { return entries }
 
-        return observations.filter { observation in
+        return entries.filter { entry in
+            let observation = entry.observation
             guard observation.bundleIdentifier == Self.menuBarAgentBundleIdentifier else {
                 return true
             }
