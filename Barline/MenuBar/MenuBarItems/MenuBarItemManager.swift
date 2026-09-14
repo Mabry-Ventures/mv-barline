@@ -176,7 +176,11 @@ extension MenuBarItemManager {
     private func beginDiscoveryRequest(
         intent: MenuBarDiscoveryRefreshIntent
     ) -> UInt64? {
-        guard itemDiscoveryRefreshGate.begin(intent: intent) else {
+        guard itemDiscoveryRefreshGate.begin(
+            intent: intent,
+            terminalFailureWithoutSnapshot:
+            itemDiscoveryState == .failed && !itemDiscoveryState.hasUsableSnapshot
+        ) else {
             itemDiscoveryDiagnostics.recordCoalescedAutomaticRequest()
             logger.debug("Coalescing automatic menu bar discovery refresh")
             return nil
@@ -453,6 +457,13 @@ extension MenuBarItemManager {
         }
 
         mutating func findSection(for item: MenuBarItem) -> MenuBarSection.Name? {
+            if #available(macOS 27.0, *) {
+                return switch item.section {
+                case .visible: .visible
+                case .hidden: .hidden
+                case .alwaysHidden: .alwaysHidden
+                }
+            }
             lazy var itemBounds = Self.bestBounds(for: item)
             return MenuBarSection.Name.allCases.first { section in
                 switch section {
@@ -591,7 +602,7 @@ extension MenuBarItemManager {
                 return
             }
             let hadUsableSnapshot = itemDiscoveryState.hasUsableSnapshot
-            if !hadUsableSnapshot {
+            if !hadUsableSnapshot, itemDiscoveryState != .failed {
                 itemDiscoveryState = .loading
             }
 

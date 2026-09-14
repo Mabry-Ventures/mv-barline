@@ -89,21 +89,21 @@ actor TahoeMenuBarBackend: MenuBarBackend {
     func restart() {}
 }
 
+@available(macOS 27.0, *)
 actor GoldenGateMenuBarBackend: MenuBarBackend {
     private let client: WindowServerClient
     private var capabilityCache = MenuBarCapabilityProbeCache()
 
     var capabilities: MenuBarCapabilities {
         capabilityCache.resolve(at: DispatchTime.now().uptimeNanoseconds) {
-            let canSnapshot = client.behavioralProbe()
-            let canSynthesize = canSnapshot && client.eventSynthesisProbe()
+            let canSnapshot = client.goldenGateBehavioralProbe()
             return MenuBarCapabilities(
                 canSnapshot: canSnapshot,
-                canMove: canSynthesize,
-                canReveal: canSynthesize,
-                canActivate: canSynthesize,
-                canRestore: canSynthesize,
-                canCapture: canSnapshot
+                canMove: false,
+                canReveal: false,
+                canActivate: false,
+                canRestore: false,
+                canCapture: false
             )
         }
     }
@@ -116,23 +116,23 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
         guard capabilities.canSnapshot else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate snapshot")
         }
-        return try client.snapshot()
+        return try client.goldenGateSnapshot()
     }
 
-    func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
-        try await client.move(operation)
+    func move(_: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
+        throw MenuBarBackendError.unavailableCapability("Golden Gate move")
     }
 
-    func reveal(_ item: MenuBarItemID) async throws -> MenuBarMutationResult {
-        try await client.reveal(item)
+    func reveal(_: MenuBarItemID) async throws -> MenuBarMutationResult {
+        throw MenuBarBackendError.unavailableCapability("Golden Gate reveal")
     }
 
-    func activate(_ item: MenuBarItemID, button: MenuBarMouseButton) async throws {
-        try await client.activate(item, button: button)
+    func activate(_: MenuBarItemID, button _: MenuBarMouseButton) async throws {
+        throw MenuBarBackendError.unavailableCapability("Golden Gate activation")
     }
 
-    func capture(_ items: [MenuBarItemID]) throws -> [MenuBarCapturedImage] {
-        try client.capture(items)
+    func capture(_: [MenuBarItemID]) throws -> [MenuBarCapturedImage] {
+        throw MenuBarBackendError.unavailableCapability("Golden Gate item capture")
     }
 
     func captureBackground(
@@ -162,8 +162,8 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
         client.endRevealObservation(token)
     }
 
-    func restore(_ snapshot: MenuBarSnapshot) async throws -> MenuBarMutationResult {
-        try await client.restore(snapshot)
+    func restore(_: MenuBarSnapshot) async throws -> MenuBarMutationResult {
+        throw MenuBarBackendError.unavailableCapability("Golden Gate restore")
     }
 
     func health() -> MenuBarBackendHealth {
@@ -229,10 +229,10 @@ enum MenuBarBackendFactory {
         // Selection is gated by live behavior first. The OS check only
         // determines which implementation gets first opportunity to probe.
         if #available(macOS 27.0, *) {
-            let goldenGate = GoldenGateMenuBarBackend(client: client)
-            if client.behavioralProbe() {
-                return goldenGate
-            }
+            // Keep the versioned backend even before permission is granted so
+            // a later authorized request can recover without falling back to
+            // the retired per-window inventory.
+            return GoldenGateMenuBarBackend(client: client)
         }
 
         // A failed startup observation may mean the session is locked, not an

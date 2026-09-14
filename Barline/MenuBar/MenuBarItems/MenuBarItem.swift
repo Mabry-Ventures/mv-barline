@@ -15,6 +15,7 @@ struct MenuBarItem: CustomStringConvertible, Equatable, Hashable {
     /// Presentation and mutation share the same validated, last-known-good authority.
     static let snapshotCoordinator = MenuBarStateCoordinator(backend: XPCMenuBarBackend())
     let stableID: MenuBarItemID
+    let section: BarlineCore.MenuBarSection
     let tag: MenuBarItemTag
     let ownerPID: pid_t
     let sourcePID: pid_t?
@@ -49,6 +50,7 @@ struct MenuBarItem: CustomStringConvertible, Equatable, Hashable {
 
     init(descriptor: MenuBarItemDescriptor) {
         stableID = descriptor.id
+        section = descriptor.section
         tag = MenuBarItemTag(
             namespace: .optional(descriptor.tagNamespace ?? descriptor.id.bundleIdentifier),
             title: descriptor.title ?? descriptor.id.title ?? ""
@@ -101,7 +103,7 @@ extension MenuBarItem {
         option: ListOption,
         interactionID: UUID? = nil
     ) async throws -> [MenuBarItem] {
-        let snapshot = try await snapshotCoordinator.refresh(interactionID: interactionID)
+        let snapshot = try await snapshotCoordinator.refreshOnce(interactionID: interactionID)
         let displayBounds = display.map(CGDisplayBounds)
         return snapshot.items
             .filter { descriptor in

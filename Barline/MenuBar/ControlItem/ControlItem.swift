@@ -335,6 +335,7 @@ final class ControlItem {
     /// item after an app update. Reapply the action whenever that happens so
     /// the replacement does not retain a stale/default event mask.
     private func configureAction(for button: NSStatusBarButton) {
+        button.setAccessibilityIdentifier(identifier.rawValue)
         button.target = self
         button.action = #selector(performAction)
         button.sendAction(on: [.leftMouseDown, .rightMouseUp])

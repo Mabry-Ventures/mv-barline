@@ -13,13 +13,14 @@ public enum MenuBarDiscoveryRefreshIntent: Sendable {
 public enum MenuBarDiscoveryRefreshPolicy {
     public static func shouldStart(
         intent: MenuBarDiscoveryRefreshIntent,
-        discoveryIsInFlight: Bool
+        discoveryIsInFlight: Bool,
+        terminalFailureWithoutSnapshot: Bool = false
     ) -> Bool {
         switch intent {
         case .authoritative:
             true
         case .automatic:
-            !discoveryIsInFlight
+            !discoveryIsInFlight && !terminalFailureWithoutSnapshot
         }
     }
 
@@ -45,12 +46,18 @@ public struct MenuBarDiscoveryRefreshGate: Sendable {
     public init() {}
 
     @discardableResult
-    public mutating func begin(intent: MenuBarDiscoveryRefreshIntent) -> Bool {
+    public mutating func begin(
+        intent: MenuBarDiscoveryRefreshIntent,
+        terminalFailureWithoutSnapshot: Bool = false
+    ) -> Bool {
         guard MenuBarDiscoveryRefreshPolicy.shouldStart(
             intent: intent,
-            discoveryIsInFlight: isInFlight
+            discoveryIsInFlight: isInFlight,
+            terminalFailureWithoutSnapshot: terminalFailureWithoutSnapshot
         ) else {
-            hasPendingAutomaticRefresh = true
+            if case .automatic = intent, isInFlight {
+                hasPendingAutomaticRefresh = true
+            }
             return false
         }
         isInFlight = true

@@ -10,11 +10,11 @@ struct LayoutBar: View {
         let appState: AppState
         let section: MenuBarSection.Name
 
-        func makeNSView(context: Context) -> LayoutBarScrollView {
+        func makeNSView(context _: Context) -> LayoutBarScrollView {
             LayoutBarScrollView(appState: appState, section: section)
         }
 
-        func updateNSView(_ nsView: LayoutBarScrollView, context: Context) { }
+        func updateNSView(_: LayoutBarScrollView, context _: Context) {}
     }
 
     @EnvironmentObject var appState: AppState
@@ -44,13 +44,12 @@ struct LayoutBar: View {
             }
     }
 
-    @ViewBuilder
     private var mainContent: some View {
-        if imageCache.cacheFailed(for: section) {
-            Text("Unable to display menu bar items")
-                .font(.body)
-        } else {
-            Representable(appState: appState, section: section)
-        }
+        // Item capture is an enhancement, not a prerequisite for inventory.
+        // macOS 27 exposes status-item identity and geometry through Accessibility
+        // but no longer exposes the per-item WindowServer surfaces used to capture
+        // thumbnails. LayoutBarItemView supplies a deterministic fallback icon when
+        // an item has no cached image, so keep the discovered inventory visible.
+        Representable(appState: appState, section: section)
     }
 }

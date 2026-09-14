@@ -2,6 +2,18 @@
 
 ## 1.0.14 (build 39) — September 13, 2026
 
+- Restore menu bar discovery on macOS 27, where WindowServer now exposes one
+  composite menu bar surface instead of one window per status item. Barline
+  uses a bounded, read-only Accessibility inventory and preserves native
+  Command-drag as the arrangement path on macOS 27.
+
+- Classify macOS 27 section geometry across live, parked, and expanded divider
+  states without allowing ambiguous or missing controls to replace the last
+  known-good layout.
+
+- Keep the graphical layout inventory usable when Screen Recording is absent
+  by showing deterministic fallback item icons. Pixel previews remain optional.
+
 - Coalesce repeated AppKit lifecycle and status-item window notifications while
   menu bar discovery is already running. One bounded trailing refresh preserves
   the latest inventory without allowing an operating-system event storm to

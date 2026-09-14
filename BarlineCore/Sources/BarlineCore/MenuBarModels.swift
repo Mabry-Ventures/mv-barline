@@ -231,6 +231,30 @@ public struct MenuBarItemDescriptor: Codable, Hashable, Sendable {
     public var isConfirmedSystemItem: Bool {
         sourceOwnership.map { $0 == .system } ?? isSystemItem
     }
+
+    public func replacingSection(_ section: MenuBarSection) -> MenuBarItemDescriptor {
+        MenuBarItemDescriptor(
+            id: id,
+            section: section,
+            order: order,
+            displayID: displayID,
+            isSystemItem: isSystemItem,
+            sourceOwnership: sourceOwnership,
+            isBarlineControlItem: isBarlineControlItem,
+            tagNamespace: tagNamespace,
+            title: title,
+            displayName: displayName,
+            ownerProcessIdentifier: ownerProcessIdentifier,
+            sourceProcessIdentifier: sourceProcessIdentifier,
+            bounds: bounds,
+            isOnScreen: isOnScreen,
+            isMovable: isMovable,
+            canBeHidden: canBeHidden,
+            isBentoBox: isBentoBox,
+            isSystemClone: isSystemClone,
+            isResponsive: isResponsive
+        )
+    }
 }
 
 public struct MenuBarSnapshot: Codable, Hashable, Sendable {

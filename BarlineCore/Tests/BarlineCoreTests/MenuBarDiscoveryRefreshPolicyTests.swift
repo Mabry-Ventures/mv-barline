@@ -18,6 +18,24 @@ struct MenuBarDiscoveryRefreshPolicyTests {
         ))
     }
 
+    @Test("Automatic refresh does not restart a terminal cold failure")
+    func automaticRefreshDoesNotRestartTerminalFailure() {
+        #expect(!MenuBarDiscoveryRefreshPolicy.shouldStart(
+            intent: .automatic,
+            discoveryIsInFlight: false,
+            terminalFailureWithoutSnapshot: true
+        ))
+    }
+
+    @Test("Authoritative refresh can retry a terminal cold failure")
+    func authoritativeRefreshRetriesTerminalFailure() {
+        #expect(MenuBarDiscoveryRefreshPolicy.shouldStart(
+            intent: .authoritative,
+            discoveryIsInFlight: false,
+            terminalFailureWithoutSnapshot: true
+        ))
+    }
+
     @Test("Authoritative refresh supersedes an in-flight discovery")
     func authoritativeRefreshSupersedes() {
         #expect(MenuBarDiscoveryRefreshPolicy.shouldStart(

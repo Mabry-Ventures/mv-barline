@@ -23,7 +23,14 @@ enum AXHelpers {
     }
 
     static func application(for runningApp: NSRunningApplication) -> Application? {
-        queue.sync { Application(runningApp) }
+        queue.sync {
+            let application = Application(runningApp)
+            // Every AX query is synchronous IPC into the target process. A
+            // wedged menu-bar app must not be able to strand Barline's entire
+            // inventory refresh for the system default timeout.
+            application?.messagingTimeout = 0.25
+            return application
+        }
     }
 
     static func extrasMenuBar(for app: Application) -> UIElement? {
@@ -44,5 +51,21 @@ enum AXHelpers {
 
     static func role(for element: UIElement) -> Role? {
         queue.sync { try? element.role() }
+    }
+
+    static func title(for element: UIElement) -> String? {
+        queue.sync { try? element.attribute(.title) }
+    }
+
+    static func identifier(for element: UIElement) -> String? {
+        queue.sync { try? element.attribute(.identifier) }
+    }
+
+    static func accessibilityDescription(for element: UIElement) -> String? {
+        queue.sync { try? element.attribute(.description) }
+    }
+
+    static func pid(for element: UIElement) -> pid_t? {
+        queue.sync { try? element.pid() }
     }
 }

@@ -20,4 +20,5 @@ the secondary shelf and graphical layout editor become available again.
 Runtime qualification must distinguish always-visible desktop, native fallback
 under auto-hide, and full-screen Spaces. A runtime result for one does not
 certify the others. macOS 27 and release-duration soak remain separate deferred
-lanes; this document makes no new runtime certification claim.
+lanes. macOS 27 discovery has a separate read-only compatibility backend;
+arrangement there uses native Command-drag rather than helper-owned mutation.

@@ -51,6 +51,7 @@ final class WindowServerClient: @unchecked Sendable {
     }
 
     private let resolver: DynamicSymbolResolver
+    private let logger = Logger(category: "WindowServerClient")
     private let generation = OSAllocatedUnfairLock(initialState: GenerationState())
     // Window numbers are ephemeral helper-private lookup keys, never domain IDs.
     private let identities = OSAllocatedUnfairLock(initialState: [CGWindowID: IdentityRecord]())
@@ -75,7 +76,17 @@ final class WindowServerClient: @unchecked Sendable {
         guard canEnumerate else {
             return false
         }
-        return enumerateMenuBarWindows() != nil
+        // A single composite menu-bar window is the macOS 27 compatibility
+        // break, not a viable per-item inventory.
+        return (enumerateMenuBarWindows()?.count ?? 0) > 1
+    }
+
+    @available(macOS 27.0, *)
+    func goldenGateBehavioralProbe() -> Bool {
+        guard let observations = try? GoldenGateAXInventory.collect() else {
+            return false
+        }
+        return !observations.isEmpty
     }
 
     func eventSynthesisProbe() -> Bool {
@@ -183,6 +194,160 @@ final class WindowServerClient: @unchecked Sendable {
             activeSpaceIsValid: activeSpaceID() != nil,
             menuTrackingIsActive: menuTrackingIsActive(menuBarWindows: windows)
         )
+    }
+
+    @available(macOS 27.0, *)
+    func goldenGateSnapshot() throws -> MenuBarSnapshot {
+        let observations = try GoldenGateAXInventory.collect()
+        let activeDisplays = activeDisplayIDs()
+        let displayIdentities = activeDisplays.map { displayID in
+            MenuBarDisplayIdentity(
+                runtimeID: stableDisplayID(displayID),
+                hardwareFingerprint: hardwareFingerprint(for: displayID)
+            )
+        }
+        let displayIDs = Set(displayIdentities.map(\.runtimeID))
+        guard let activeDisplayID = Bridging.getActiveMenuBarDisplayID(),
+              activeDisplays.contains(activeDisplayID)
+        else {
+            throw MenuBarBackendError.unavailableCapability("active menu bar display")
+        }
+        let activeStableDisplayID = stableDisplayID(activeDisplayID)
+        let activeDisplayBounds = CGDisplayBounds(activeDisplayID)
+        let appSigningIdentifier = Bundle.main.object(
+            forInfoDictionaryKey: "BarlineAppSigningIdentifier"
+        ) as? String ?? "com.mabryventures.Barline"
+
+        var occurrenceBySemanticKey = [String: Int]()
+        let preliminary = observations.enumerated().map { order, observation in
+            let semanticKey = "\(observation.bundleIdentifier.lowercased())|\(observation.stableTitle.lowercased())"
+            let occurrence = occurrenceBySemanticKey[semanticKey, default: 0]
+            occurrenceBySemanticKey[semanticKey] = occurrence + 1
+            let isControlItem = observation.bundleIdentifier.caseInsensitiveCompare(
+                appSigningIdentifier
+            ) == .orderedSame && observation.stableTitle.hasPrefix("Barline.ControlItem.")
+            let ownership: MenuBarSourceOwnership = observation.bundleIdentifier.hasPrefix(
+                "com.apple."
+            ) ? .system : .application
+            let semantics = semanticFlags(
+                namespace: observation.bundleIdentifier,
+                title: observation.stableTitle,
+                isControlItem: isControlItem
+            )
+            let itemID = MenuBarItemID(
+                bundleIdentifier: observation.bundleIdentifier,
+                accessibilityIdentifier: observation.identifier,
+                title: observation.stableTitle,
+                alias: "occurrence-\(occurrence)",
+                fallbackFingerprint: GoldenGateAXInventory.fallbackFingerprint(
+                    bundleIdentifier: observation.bundleIdentifier,
+                    stableTitle: observation.stableTitle
+                )
+            )
+            return MenuBarItemDescriptor(
+                id: itemID,
+                section: .visible,
+                order: order,
+                // AXExtrasMenuBar describes the active menu bar. Hidden items
+                // intentionally have off-screen geometry, so assigning them by
+                // rectangle can attach them to the wrong adjacent display.
+                // Bind the entire inventory to the display whose menu bar is
+                // active for this atomic snapshot.
+                displayID: activeStableDisplayID,
+                isSystemItem: ownership == .system,
+                sourceOwnership: ownership,
+                isBarlineControlItem: isControlItem,
+                tagNamespace: isControlItem
+                    ? appSigningIdentifier
+                    : observation.bundleIdentifier,
+                title: observation.stableTitle,
+                displayName: observation.localizedApplicationName
+                    ?? observation.displayTitle,
+                ownerProcessIdentifier: observation.ownerPID,
+                sourceProcessIdentifier: observation.ownerPID,
+                bounds: MenuBarRect(
+                    x: observation.bounds.minX,
+                    y: observation.bounds.minY,
+                    width: observation.bounds.width,
+                    height: observation.bounds.height
+                ),
+                isOnScreen: activeDisplayBounds.intersects(observation.bounds),
+                // macOS 27 inventory is currently read-only. Keep the item's
+                // semantic hideability so the app-side cache can classify it,
+                // but do not enable drag-based mutations until they have an
+                // auditable implementation with post-action verification and
+                // rollback.
+                isMovable: false,
+                canBeHidden: semantics.canBeHidden,
+                isBentoBox: semantics.isBentoBox,
+                isSystemClone: semantics.isSystemClone,
+                isResponsive: true
+            )
+        }
+
+        let hiddenControl = preliminary.first {
+            $0.isBarlineControlItem && $0.title == "Barline.ControlItem.Hidden"
+        }
+        let alwaysHiddenControl = preliminary.first {
+            $0.isBarlineControlItem && $0.title == "Barline.ControlItem.AlwaysHidden"
+        }
+        logger.info(
+            "Golden Gate snapshot inventory: items=\(preliminary.count, privacy: .public), controls=\(preliminary.count(where: \.isBarlineControlItem), privacy: .public)"
+        )
+        guard let hiddenControl else {
+            // A sectionless inventory must never replace the last-known-good
+            // snapshot. App-side discovery will retry this bounded failure and
+            // retain its existing cache.
+            throw MenuBarBackendError.unavailableCapability("Barline section controls")
+        }
+        let descriptors = try preliminary.map { descriptor in
+            let section: MenuBarSection
+            if descriptor.isBarlineControlItem {
+                section = switch descriptor.title {
+                case "Barline.ControlItem.AlwaysHidden": .alwaysHidden
+                case "Barline.ControlItem.Hidden": .hidden
+                default: .visible
+                }
+            } else {
+                guard let classified = MenuBarDividerSectionClassifier.classify(
+                    itemBounds: descriptor.bounds,
+                    hiddenControlBounds: hiddenControl.bounds,
+                    alwaysHiddenControlBounds: alwaysHiddenControl?.bounds
+                ) else {
+                    throw MenuBarBackendError.unavailableCapability(
+                        "unambiguous Barline section geometry"
+                    )
+                }
+                section = classified
+            }
+            return descriptor.replacingSection(section)
+        }
+
+        let nextGeneration = generation.withLock { state in
+            state.value &+= 1
+            return state.value
+        }
+        return MenuBarSnapshot(
+            generation: nextGeneration,
+            capturedAt: Date(),
+            items: descriptors,
+            displayIDs: displayIDs,
+            displayIdentities: displayIdentities,
+            activeSpaceIsValid: !displayIDs.isEmpty,
+            menuTrackingIsActive: false
+        )
+    }
+
+    private func activeDisplayIDs() -> [CGDirectDisplayID] {
+        var count: UInt32 = 0
+        guard CGGetActiveDisplayList(0, nil, &count) == .success, count > 0 else {
+            return []
+        }
+        var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+        guard CGGetActiveDisplayList(count, &displays, &count) == .success else {
+            return []
+        }
+        return Array(displays.prefix(Int(count)))
     }
 
     func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {

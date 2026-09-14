@@ -293,6 +293,20 @@ public actor MenuBarStateCoordinator {
         return try await refreshAssumingMutationTurn(now: now)
     }
 
+    /// Performs one backend snapshot attempt. Callers that own a larger retry
+    /// budget use this to avoid multiplying independent retry loops.
+    @discardableResult
+    public func refreshOnce(
+        now: Date? = nil,
+        interactionID: UUID? = nil
+    ) async throws -> MenuBarSnapshot {
+        await acquireMutationTurn()
+        defer { releaseMutationTurn() }
+        try requireItemInteraction(interactionID)
+
+        return try await refreshAssumingMutationTurn(now: now, maximumAttempts: 1)
+    }
+
     /// Refreshes only while the caller's previously validated authority is
     /// still current. The check and refresh share the mutation turn, preventing
     /// a layout mutation from slipping between them.
@@ -309,10 +323,15 @@ public actor MenuBarStateCoordinator {
         return try await refreshAssumingMutationTurn(now: now)
     }
 
-    private func refreshAssumingMutationTurn(now: Date?) async throws -> MenuBarSnapshot {
+    private func refreshAssumingMutationTurn(
+        now: Date?,
+        maximumAttempts: Int? = nil
+    ) async throws -> MenuBarSnapshot {
         var mostRecentError: (any Error)?
 
-        for attempt in 0 ..< retryPolicy.maximumAttempts {
+        let attemptCount = max(1, maximumAttempts ?? retryPolicy.maximumAttempts)
+
+        for attempt in 0 ..< attemptCount {
             try Task.checkCancellation()
             do {
                 let candidate = try await normalizedBackendSnapshot()
@@ -349,7 +368,7 @@ public actor MenuBarStateCoordinator {
                 )
             }
 
-            if attempt + 1 < retryPolicy.maximumAttempts {
+            if attempt + 1 < attemptCount {
                 let jitter = Int.random(in: 0 ... retryPolicy.maximumJitterPermille)
                 try await Task.sleep(
                     for: retryPolicy.delay(forAttempt: attempt, jitterPermille: jitter)

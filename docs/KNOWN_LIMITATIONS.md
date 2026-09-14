@@ -1,14 +1,17 @@
 # Known limitations and release status
 
-This page describes the boundaries of Barline 1.0.13. Release evidence is bound
+This page describes the boundaries of Barline 1.0.14. Release evidence is bound
 to its exact source and signed binary; it is not blanket approval for later
 changes.
 
 ## Compatibility
 
-- The target platform is Apple Silicon running macOS 26. Intel is unsupported.
-- macOS 27 has not been runtime-qualified. Compilation or results on macOS 26
-  do not establish support for macOS 27.
+- The target platform is Apple Silicon running macOS 26 or macOS 27. Intel is
+  unsupported.
+- macOS 27 discovery and layout presentation were exercised on an Apple
+  Silicon macOS 27.0 host. Barline's macOS 27 backend is deliberately
+  read-only; arrangement uses native Command-drag and fails closed when public
+  Accessibility cannot provide unambiguous inventory or divider geometry.
 - The secondary shelf and graphical layout editor require an always-visible
   menu bar. Auto-hide uses native reveal instead; see
   [supported configurations](SUPPORTED_CONFIGURATIONS.md).
