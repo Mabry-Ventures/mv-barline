@@ -208,6 +208,7 @@ run_fast() {
     run_step "core-tests" swift test --package-path BarlineCore --enable-code-coverage
     run_step "status-item-geometry" bash ./script/test-status-item-geometry.sh
     run_step "shelf-probe-cycle" bash ./script/test-shelf-probe-cycle.sh
+    run_step "activation-routing-topology" ruby ./script/test-activation-routing-topology.rb
     run_step "app-intents-topology-tests" ruby ./script/test-app-intents-topology.rb
     if [[ "$(uname -s)" == Darwin ]]; then
         run_step "app-intents-source-topology" ruby ./script/validate-app-intents-topology.rb

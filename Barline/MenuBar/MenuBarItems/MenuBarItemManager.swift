@@ -1074,17 +1074,34 @@ extension MenuBarItemManager {
         }
     }
 
-    func click(item: MenuBarItem, with mouseButton: CGMouseButton) async throws {
+    func click(
+        item: MenuBarItem,
+        with mouseButton: CGMouseButton,
+        interactionID: UUID
+    ) async throws {
         try await waitForUserToPauseInput()
         let button: MenuBarMouseButton = switch mouseButton {
         case .left: .left
         case .right: .right
         default: .other
         }
+        guard let appState else {
+            throw EventError.cannotComplete
+        }
         do {
-            try await BarlineMenuService.Connection.shared.activate(item.stableID, button: button)
+            let snapshot = try await appState.compatibilityCoordinator.refresh(
+                interactionID: interactionID
+            )
+            guard snapshot.items.contains(where: { $0.id == item.stableID }) else {
+                throw MenuBarBackendError.staleItem(item.stableID)
+            }
+            _ = try await appState.compatibilityCoordinator.perform(
+                .activate(item.stableID, button),
+                expectedGeneration: snapshot.generation,
+                interactionID: interactionID
+            )
         } catch {
-            logger.error("Typed helper activation failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)")
+            logger.error("Typed activation failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)")
             throw EventError.cannotComplete
         }
     }
@@ -1132,7 +1149,7 @@ extension MenuBarItemManager {
         if item.isOnScreen {
             let token = try await BarlineMenuService.Connection.shared.beginRevealObservation(for: itemID)
             do {
-                try await click(item: item, with: button)
+                try await click(item: item, with: button, interactionID: interactionID)
                 interfaceObserved = try await waitForInterface(token)
                 if interfaceObserved {
                     observeVisibleInterfaceUntilClosed(token)
@@ -1393,7 +1410,7 @@ extension MenuBarItemManager {
         context.revealObservation = observation
 
         do {
-            try await click(item: item, with: mouseButton)
+            try await click(item: item, with: mouseButton, interactionID: interactionID)
         } catch {
             logger.error("Error clicking item: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)")
             throw error
