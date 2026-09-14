@@ -113,12 +113,7 @@ final class BarlineUITests: XCTestCase {
         }
         let action = target == "BF Popover" && !rightClick
             ? app.buttons["fixture-journey-action"] : app.menuItems["Fixture Receipt Action"]
-        guard action.waitForExistence(timeout: 5) else {
-            XCTFail("The fixture did not expose its actual menu/popover action")
-            return
-        }
-        action.click()
-        let observed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        let completedReceipt = {
             guard let data = try? Data(contentsOf: receiptURL),
                   let receipt = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else { return false }
@@ -128,6 +123,21 @@ final class BarlineUITests: XCTestCase {
                 receipt["opens"] as? Int == 1 &&
                 receipt["closes"] as? Int == 1 &&
                 receipt["visible"] as? Bool == false
+        }
+        guard action.waitForExistence(timeout: 5) else {
+            // XCUITest can release a synthesized right-click directly over the
+            // newly opened native menu item. In that case AppKit completes the
+            // target action and closes the menu before XCUI publishes it. The
+            // target-process receipt remains exact proof of the full lifecycle.
+            if rightClick, completedReceipt() {
+                return
+            }
+            XCTFail("The fixture did not expose its actual menu/popover action")
+            return
+        }
+        action.click()
+        let observed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+            completedReceipt()
         }, object: nil)
         XCTAssertEqual(XCTWaiter.wait(for: [observed], timeout: 5), .completed)
     }
