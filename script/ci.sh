@@ -253,7 +253,11 @@ run_full() {
         run_step "installed-gatekeeper" spctl --assess --type execute "$BARLINE_CANDIDATE_APP"
         run_step "installed-staple" xcrun stapler validate "$BARLINE_CANDIDATE_APP"
         run_step "installed-app-intents-topology" ruby ./script/validate-app-intents-topology.rb --app "$BARLINE_CANDIDATE_APP"
-        run_step "installed-shelf-recovery" ./script/test-reopen-burst.sh --reuse-running
+        # The source-bound receipt directory is immutable qualification input at
+        # this point. Exercise recovery again, but do not attempt to overwrite
+        # its already-recorded performance and interruption receipts.
+        run_step "installed-shelf-recovery" env BARLINE_INSTALLED_EVIDENCE_DIR= \
+            ./script/test-reopen-burst.sh --reuse-running
         local installed_executable_sha
         installed_executable_sha="$(shasum -a 256 "$BARLINE_CANDIDATE_APP/Contents/MacOS/Barline" | awk '{print $1}')"
         run_step "installed-evidence" ruby ./script/validate-installed-evidence.rb \
@@ -309,7 +313,16 @@ run_nonfocus() {
     require_gate_script ./script/test-menu-bar-recovery.sh
     require_gate_script ./script/test-notch-overflow.sh
     require_gate_script ./script/test-fixtures.sh
-    require_gate_script ./script/test-xcode-ui.sh
+    if "$INSTALLED_CANDIDATE"; then
+        # Fixture status items must not be classified or repositioned by the
+        # installed menu-bar manager while XCUITest qualifies their own event
+        # handling. Restore the signed candidate before its installed gates.
+        barline_pause_installed_app
+        require_gate_script ./script/test-xcode-ui.sh
+        barline_restore_installed_app
+    else
+        require_gate_script ./script/test-xcode-ui.sh
+    fi
     require_gate_script ./script/test-accessibility.sh
     require_gate_script ./script/test-support-bundle-privacy.sh
     run_step "permission-refresh" bash ./script/test-permission-refresh.sh

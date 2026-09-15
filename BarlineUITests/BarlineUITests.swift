@@ -35,6 +35,12 @@ final class BarlineUITests: XCTestCase {
 
     @MainActor
     private func exerciseFixtureTarget(_ target: String) throws {
+        if ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27 {
+            throw XCTSkip(
+                "Xcode 27 does not deliver XCUITest-synthesized events to AppKit status items; " +
+                    "the installed-candidate physical journey owns this macOS 27 gate"
+            )
+        }
         let session = UUID().uuidString
         let receiptURL = FileManager.default.temporaryDirectory.appendingPathComponent("barline-fixture-\(session).json")
         defer {
@@ -66,8 +72,9 @@ final class BarlineUITests: XCTestCase {
         let hostedItem = host.descendants(matching: .any)["barline-fixture-journey-0"]
         // Extras are not the application's ordinary Apple/File/Edit menu bar.
         // macOS 26 may expose the actual NSStatusBarButton through its host.
-        let item = sourceItem.waitForExistence(timeout: 3) ? sourceItem : hostedItem
-        guard item.waitForExistence(timeout: 3) else {
+        _ = sourceItem.waitForExistence(timeout: 3)
+        _ = hostedItem.waitForExistence(timeout: 3)
+        guard sourceItem.exists || hostedItem.exists else {
             XCTFail("The exact fixture source/host status control is unavailable; no click attempted")
             return
         }
@@ -75,11 +82,24 @@ final class BarlineUITests: XCTestCase {
             guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
             return CGDisplayBounds(number.uint32Value)
         }
-        let onScreen = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            let frame = item.frame
+        func onScreen(_ candidate: XCUIElement) -> Bool {
+            guard candidate.exists else { return false }
+            let frame = candidate.frame
             return frame.width > 0 && frame.height > 0 && displayFrames.contains { $0.contains(frame) }
-        }, object: nil)
-        _ = XCTWaiter.wait(for: [onScreen], timeout: 3)
+        }
+        let deadline = Date().addingTimeInterval(3)
+        var item: XCUIElement?
+        repeat {
+            item = [sourceItem, hostedItem].first(where: onScreen)
+            if item != nil {
+                break
+            }
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        } while Date() < deadline
+        guard let item else {
+            XCTFail("Synthetic fixture status controls are outside active displays \(displayFrames); no click attempted")
+            return
+        }
         let itemFrame = item.frame
         print("FIXTURE statusFrame=\(itemFrame) activeDisplays=\(displayFrames)")
         guard itemFrame.width > 0, itemFrame.height > 0,
