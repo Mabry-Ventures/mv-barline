@@ -95,6 +95,12 @@ struct GoldenGateLogicalLayoutPlannerTests {
             title: "Barline",
             alias: "occurrence-0"
         )
+        let absentControlID = MenuBarItemID(
+            bundleIdentifier: "COM.MABRYVENTURES.BARLINE",
+            accessibilityIdentifier: "absent-barline-control",
+            title: "Barline",
+            alias: "occurrence-0"
+        )
         let before = snapshot([
             item(1, section: .hidden, order: 0),
             item(
@@ -107,6 +113,11 @@ struct GoldenGateLogicalLayoutPlannerTests {
         let existing = [
             absentID: GoldenGateLogicalAssignment(itemID: absentID, section: .hidden, rank: 3),
             id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .visible, rank: 8),
+            absentControlID: GoldenGateLogicalAssignment(
+                itemID: absentControlID,
+                section: .hidden,
+                rank: 4
+            ),
         ]
 
         let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
@@ -119,6 +130,7 @@ struct GoldenGateLogicalLayoutPlannerTests {
         #expect(assignments.map(\.itemID) == [id(1), absentID])
         #expect(assignments[0].section == .hidden)
         #expect(!assignments.contains(where: { $0.itemID == controlID }))
+        #expect(!assignments.contains(where: { $0.itemID == absentControlID }))
     }
 
     @Test("Persistence is deterministically bounded")

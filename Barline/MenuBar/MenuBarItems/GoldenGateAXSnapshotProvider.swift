@@ -69,7 +69,7 @@ actor GoldenGateAXSnapshotProvider {
                 canActivate: false,
                 canRestore: canSnapshot,
                 canCapture: false,
-                moveDestinationSupport: .emptySectionAllowed
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder
             )
         }
     }

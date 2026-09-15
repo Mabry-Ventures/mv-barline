@@ -102,7 +102,7 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
             .filter {
                 !observedIDs.contains($0.itemID) &&
                     $0.itemID.isPlausiblyStable &&
-                    $0.itemID.bundleIdentifier != barlineBundleIdentifier.lowercased() &&
+                    $0.itemID.bundleIdentifier.caseInsensitiveCompare(barlineBundleIdentifier) != .orderedSame &&
                     $0.rank >= 0
             }
             .sorted {

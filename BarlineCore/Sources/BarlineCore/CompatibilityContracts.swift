@@ -8,6 +8,9 @@ import Foundation
 public enum MenuBarMoveDestinationSupport: String, Codable, Sendable {
     case existingItemRequired
     case emptySectionAllowed
+    /// The backend can assign visibility sections, including an empty one,
+    /// but native status-item ordering remains owned by macOS.
+    case logicalSectionsPreserveNativeOrder
 }
 
 public struct MenuBarCapabilities: Codable, Equatable, Sendable {

@@ -76,6 +76,58 @@ struct ProfileLayoutReconcilerTests {
         #expect(logical.targets.first?.layout == saved)
     }
 
+    @Test("Logical section profiles preserve native order around macOS 27 controls")
+    func logicalSectionsPreserveNativeControlOrder() throws {
+        let control = MenuBarItemDescriptor(
+            id: id("hidden-control"), section: .hidden, order: 0,
+            isBarlineControlItem: true,
+            title: "Barline.ControlItem.Hidden",
+            isMovable: false
+        )
+        let app = item("a", 1)
+        let captured = ProfileLayout(hidden: [control.id, app.id])
+
+        let plan = try ProfileLayoutReconciler.planAcrossDisplays(
+            layout: captured,
+            items: [control, app],
+            destinationSupport: .logicalSectionsPreserveNativeOrder
+        )
+
+        #expect(plan.targets.first?.layout == captured)
+        #expect(plan.operations == [
+            MenuBarMoveOperation(
+                itemID: app.id,
+                section: .hidden,
+                index: 1,
+                destinationDisplayID: app.displayID
+            ),
+        ])
+        let applied = [control, app.replacingSection(.hidden)]
+        #expect(plan.matches(items: applied))
+        #expect(ProfileLayoutReconciler.matches(layout: captured, items: applied))
+
+        let reapplied = try ProfileLayoutReconciler.planAcrossDisplays(
+            layout: captured,
+            items: applied,
+            destinationSupport: .logicalSectionsPreserveNativeOrder
+        )
+        #expect(reapplied.operations.isEmpty)
+        #expect(reapplied.matches(items: applied))
+    }
+
+    @Test("Logical section profiles reject unsupported native reordering")
+    func logicalSectionsRejectNativeReordering() {
+        let items = [item("a", 0), item("b", 1)]
+
+        #expect(throws: ProfileLayoutReconciler.Failure.immovableOrderChange) {
+            try ProfileLayoutReconciler.planAcrossDisplays(
+                layout: ProfileLayout(visible: [id("b"), id("a")]),
+                items: items,
+                destinationSupport: .logicalSectionsPreserveNativeOrder
+            )
+        }
+    }
+
     @Test("Authority accepts preserved new anchors but rejects wrong saved order and section")
     func authorityUsesAnchorOrdering() {
         let saved = ProfileLayout(visible: [id("a"), id("fixed"), id("b")])

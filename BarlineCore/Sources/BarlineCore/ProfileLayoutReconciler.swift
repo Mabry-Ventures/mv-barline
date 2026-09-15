@@ -66,6 +66,11 @@ public enum ProfileLayoutReconciler {
                 hidden: layout.hidden.filter { ids.contains($0) },
                 alwaysHidden: layout.alwaysHidden.filter { ids.contains($0) }
             )
+            if let target = try? logicalSectionTarget(layout: localLayout, items: localItems),
+               observedLayout(items: localItems) == target
+            {
+                return true
+            }
             guard let target = try? reconcile(layout: localLayout, items: localItems) else { return false }
             return observedLayout(items: localItems) == target
         }
@@ -147,7 +152,7 @@ public enum ProfileLayoutReconciler {
                         throw Failure.unsupportedDestination
                     }
                     insertion = index
-                } else if localDestination.isEmpty, destinationSupport == .emptySectionAllowed {
+                } else if localDestination.isEmpty, destinationSupport != .existingItemRequired {
                     insertion = destination.count
                 } else {
                     guard let last = localDestination.last,
@@ -179,6 +184,9 @@ public enum ProfileLayoutReconciler {
     ) throws -> Plan {
         guard Set(items.map(\.displayID)).count <= 1 else {
             throw Failure.unsupportedDestination
+        }
+        if destinationSupport == .logicalSectionsPreserveNativeOrder {
+            return try logicalSectionPlan(layout: layout, items: items)
         }
         let target = try reconcile(layout: layout, items: items)
         let selected = Set(layout.allItemIDs)
@@ -212,7 +220,7 @@ public enum ProfileLayoutReconciler {
                     continue
                 }
                 // The current helper needs another item as a physical destination.
-                guard destinationSupport == .emptySectionAllowed || destination.contains(where: { $0 != id }) else {
+                guard destinationSupport != .existingItemRequired || destination.contains(where: { $0 != id }) else {
                     throw Failure.unsupportedDestination
                 }
                 operations.append(MenuBarMoveOperation(
@@ -228,6 +236,86 @@ public enum ProfileLayoutReconciler {
               current[.alwaysHidden] == target.alwaysHidden
         else { throw Failure.unsupportedDestination }
         return Plan(target: target, operations: operations)
+    }
+
+    /// macOS 27 can assign a status item to a visibility section without
+    /// changing its native order. Build a target and operations that preserve
+    /// that order, including the physical position of Barline's controls.
+    private static func logicalSectionPlan(
+        layout: ProfileLayout,
+        items: [MenuBarItemDescriptor]
+    ) throws -> Plan {
+        let target = try logicalSectionTarget(layout: layout, items: items)
+        let requestedSections = requestedSections(for: layout)
+        let ordered = items.sorted { $0.order < $1.order }
+        var operations = [MenuBarMoveOperation]()
+        for item in ordered {
+            guard let section = requestedSections[item.id], section != item.section else { continue }
+            let destination = target.ids(in: section)
+            guard let index = destination.firstIndex(of: item.id) else {
+                throw Failure.unsupportedDestination
+            }
+            operations.append(MenuBarMoveOperation(
+                itemID: item.id,
+                section: section,
+                index: index,
+                destinationDisplayID: item.displayID
+            ))
+        }
+        return Plan(target: target, operations: operations)
+    }
+
+    private static func logicalSectionTarget(
+        layout: ProfileLayout,
+        items: [MenuBarItemDescriptor]
+    ) throws -> ProfileLayout {
+        guard Set(layout.allItemIDs).count == layout.allItemIDs.count,
+              Set(items.map(\.id)).count == items.count
+        else { throw Failure.ambiguousIdentity }
+        let known = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0) })
+        let requestedSections = requestedSections(for: layout)
+        guard requestedSections.keys.allSatisfy({ known[$0] != nil }) else {
+            throw Failure.missingItem
+        }
+        for (itemID, section) in requestedSections {
+            guard let item = known[itemID] else { throw Failure.missingItem }
+            if item.section != section, !canReposition(item) {
+                throw Failure.immovableSectionChange
+            }
+            if item.section != section, section != .visible, !item.canBeHidden {
+                throw Failure.cannotHideItem
+            }
+        }
+
+        let ordered = items.sorted { $0.order < $1.order }
+        let target = ProfileLayout(
+            visible: ordered.filter {
+                requestedSections[$0.id, default: $0.section] == .visible
+            }.map(\.id),
+            hidden: ordered.filter {
+                requestedSections[$0.id, default: $0.section] == .hidden
+            }.map(\.id),
+            alwaysHidden: ordered.filter {
+                requestedSections[$0.id, default: $0.section] == .alwaysHidden
+            }.map(\.id)
+        )
+        let selected = Set(layout.allItemIDs)
+        for section in MenuBarSection.allCases {
+            let requested = layout.ids(in: section).filter { known[$0]?.isBarlineControlItem != true }
+            let native = target.ids(in: section).filter {
+                selected.contains($0) && known[$0]?.isBarlineControlItem != true
+            }
+            guard requested == native else { throw Failure.immovableOrderChange }
+        }
+        return target
+    }
+
+    private static func requestedSections(
+        for layout: ProfileLayout
+    ) -> [MenuBarItemID: MenuBarSection] {
+        Dictionary(uniqueKeysWithValues: MenuBarSection.allCases.flatMap { section in
+            layout.ids(in: section).map { ($0, section) }
+        })
     }
 
     public static func reconcile(
@@ -290,5 +378,15 @@ public enum ProfileLayoutReconciler {
             hidden: merged[.hidden] ?? [],
             alwaysHidden: merged[.alwaysHidden] ?? []
         )
+    }
+}
+
+private extension ProfileLayout {
+    func ids(in section: MenuBarSection) -> [MenuBarItemID] {
+        switch section {
+        case .visible: visible
+        case .hidden: hidden
+        case .alwaysHidden: alwaysHidden
+        }
     }
 }

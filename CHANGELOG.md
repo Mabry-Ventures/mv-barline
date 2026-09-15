@@ -15,6 +15,9 @@
 - Preserve assignments for temporarily absent applications, advance helper
   generations after every accepted change, and reject unsafe saved-layout
   restores without altering the current menu bar.
+- Keep macOS 27 saved layouts and Focus Filters aligned with native status-item
+  order while allowing supported items to change visibility sections. Profiles
+  no longer depend on the older physical-divider ordering rule on this backend.
 
 ## 1.0.15 (build 76) — September 14, 2026
 
