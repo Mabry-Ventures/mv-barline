@@ -597,6 +597,61 @@ struct StateCoordinatorTests {
         #expect(await backend.restoredSnapshots == [before])
     }
 
+    @Test("Failed mutation compensation reports an explicit unknown layout state")
+    func reportsMutationRecoveryFailure() async throws {
+        let before = makeSnapshot(generation: 1, count: 3)
+        let invalidAfter = makeSnapshot(generation: 2, count: 0)
+        let backend = FakeBackend(
+            snapshots: [before, invalidAfter],
+            restoreFailures: 1
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+
+        await #expect(throws: MenuBarBackendError.mutationRecoveryFailed) {
+            try await coordinator.perform(
+                .reveal(before.items[0].id),
+                now: invalidAfter.capturedAt
+            )
+        }
+        #expect(await coordinator.currentSnapshot == nil)
+        #expect(await coordinator.activeProfileID == nil)
+    }
+
+    @Test("A post-mutation failure without restore capability reports unknown layout state")
+    func reportsUnknownStateWhenRestoreIsUnavailable() async throws {
+        let before = makeSnapshot(generation: 1, count: 3)
+        let invalidAfter = makeSnapshot(generation: 2, count: 0)
+        let backend = FakeBackend(
+            snapshots: [before, invalidAfter],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: true,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder
+            )
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+
+        await #expect(throws: MenuBarBackendError.mutationRecoveryFailed) {
+            try await coordinator.perform(
+                .reveal(before.items[0].id),
+                now: invalidAfter.capturedAt
+            )
+        }
+        #expect(await backend.revealedItems == [before.items[0].id])
+        #expect(await backend.restoredSnapshots.isEmpty)
+        #expect(await coordinator.currentSnapshot == nil)
+        #expect(await coordinator.activeProfileID == nil)
+    }
+
     @Test("Reveal rolls back when the target remains hidden")
     func rejectsRevealNoOp() async throws {
         let itemID = MenuBarItemID(
@@ -2955,6 +3010,60 @@ struct StateCoordinatorTests {
         #expect(await coordinator.currentSnapshot == verifiedRollback)
     }
 
+    @Test("Logical section moves ignore synthetic insertion slots while preserving native order")
+    func acceptsLogicalSectionMoveAtNativeOrder() async throws {
+        let base = makeSnapshot(generation: 1, count: 3)
+        let beforeItems = [
+            base.items[0].replacing(section: .visible, order: 0),
+            base.items[1].replacing(section: .hidden, order: 1),
+            base.items[2].replacing(section: .hidden, order: 2),
+        ]
+        let afterItems = beforeItems.enumerated().map { index, item in
+            item.replacing(section: .hidden, order: index)
+        }
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: base.capturedAt,
+            items: beforeItems,
+            displayIDs: base.displayIDs,
+            displayIdentities: base.displayIdentities,
+            activeSpaceIsValid: true
+        )
+        let after = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: base.capturedAt,
+            items: afterItems,
+            displayIDs: base.displayIDs,
+            displayIdentities: base.displayIdentities,
+            activeSpaceIsValid: true
+        )
+        let capabilities = MenuBarCapabilities(
+            canSnapshot: true,
+            canMove: true,
+            canReveal: true,
+            canActivate: true,
+            canRestore: false,
+            moveDestinationSupport: .logicalSectionsPreserveNativeOrder
+        )
+        let backend = FakeBackend(snapshots: [before, after], capabilities: capabilities)
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+        let operation = MenuBarMoveOperation(
+            itemID: before.items[0].id,
+            section: .hidden,
+            index: 2,
+            destinationDisplayID: before.items[0].displayID
+        )
+
+        let result = try await coordinator.perform(.move(operation), now: after.capturedAt)
+
+        #expect(result == after)
+        #expect(await backend.moveOperations == [operation])
+        #expect(await backend.restoredSnapshots.isEmpty)
+    }
+
     @Test("Layout mutations create bounded undo and redo checkpoints")
     func undoesAndRedoesLayoutMutation() async throws {
         let before = makeSnapshot(generation: 1, count: 2)
@@ -3509,7 +3618,7 @@ struct StateCoordinatorTests {
         #expect(await backend.restoredSnapshots == [before])
     }
 
-    @Test("Rollback does not call restore when the backend lacks that capability")
+    @Test("Unavailable rollback reports unknown state without calling restore")
     func rollbackWithoutRestoreCapability() async throws {
         let before = makeSnapshot(generation: 1, count: 2)
         let capabilities = MenuBarCapabilities(
@@ -3530,7 +3639,7 @@ struct StateCoordinatorTests {
         )
         _ = try await coordinator.refresh(now: before.capturedAt)
 
-        await #expect(throws: MenuBarBackendError.interrupted) {
+        await #expect(throws: MenuBarBackendError.mutationRecoveryFailed) {
             try await coordinator.perform(.reveal(before.items[0].id), now: before.capturedAt)
         }
 

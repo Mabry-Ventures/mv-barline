@@ -1,5 +1,6 @@
 import BarlineCore
 import Foundation
+import OSLog
 
 actor TahoeMenuBarBackend: MenuBarBackend {
     private let client: WindowServerClient
@@ -93,8 +94,11 @@ actor TahoeMenuBarBackend: MenuBarBackend {
 actor GoldenGateMenuBarBackend: MenuBarBackend {
     private let client: WindowServerClient
     private let concealmentController = GoldenGateConcealmentController()
-    private var revealedItemsByObservation = [MenuBarRevealObservationToken: MenuBarItemID]()
+    private var revealObservations = TemporaryRevealObservationRegistry()
+    private var restorationTasks = [MenuBarRevealObservationToken: Task<Void, Never>]()
+    private var restartTask: Task<Void, Never>?
     private var capabilityCache = MenuBarCapabilityProbeCache()
+    private let logger = Logger(category: "GoldenGateMenuBarBackend")
 
     var capabilities: MenuBarCapabilities {
         capabilityCache.resolve(at: DispatchTime.now().uptimeNanoseconds) {
@@ -160,14 +164,31 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
     func beginRevealObservation(
         _ item: MenuBarItemID
     ) async throws -> MenuBarRevealObservationToken {
-        let resolved = try GoldenGateAXInventory.resolve(item)
-        let token = client.beginRevealObservation(sourcePID: resolved.ownerPID)
+        guard revealObservations.canAdmitOperations else { throw MenuBarBackendError.interrupted }
+        let lifecycleEpoch = revealObservations.lifecycleEpoch
+        var didRevealNatively = false
         do {
-            try await concealmentController.beginTemporaryReveal(resolved.id)
-            revealedItemsByObservation[token] = resolved.id
+            // Native concealment can remove a hidden item from the AX tree.
+            // Reveal by stable identity first, then bind observation and click
+            // delivery only after fresh owner/geometry resolution succeeds.
+            didRevealNatively = try await concealmentController.beginTemporaryReveal(item)
+            let resolved = try await resolveAfterNativeReveal(item)
+            let token = client.beginRevealObservation(sourcePID: resolved.ownerPID)
+            if didRevealNatively {
+                guard revealObservations.register(token, item: item, at: lifecycleEpoch) else {
+                    client.endRevealObservation(token)
+                    throw MenuBarBackendError.interrupted
+                }
+            }
             return token
         } catch {
-            client.endRevealObservation(token)
+            if didRevealNatively, lifecycleEpoch == revealObservations.lifecycleEpoch {
+                let recoveryToken = MenuBarRevealObservationToken()
+                _ = revealObservations.register(recoveryToken, item: item, at: lifecycleEpoch)
+                if await !restoreObservation(recoveryToken) {
+                    scheduleRestoration(for: recoveryToken)
+                }
+            }
             throw error
         }
     }
@@ -178,12 +199,13 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
 
     func endRevealObservation(_ token: MenuBarRevealObservationToken) async {
         client.endRevealObservation(token)
-        if let item = revealedItemsByObservation.removeValue(forKey: token) {
-            await concealmentController.endTemporaryReveal(item)
+        if await !restoreObservation(token) {
+            scheduleRestoration(for: token)
         }
     }
 
     func configureConcealment(_ configuration: MenuBarConcealmentConfiguration) async throws {
+        guard revealObservations.canAdmitOperations else { throw MenuBarBackendError.interrupted }
         try await concealmentController.configure(configuration)
     }
 
@@ -199,8 +221,62 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
         )
     }
 
-    func restart() {
-        concealmentController.invalidate()
+    func restart() async {
+        if let restartTask {
+            await restartTask.value
+            return
+        }
+        guard revealObservations.beginRestart() else { return }
+        restorationTasks.values.forEach { $0.cancel() }
+        restorationTasks.removeAll()
+        let task = Task { await concealmentController.invalidate() }
+        restartTask = task
+        await task.value
+        restartTask = nil
+        revealObservations.finishRestart()
+    }
+
+    private func resolveAfterNativeReveal(
+        _ item: MenuBarItemID
+    ) async throws -> GoldenGateAXInventory.ResolvedItem {
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        repeat {
+            try Task.checkCancellation()
+            if let resolved = try? GoldenGateAXInventory.resolve(item) {
+                return resolved
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        } while ContinuousClock.now < deadline
+        throw MenuBarBackendError.timedOut
+    }
+
+    private func restoreObservation(_ token: MenuBarRevealObservationToken) async -> Bool {
+        guard let reservation = revealObservations.reserve(token) else { return true }
+        do {
+            try await concealmentController.endTemporaryReveal(reservation.item)
+            restorationTasks[token]?.cancel()
+            restorationTasks[token] = nil
+            return true
+        } catch {
+            _ = revealObservations.restoreFailed(reservation)
+            logger.error("Golden Gate temporary reveal restoration deferred")
+            return false
+        }
+    }
+
+    private func scheduleRestoration(for token: MenuBarRevealObservationToken) {
+        guard restorationTasks[token] == nil else { return }
+        restorationTasks[token] = Task { [weak self] in
+            var delay = Duration.milliseconds(250)
+            while !Task.isCancelled {
+                try? await Task.sleep(for: delay)
+                guard !Task.isCancelled, let self else { return }
+                if await restoreObservation(token) {
+                    return
+                }
+                delay = min(delay * 2, .seconds(5))
+            }
+        }
     }
 }
 

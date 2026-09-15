@@ -98,6 +98,7 @@ private struct MenuBarInventoryBar: View {
 
     @State private var isDropTargeted = false
     @State private var assignmentFailed = false
+    @State private var assignmentFailureMessage = ""
 
     private var emptyForeground: Color {
         colorScheme == .dark ? Color.white.opacity(0.65) : Color.black.opacity(0.58)
@@ -151,7 +152,7 @@ private struct MenuBarInventoryBar: View {
         .alert("Layout could not be changed", isPresented: $assignmentFailed) {
             Button("OK", role: .cancel) {}
         } message: {
-            Text("Your existing menu bar layout is unchanged. Please try again.")
+            Text(assignmentFailureMessage)
         }
     }
 
@@ -182,6 +183,7 @@ private struct MenuBarInventoryBar: View {
                 index: itemManager.itemCache.managedItems(for: destination).count
             )
         } catch {
+            assignmentFailureMessage = MenuBarAssignmentFailurePresentation.message(for: error)
             assignmentFailed = true
         }
     }

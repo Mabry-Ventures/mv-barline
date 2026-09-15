@@ -1130,7 +1130,9 @@ extension MenuBarItemManager {
             logger.error(
                 "Golden Gate layout assignment failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
             )
-            throw EventError.cannotComplete
+            // The settings UI must distinguish a verified no-op/rollback from
+            // an unknown native state that requires user review.
+            throw error
         }
     }
 
@@ -1216,8 +1218,13 @@ extension MenuBarItemManager {
         guard item.isResponsive else {
             throw EventError.cannotComplete
         }
+        let usesNativeReveal = if #available(macOS 27.0, *) {
+            true
+        } else {
+            false
+        }
         let interfaceObserved: Bool
-        if item.isOnScreen {
+        if item.isOnScreen || usesNativeReveal {
             let token = try await BarlineMenuService.Connection.shared.beginRevealObservation(for: item.stableID)
             do {
                 try await click(item: item, with: button, interactionID: interactionID)

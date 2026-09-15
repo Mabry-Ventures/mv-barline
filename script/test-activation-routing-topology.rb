@@ -56,9 +56,17 @@ if item_projection.include?('.accessibilityElement(children: .ignore)')
   abort('SwiftUI accessibility projection shadows the native shelf item control')
 end
 
-unless helper_backend.match?(/GoldenGateAXInventory\.resolve\(item\).*?beginRevealObservation\(sourcePID: resolved\.ownerPID\)/m) &&
+unless helper_backend.match?(/beginTemporaryReveal\(item\).*?resolveAfterNativeReveal\(item\).*?beginRevealObservation\(sourcePID: resolved\.ownerPID\)/m) &&
        helper_inventory.match?(/static func resolve\(_ itemID: MenuBarItemID\).*?GoldenGateMenuBarIdentityResolver\.resolve/m)
-  abort('Golden Gate reveal observation is not bound to the Accessibility item owner')
+  abort('Golden Gate reveal does not precede fresh Accessibility owner binding')
+end
+
+unless manager.match?(/usesNativeReveal = if #available\(macOS 27\.0, \*\).*?true.*?else.*?false.*?if item\.isOnScreen \|\| usesNativeReveal.*?beginRevealObservation/m) &&
+       helper_backend.include?('scheduleRestoration(for:') &&
+       helper_backend.match?(/func restoreObservation\(.*?revealObservations\.reserve\(token\).*?endTemporaryReveal\(reservation\.item\)/m) &&
+       helper_backend.match?(/func beginRevealObservation\(.*?guard revealObservations\.canAdmitOperations.*?lifecycleEpoch/m) &&
+       helper_backend.match?(/func restart\(\) async.*?revealObservations\.beginRestart\(\).*?restartTask = task.*?await task\.value.*?restartTask = nil.*?revealObservations\.finishRestart\(\)/m)
+  abort('retained Golden Gate activation can fall back to positional movement or orphan native reveal')
 end
 
 unless helper_backend.match?(/func activate\(_ item: MenuBarItemID.*?client\.activateGoldenGate\(item/m) &&
@@ -67,30 +75,51 @@ unless helper_backend.match?(/func activate\(_ item: MenuBarItemID.*?client\.act
 end
 
 unless concealment.include?('BLNGoldenGateAssessmentCreate()') &&
-       concealment.include?('BLNGoldenGateAssessmentApply(') &&
+       concealment.include?('BLNGoldenGateAssessmentBegin(') &&
        concealment.include?('BLNGoldenGateAssessmentActivationState(') &&
+       concealment.include?('BLNGoldenGateAssessmentCommit(') &&
+       concealment.include?('BLNGoldenGateAssessmentAbort(') &&
        bridge_header.include?('BLNGoldenGateAssessmentCreate') &&
-       bridge_header.include?('BLNGoldenGateAssessmentApply') &&
+       bridge_header.include?('BLNGoldenGateAssessmentBegin') &&
        bridge_header.include?('BLNGoldenGateAssessmentActivationState') &&
+       bridge_header.include?('BLNGoldenGateAssessmentCommit') &&
+       bridge_header.include?('BLNGoldenGateAssessmentAbort') &&
        !concealment.include?('resolve("BLNGoldenGateAssessment')
   abort('Golden Gate concealment bridge is not compile-time linked')
+end
+
+unless concealment.include?('AsyncExclusiveOperationGate()') &&
+       concealment.include?('TemporaryRevealLedger()') &&
+       concealment.match?(/candidateLedger = temporaryRevealLedger\.beginning\(item\).*?applyCurrentState\(temporaryRevealLedger: candidateLedger\).*?temporaryRevealLedger = candidateLedger/m) &&
+       concealment.match?(/candidateLedger = temporaryRevealLedger\.ending\(item\).*?applyCurrentState\(temporaryRevealLedger: candidateLedger\).*?temporaryRevealLedger = candidateLedger/m)
+  abort('Golden Gate native state changes are not serialized and reference-count committed')
 end
 
 if assessment_bridge.include?('dispatch_semaphore_wait')
   abort('Golden Gate assertion activation blocks the callback executor')
 end
 
-unless assessment_bridge.include?('strongSelf.activationState = -1;') &&
-       assessment_bridge.include?('strongSelf.assertion = candidate;') &&
-       assessment_bridge.include?('strongSelf.activationState = 1;') &&
-       assessment_bridge.match?(/if \(error\).*?candidate, invalidationSelector.*?else if \(previous\).*?previous, invalidationSelector/m) &&
-       !assessment_bridge.match?(/Activation completion.*?self\.assertion = candidate/m)
-  abort('Golden Gate assertion replacement is not callback-acknowledged and atomic')
+callback = assessment_bridge.split('void (^completion)', 2).last.split('@try', 2).first
+acknowledgement = assessment_bridge.split('- (void)acknowledgeCandidate:', 3).last
+  .split('- (int32_t)activationStateForToken:', 2).first
+commit = assessment_bridge.split('- (BOOL)commitToken:', 3).last.split('- (BOOL)abortToken:', 2).first
+abort_transaction = assessment_bridge.split('- (BOOL)abortToken:', 3).last.split('- (void)invalidate', 2).first
+unless callback.include?('acknowledgeCandidate:candidate token:token error:error') &&
+       !callback.include?('strongSelf.assertion = candidate;') &&
+       acknowledgement.include?('self.activationState = 1;') &&
+       !acknowledgement.include?('self.assertion = candidate;') &&
+       commit.include?('self.assertion = self.pendingClearsCurrentAssertion ? nil : self.pendingAssertion;') &&
+       commit.include?('previous, NSSelectorFromString(@"invalidate")') &&
+       abort_transaction.include?('self.pendingToken = 0;') &&
+       abort_transaction.include?('pending, NSSelectorFromString(@"invalidate")') &&
+       concealment.match?(/defer \{.*?BLNGoldenGateAssessmentAbort\(opaqueController, transaction\)/m) &&
+       concealment.match?(/Task\.checkCancellation\(\).*?BLNGoldenGateAssessmentCommit\(opaqueController, transaction\)/m)
+  abort('Golden Gate assertion replacement is not an explicit abortable two-phase transaction')
 end
 
 unless golden_gate_provider.include?('verifyNativeAssignments') &&
        golden_gate_provider.include?('GoldenGateRetainedInventoryPolicy.merging(') &&
-       golden_gate_provider.match?(/applyNativeConfiguration\(.*?configureConcealment\(.*?candidateConfiguration.*?catch.*?verifyNativeAssignments\(expectations\).*?catch.*?configureConcealment\(.*?previousConfiguration.*?catch.*?native concealment rollback failed/m) &&
+       golden_gate_provider.match?(/applyNativeConfiguration\(.*?configureConcealment\(.*?candidateConfiguration.*?catch.*?verifyNativeAssignments\(expectations\).*?catch.*?configureConcealment\(.*?previousConfiguration.*?catch.*?MenuBarBackendError\.mutationRecoveryFailed/m) &&
        service_connection.match?(/case \.configureConcealment = request,.*?case \.activation\(\.success\) = response/m)
   abort('Golden Gate concealment is not verified, rolled back, and replayed transactionally')
 end

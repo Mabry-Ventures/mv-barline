@@ -445,8 +445,16 @@ public struct MenuBarMovePlanner: Sendable {
     public func resultMatches(
         _ operation: MenuBarMoveOperation,
         in snapshot: MenuBarSnapshot,
-        from previousSnapshot: MenuBarSnapshot
+        from previousSnapshot: MenuBarSnapshot,
+        destinationSupport: MenuBarMoveDestinationSupport? = nil
     ) -> Bool {
+        if destinationSupport == .logicalSectionsPreserveNativeOrder {
+            return logicalSectionResultMatches(
+                operation,
+                in: snapshot,
+                from: previousSnapshot
+            )
+        }
         let candidates = snapshot.items.filter { $0.section == operation.section }
         guard let itemIndex = candidates.firstIndex(where: { $0.id == operation.itemID }) else {
             return false
@@ -485,6 +493,30 @@ public struct MenuBarMovePlanner: Sendable {
             return itemIndex == anchorIndex + 1
         }
         return itemIndex == 0
+    }
+
+    private func logicalSectionResultMatches(
+        _ operation: MenuBarMoveOperation,
+        in snapshot: MenuBarSnapshot,
+        from previousSnapshot: MenuBarSnapshot
+    ) -> Bool {
+        guard let item = snapshot.items.first(where: { $0.id == operation.itemID }),
+              item.section == operation.section,
+              operation.destinationDisplayID.map({ item.displayID == $0 }) != false
+        else {
+            return false
+        }
+
+        let previousByID = Dictionary(uniqueKeysWithValues: previousSnapshot.items.map { ($0.id, $0) })
+        let currentByID = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
+        let sharedIDs = Set(previousByID.keys).intersection(currentByID.keys)
+        let previousOrder = previousSnapshot.items.map(\.id).filter(sharedIDs.contains)
+        let currentOrder = snapshot.items.map(\.id).filter(sharedIDs.contains)
+        guard previousOrder == currentOrder else { return false }
+
+        return sharedIDs.allSatisfy { id in
+            id == operation.itemID || previousByID[id]?.section == currentByID[id]?.section
+        }
     }
 
     public func restoreOperations(for snapshot: MenuBarSnapshot) -> [MenuBarMoveOperation] {

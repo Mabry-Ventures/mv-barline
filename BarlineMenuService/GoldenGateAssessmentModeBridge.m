@@ -6,10 +6,16 @@
 @interface BLNGoldenGateAssessmentController : NSObject
 @property(nonatomic, strong, nullable) id assertion;
 @property(nonatomic, strong, nullable) id pendingAssertion;
+@property(nonatomic) uint64_t pendingToken;
+@property(nonatomic) uint64_t nextToken;
+@property(nonatomic) BOOL pendingClearsCurrentAssertion;
 @property(nonatomic) int32_t activationState;
-- (BOOL)applyConcealedBundleIdentifiers:(NSArray<NSString *> *)concealedBundleIdentifiers
+- (uint64_t)beginConcealedBundleIdentifiers:(NSArray<NSString *> *)concealedBundleIdentifiers
            allowedSystemItemIdentifiers:(NSArray<NSNumber *> *)allowedSystemItemIdentifiers;
-- (int32_t)currentActivationState;
+- (int32_t)activationStateForToken:(uint64_t)token;
+- (void)acknowledgeCandidate:(id)candidate token:(uint64_t)token error:(NSError * _Nullable)error;
+- (BOOL)commitToken:(uint64_t)token;
+- (BOOL)abortToken:(uint64_t)token;
 - (void)invalidate;
 @end
 
@@ -38,17 +44,28 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
     return runtimeAvailable;
 }
 
-- (BOOL)applyConcealedBundleIdentifiers:(NSArray<NSString *> *)concealedBundleIdentifiers
+- (uint64_t)beginConcealedBundleIdentifiers:(NSArray<NSString *> *)concealedBundleIdentifiers
            allowedSystemItemIdentifiers:(NSArray<NSNumber *> *)allowedSystemItemIdentifiers {
-    if (concealedBundleIdentifiers.count == 0 && allowedSystemItemIdentifiers.count == 9) {
-        [self invalidate];
-        @synchronized (self) {
-            self.activationState = 1;
-        }
-        return YES;
+    if (!BLNGoldenGateAssessmentRuntimeAvailable()) return 0;
+
+    uint64_t token = 0;
+    @synchronized (self) {
+        if (self.pendingToken != 0) return 0;
+        self.nextToken += 1;
+        if (self.nextToken == 0) self.nextToken = 1;
+        token = self.nextToken;
+        self.pendingToken = token;
+        self.activationState = 0;
     }
 
-    if (!BLNGoldenGateAssessmentRuntimeAvailable()) return NO;
+    if (concealedBundleIdentifiers.count == 0 && allowedSystemItemIdentifiers.count == 9) {
+        @synchronized (self) {
+            if (self.pendingToken != token) return 0;
+            self.pendingClearsCurrentAssertion = YES;
+            self.activationState = 1;
+        }
+        return token;
+    }
 
     Class configurationClass = NSClassFromString(@"MBAssessmentModeConfiguration");
     Class assertionClass = NSClassFromString(@"MBAssessmentModeAssertion");
@@ -63,7 +80,8 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
         ![configurationClass instancesRespondToSelector:configurationInitializer] ||
         ![assertionClass instancesRespondToSelector:activationSelector] ||
         ![assertionClass instancesRespondToSelector:invalidationSelector]) {
-        return NO;
+        [self abortToken:token];
+        return 0;
     }
 
     NSSet<NSString *> *concealed = [NSSet setWithArray:concealedBundleIdentifiers];
@@ -88,46 +106,32 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
         allowedSystemItemIdentifiers,
         allowedBundles.array
     );
-    if (!configuration) return NO;
+    if (!configuration) {
+        [self abortToken:token];
+        return 0;
+    }
 
     id candidate = ((id (*)(id, SEL))objc_msgSend)(assertionClass, @selector(new));
-    if (!candidate) return NO;
+    if (!candidate) {
+        [self abortToken:token];
+        return 0;
+    }
 
     @synchronized (self) {
-        if (self.pendingAssertion) {
+        if (self.pendingToken != token || self.pendingAssertion) {
             ((void (*)(id, SEL))objc_msgSend)(candidate, invalidationSelector);
-            return NO;
+            [self abortToken:token];
+            return 0;
         }
         self.pendingAssertion = candidate;
-        self.activationState = 0;
+        self.pendingClearsCurrentAssertion = NO;
     }
 
     __weak BLNGoldenGateAssessmentController *weakSelf = self;
     void (^completion)(NSError *) = ^(NSError *error) {
         BLNGoldenGateAssessmentController *strongSelf = weakSelf;
         if (!strongSelf) return;
-
-        id previous = nil;
-        @synchronized (strongSelf) {
-            // Ignore a callback for an assertion invalidated by shutdown.
-            if (strongSelf.pendingAssertion != candidate) return;
-            strongSelf.pendingAssertion = nil;
-            if (error) {
-                strongSelf.activationState = -1;
-            } else {
-                previous = strongSelf.assertion;
-                strongSelf.assertion = candidate;
-                strongSelf.activationState = 1;
-            }
-        }
-
-        if (error) {
-            ((void (*)(id, SEL))objc_msgSend)(candidate, invalidationSelector);
-            NSLog(@"[BarlineAssessment] activation rejected domain=%@ code=%ld",
-                  error.domain, (long)error.code);
-        } else if (previous) {
-            ((void (*)(id, SEL))objc_msgSend)(previous, invalidationSelector);
-        }
+        [strongSelf acknowledgeCandidate:candidate token:token error:error];
     };
     @try {
         ((void (*)(id, SEL, id, id))objc_msgSend)(
@@ -135,21 +139,78 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
         );
     } @catch (__unused NSException *exception) {
         @synchronized (self) {
-            if (self.pendingAssertion == candidate) {
+            if (self.pendingToken == token && self.pendingAssertion == candidate) {
                 self.pendingAssertion = nil;
+                self.pendingToken = 0;
                 self.activationState = -1;
             }
         }
         ((void (*)(id, SEL))objc_msgSend)(candidate, invalidationSelector);
-        return NO;
+        return 0;
+    }
+    return token;
+}
+
+- (void)acknowledgeCandidate:(id)candidate token:(uint64_t)token error:(NSError *)error {
+    @synchronized (self) {
+        // A callback only acknowledges readiness. The Swift owner must
+        // explicitly commit this exact token before native state changes.
+        if (self.pendingToken != token || self.pendingAssertion != candidate) return;
+        if (error) {
+            self.pendingAssertion = nil;
+            self.activationState = -1;
+        } else {
+            self.activationState = 1;
+        }
+    }
+
+    if (error) {
+        ((void (*)(id, SEL))objc_msgSend)(candidate, NSSelectorFromString(@"invalidate"));
+        NSLog(@"[BarlineAssessment] activation rejected domain=%@ code=%ld",
+              error.domain, (long)error.code);
+    }
+}
+
+- (int32_t)activationStateForToken:(uint64_t)token {
+    @synchronized (self) {
+        if (token == 0 || self.pendingToken != token) return -2;
+        return self.activationState;
+    }
+}
+
+- (BOOL)commitToken:(uint64_t)token {
+    id previous = nil;
+    @synchronized (self) {
+        if (token == 0 || self.pendingToken != token || self.activationState != 1) {
+            return NO;
+        }
+        previous = self.assertion;
+        self.assertion = self.pendingClearsCurrentAssertion ? nil : self.pendingAssertion;
+        self.pendingAssertion = nil;
+        self.pendingToken = 0;
+        self.pendingClearsCurrentAssertion = NO;
+        self.activationState = -2;
+    }
+    if (previous) {
+        ((void (*)(id, SEL))objc_msgSend)(previous, NSSelectorFromString(@"invalidate"));
     }
     return YES;
 }
 
-- (int32_t)currentActivationState {
+- (BOOL)abortToken:(uint64_t)token {
+    id pending = nil;
     @synchronized (self) {
-        return self.activationState;
+        if (token == 0 || self.pendingToken != token) return NO;
+        pending = self.pendingAssertion;
+        self.pendingAssertion = nil;
+        self.pendingToken = 0;
+        self.pendingClearsCurrentAssertion = NO;
+        self.activationState = -2;
     }
+    if (pending) {
+        ((void (*)(id, SEL))objc_msgSend)(pending, NSSelectorFromString(@"invalidate"));
+    }
+    return YES;
 }
 
 - (void)invalidate {
@@ -160,7 +221,9 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
         pending = self.pendingAssertion;
         self.assertion = nil;
         self.pendingAssertion = nil;
-        self.activationState = -1;
+        self.pendingToken = 0;
+        self.pendingClearsCurrentAssertion = NO;
+        self.activationState = -2;
     }
     if (current) {
         ((void (*)(id, SEL))objc_msgSend)(current, NSSelectorFromString(@"invalidate"));
@@ -181,19 +244,29 @@ void *BLNGoldenGateAssessmentCreate(void) {
     return (__bridge_retained void *)[BLNGoldenGateAssessmentController new];
 }
 
-bool BLNGoldenGateAssessmentApply(
+uint64_t BLNGoldenGateAssessmentBegin(
     void *opaqueController,
     CFArrayRef concealedBundleIdentifiers,
     CFArrayRef allowedSystemItemIdentifiers
 ) {
     BLNGoldenGateAssessmentController *controller = (__bridge BLNGoldenGateAssessmentController *)opaqueController;
-    return [controller applyConcealedBundleIdentifiers:(__bridge NSArray *)concealedBundleIdentifiers
+    return [controller beginConcealedBundleIdentifiers:(__bridge NSArray *)concealedBundleIdentifiers
                           allowedSystemItemIdentifiers:(__bridge NSArray *)allowedSystemItemIdentifiers];
 }
 
-int32_t BLNGoldenGateAssessmentActivationState(void *opaqueController) {
+int32_t BLNGoldenGateAssessmentActivationState(void *opaqueController, uint64_t transactionToken) {
     BLNGoldenGateAssessmentController *controller = (__bridge BLNGoldenGateAssessmentController *)opaqueController;
-    return [controller currentActivationState];
+    return [controller activationStateForToken:transactionToken];
+}
+
+bool BLNGoldenGateAssessmentCommit(void *opaqueController, uint64_t transactionToken) {
+    BLNGoldenGateAssessmentController *controller = (__bridge BLNGoldenGateAssessmentController *)opaqueController;
+    return [controller commitToken:transactionToken];
+}
+
+bool BLNGoldenGateAssessmentAbort(void *opaqueController, uint64_t transactionToken) {
+    BLNGoldenGateAssessmentController *controller = (__bridge BLNGoldenGateAssessmentController *)opaqueController;
+    return [controller abortToken:transactionToken];
 }
 
 void BLNGoldenGateAssessmentInvalidate(void *opaqueController) {

@@ -439,6 +439,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "interrupted"
         case .timedOut:
             "timed-out"
+        case .mutationRecoveryFailed:
+            "mutation-recovery-failed"
         case .operationFailed:
             "operation-failed"
         }

@@ -248,6 +248,7 @@ public enum MenuBarBackendError: Error, Codable, Equatable, Sendable {
     case invalidSnapshot(SnapshotRejectionReason)
     case interrupted
     case timedOut
+    case mutationRecoveryFailed
     case operationFailed(String)
 }
 

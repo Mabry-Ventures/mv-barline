@@ -35,6 +35,13 @@ actor GoldenGateAXSnapshotProvider {
         let descriptors: [MenuBarItemDescriptor]
     }
 
+    private struct PreparedPersistence {
+        let assignments: [GoldenGateLogicalAssignment]
+        let assignmentData: Data
+        let descriptors: [MenuBarItemDescriptor]
+        let descriptorData: Data
+    }
+
     private struct ElementMetadata {
         let identifier: String?
         let accessibilityDescription: String?
@@ -147,12 +154,15 @@ actor GoldenGateAXSnapshotProvider {
             assignments: explicitAssignments,
             runningBundleIdentifiers: Set(
                 NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
-            )
+            ),
+            barlineBundleIdentifier: signingIdentifier
         )
         if hiddenControlUsesLiveGeometry, explicitAssignments.isEmpty {
             rememberSections(from: result)
         }
-        rememberRetainedInventory(from: result)
+        if let prepared = try? prepareRetainedInventory(from: result, requiredItemIDs: []) {
+            commitRetainedInventory(prepared)
+        }
         cachedAt = now
         cachedSnapshot = result
         logger.info(
@@ -174,6 +184,10 @@ actor GoldenGateAXSnapshotProvider {
         }
 
         let candidate = try logicalLayoutPlanner.applying(operation, to: before)
+        let persistence = try preparePersistence(
+            from: candidate,
+            requiredItemIDs: [source.id]
+        )
         let previousConfiguration = concealmentConfiguration(for: before)
         try await applyNativeConfiguration(
             concealmentConfiguration(for: candidate),
@@ -181,8 +195,7 @@ actor GoldenGateAXSnapshotProvider {
             expectations: [source.id: operation.section == .visible]
         )
         generation = candidate.generation
-        rememberExplicitLayout(from: candidate)
-        rememberRetainedInventory(from: candidate)
+        commitPersistence(persistence)
         cachedAt = DispatchTime.now().uptimeNanoseconds
         cachedSnapshot = candidate
         return MenuBarMutationResult(
@@ -198,6 +211,10 @@ actor GoldenGateAXSnapshotProvider {
         let changedItems = candidate.items.filter { candidateItem in
             current.items.first(where: { $0.id == candidateItem.id })?.section != candidateItem.section
         }
+        let persistence = try preparePersistence(
+            from: candidate,
+            requiredItemIDs: Set(changedItems.map(\.id))
+        )
         try await applyNativeConfiguration(
             concealmentConfiguration(for: candidate),
             previousConfiguration: previousConfiguration,
@@ -206,8 +223,7 @@ actor GoldenGateAXSnapshotProvider {
             })
         )
         generation = candidate.generation
-        rememberExplicitLayout(from: candidate)
-        rememberRetainedInventory(from: candidate)
+        commitPersistence(persistence)
         cachedAt = DispatchTime.now().uptimeNanoseconds
         cachedSnapshot = candidate
         return MenuBarMutationResult(
@@ -314,49 +330,158 @@ actor GoldenGateAXSnapshotProvider {
         var result = [MenuBarItemID: MenuBarItemDescriptor]()
         for descriptor in document.descriptors {
             guard descriptor.id.isPlausiblyStable,
-                  !descriptor.isBarlineControlItem,
-                  result.updateValue(descriptor, forKey: descriptor.id) == nil
+                  result.updateValue(sanitizedDescriptor(descriptor), forKey: descriptor.id) == nil
             else { return [:] }
         }
         return result
     }
 
-    private func rememberExplicitLayout(from snapshot: MenuBarSnapshot) {
-        let assignments = logicalLayoutPlanner.assignmentsForPersistence(
+    private func preparePersistence(
+        from snapshot: MenuBarSnapshot,
+        requiredItemIDs: Set<MenuBarItemID>
+    ) throws -> PreparedPersistence {
+        let assignmentCandidates = logicalLayoutPlanner.assignmentsForPersistence(
             from: snapshot,
             preserving: explicitAssignments,
             barlineBundleIdentifier: Bundle.main.bundleIdentifier
                 ?? "com.mabryventures.Barline",
-            maximumCount: Self.maximumRememberedAssignments
+            maximumCount: Self.maximumRememberedAssignments * 2
         )
-        let document = ExplicitLayout(version: 1, assignments: assignments)
-        guard let data = try? JSONEncoder().encode(document),
-              data.count <= Self.maximumRememberedBytes
-        else { return }
-        explicitAssignments = Dictionary(uniqueKeysWithValues: document.assignments.map {
-            ($0.itemID, $0)
+        .sorted(by: Self.persistencePriority)
+        let requiredAssignmentIndices = Set(assignmentCandidates.indices.filter { index in
+            let assignment = assignmentCandidates[index]
+            return requiredItemIDs.contains(assignment.itemID) || assignment.section != .visible
         })
-        UserDefaults.standard.set(data, forKey: Self.explicitLayoutKey)
+        let assignmentSelection: (elements: [GoldenGateLogicalAssignment], data: Data)
+        do {
+            assignmentSelection = try BoundedPersistenceSelection.select(
+                from: assignmentCandidates,
+                requiredIndices: requiredAssignmentIndices,
+                maximumCount: Self.maximumRememberedAssignments,
+                maximumBytes: Self.maximumRememberedBytes,
+                encode: { try JSONEncoder().encode(ExplicitLayout(version: 1, assignments: $0)) }
+            )
+        } catch {
+            throw MenuBarBackendError.operationFailed("menu bar layout cannot be saved safely")
+        }
+        let retained = try prepareRetainedInventory(
+            from: snapshot,
+            requiredItemIDs: requiredItemIDs
+        )
+        return PreparedPersistence(
+            assignments: assignmentSelection.elements,
+            assignmentData: assignmentSelection.data,
+            descriptors: retained.elements,
+            descriptorData: retained.data
+        )
     }
 
-    private func rememberRetainedInventory(from snapshot: MenuBarSnapshot) {
-        var merged = retainedDescriptors
-        for descriptor in snapshot.items where
-            !descriptor.isBarlineControlItem && descriptor.id.isPlausiblyStable
-        {
-            merged[descriptor.id] = descriptor
-        }
-        let descriptors = merged.values.sorted {
-            $0.id.description < $1.id.description
-        }.prefix(Self.maximumRememberedAssignments)
-        let document = RetainedInventory(version: 1, descriptors: Array(descriptors))
-        guard let data = try? JSONEncoder().encode(document),
-              data.count <= Self.maximumRememberedBytes
-        else { return }
-        retainedDescriptors = Dictionary(uniqueKeysWithValues: document.descriptors.map {
+    private func commitPersistence(_ prepared: PreparedPersistence) {
+        explicitAssignments = Dictionary(uniqueKeysWithValues: prepared.assignments.map {
+            ($0.itemID, $0)
+        })
+        retainedDescriptors = Dictionary(uniqueKeysWithValues: prepared.descriptors.map {
             ($0.id, $0)
         })
-        UserDefaults.standard.set(data, forKey: Self.retainedInventoryKey)
+        UserDefaults.standard.set(prepared.assignmentData, forKey: Self.explicitLayoutKey)
+        UserDefaults.standard.set(prepared.descriptorData, forKey: Self.retainedInventoryKey)
+    }
+
+    private func prepareRetainedInventory(
+        from snapshot: MenuBarSnapshot,
+        requiredItemIDs: Set<MenuBarItemID>
+    ) throws -> (elements: [MenuBarItemDescriptor], data: Data) {
+        var merged = retainedDescriptors
+        for (id, descriptor) in merged {
+            merged[id] = Self.sanitizedDescriptor(descriptor)
+        }
+        for descriptor in snapshot.items where descriptor.id.isPlausiblyStable {
+            // Barline controls are retained only as sanitized global-order
+            // anchors; the merge policy never fabricates a missing control.
+            merged[descriptor.id] = Self.sanitizedDescriptor(descriptor)
+        }
+        let descriptorCandidates = merged.values.sorted(by: Self.persistencePriority)
+        let requiredDescriptorIndices = Set(descriptorCandidates.indices.filter { index in
+            let descriptor = descriptorCandidates[index]
+            return requiredItemIDs.contains(descriptor.id) ||
+                descriptor.isBarlineControlItem ||
+                descriptor.section != .visible
+        })
+        do {
+            return try BoundedPersistenceSelection.select(
+                from: descriptorCandidates,
+                requiredIndices: requiredDescriptorIndices,
+                maximumCount: Self.maximumRememberedAssignments,
+                maximumBytes: Self.maximumRememberedBytes,
+                encode: { try JSONEncoder().encode(RetainedInventory(version: 1, descriptors: $0)) }
+            )
+        } catch {
+            throw MenuBarBackendError.operationFailed("menu bar inventory cannot be saved safely")
+        }
+    }
+
+    private func commitRetainedInventory(
+        _ prepared: (elements: [MenuBarItemDescriptor], data: Data)
+    ) {
+        retainedDescriptors = Dictionary(uniqueKeysWithValues: prepared.elements.map {
+            ($0.id, $0)
+        })
+        UserDefaults.standard.set(prepared.data, forKey: Self.retainedInventoryKey)
+    }
+
+    private static func persistencePriority(
+        _ lhs: GoldenGateLogicalAssignment,
+        _ rhs: GoldenGateLogicalAssignment
+    ) -> Bool {
+        let lhsPriority = lhs.section == .visible ? 1 : 0
+        let rhsPriority = rhs.section == .visible ? 1 : 0
+        if lhsPriority != rhsPriority {
+            return lhsPriority < rhsPriority
+        }
+        if lhs.section != rhs.section {
+            return lhs.section.rawValue < rhs.section.rawValue
+        }
+        if lhs.rank != rhs.rank {
+            return lhs.rank < rhs.rank
+        }
+        return lhs.itemID.description < rhs.itemID.description
+    }
+
+    private static func persistencePriority(
+        _ lhs: MenuBarItemDescriptor,
+        _ rhs: MenuBarItemDescriptor
+    ) -> Bool {
+        let lhsPriority = lhs.isBarlineControlItem ? 0 : (lhs.section == .visible ? 2 : 1)
+        let rhsPriority = rhs.isBarlineControlItem ? 0 : (rhs.section == .visible ? 2 : 1)
+        if lhsPriority != rhsPriority {
+            return lhsPriority < rhsPriority
+        }
+        if lhs.order != rhs.order {
+            return lhs.order < rhs.order
+        }
+        return lhs.id.description < rhs.id.description
+    }
+
+    private static func sanitizedDescriptor(_ descriptor: MenuBarItemDescriptor) -> MenuBarItemDescriptor {
+        MenuBarItemDescriptor(
+            id: descriptor.id,
+            section: descriptor.section,
+            order: descriptor.order,
+            displayID: descriptor.displayID,
+            isSystemItem: descriptor.isSystemItem,
+            sourceOwnership: descriptor.sourceOwnership,
+            isBarlineControlItem: descriptor.isBarlineControlItem,
+            tagNamespace: descriptor.tagNamespace,
+            title: descriptor.title,
+            displayName: descriptor.displayName,
+            bounds: .zero,
+            isOnScreen: false,
+            isMovable: descriptor.isMovable,
+            canBeHidden: descriptor.canBeHidden,
+            isBentoBox: descriptor.isBentoBox,
+            isSystemClone: descriptor.isSystemClone,
+            isResponsive: descriptor.isResponsive
+        )
     }
 
     private func concealmentConfiguration(
@@ -409,9 +534,7 @@ actor GoldenGateAXSnapshotProvider {
                 logger.fault(
                     "Golden Gate layout transaction rollback failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
                 )
-                throw MenuBarBackendError.operationFailed(
-                    "native concealment rollback failed"
-                )
+                throw MenuBarBackendError.mutationRecoveryFailed
             }
             throw postconditionError
         }

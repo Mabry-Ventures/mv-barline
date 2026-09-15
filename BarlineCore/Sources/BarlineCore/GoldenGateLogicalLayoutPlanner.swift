@@ -33,8 +33,9 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
         }
 
         // Native concealment changes visibility only; macOS retains physical
-        // status-item order. Preserve that order and reject any operation whose
-        // requested insertion slot would require an unperformed native reorder.
+        // status-item order. A cross-section drop expresses a section choice,
+        // not a physical reorder, so preserve native order and ignore its
+        // synthetic destination index. Same-section reorders remain unsupported.
         let ordered = snapshot.items.map { item in
             item.id == operation.itemID
                 ? item.replacingSection(operation.section)
@@ -45,7 +46,9 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
             in: snapshot,
             generation: snapshot.generation &+ 1
         )
-        guard MenuBarMovePlanner().resultMatches(operation, in: candidate, from: snapshot) else {
+        guard source.section != operation.section ||
+            MenuBarMovePlanner().resultMatches(operation, in: candidate, from: snapshot)
+        else {
             throw MenuBarBackendError.operationFailed(
                 "menu bar assignment would require changing native item order"
             )

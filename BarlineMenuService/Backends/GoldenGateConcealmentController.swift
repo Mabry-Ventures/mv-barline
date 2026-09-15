@@ -5,11 +5,12 @@ import OSLog
 @available(macOS 27.0, *)
 final class GoldenGateConcealmentController: @unchecked Sendable {
     private let logger = Logger(category: "GoldenGateConcealmentController")
+    private let transactionGate = AsyncExclusiveOperationGate()
     private let opaqueController: UnsafeMutableRawPointer?
     private var desiredConfiguration = MenuBarConcealmentConfiguration(
         visibleItemIDs: [], concealedItemIDs: []
     )
-    private var temporaryRevealCounts = [MenuBarItemID: Int]()
+    private var temporaryRevealLedger = TemporaryRevealLedger()
     private var appliedResolution: GoldenGateResolvedConcealment?
 
     init() {
@@ -28,50 +29,59 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     }
 
     func configure(_ configuration: MenuBarConcealmentConfiguration) async throws {
-        let previousConfiguration = desiredConfiguration
-        desiredConfiguration = configuration
-        do {
-            try await applyCurrentState()
-        } catch {
-            desiredConfiguration = previousConfiguration
-            throw error
-        }
-    }
-
-    func beginTemporaryReveal(_ item: MenuBarItemID) async throws {
-        temporaryRevealCounts[item, default: 0] += 1
-        do {
-            try await applyCurrentState()
-        } catch {
-            temporaryRevealCounts[item, default: 0] -= 1
-            if temporaryRevealCounts[item] == 0 {
-                temporaryRevealCounts[item] = nil
+        try await transactionGate.withLock { [self] in
+            let previousConfiguration = desiredConfiguration
+            desiredConfiguration = configuration
+            do {
+                try await applyCurrentState()
+            } catch {
+                desiredConfiguration = previousConfiguration
+                throw error
             }
-            throw error
         }
     }
 
-    func endTemporaryReveal(_ item: MenuBarItemID) async {
-        guard let count = temporaryRevealCounts[item] else { return }
-        temporaryRevealCounts[item] = count > 1 ? count - 1 : nil
-        do {
-            try await applyCurrentState()
-        } catch {
-            logger.error("Failed to restore Golden Gate concealment after temporary reveal")
+    @discardableResult
+    func beginTemporaryReveal(_ item: MenuBarItemID) async throws -> Bool {
+        try await transactionGate.withLock { [self] in
+            guard desiredConfiguration.concealedItemIDs.contains(item) else { return false }
+            let candidateLedger = temporaryRevealLedger.beginning(item)
+            try await applyCurrentState(temporaryRevealLedger: candidateLedger)
+            temporaryRevealLedger = candidateLedger
+            return true
         }
     }
 
-    func invalidate() {
-        guard let opaqueController else { return }
-        BLNGoldenGateAssessmentInvalidate(opaqueController)
-        appliedResolution = nil
+    func endTemporaryReveal(_ item: MenuBarItemID) async throws {
+        try await transactionGate.withLock { [self] in
+            guard let candidateLedger = temporaryRevealLedger.ending(item) else { return }
+            try await applyCurrentState(temporaryRevealLedger: candidateLedger)
+            temporaryRevealLedger = candidateLedger
+        }
     }
 
-    private func applyCurrentState() async throws {
+    func invalidate() async {
+        // Restart cleanup must complete even when its caller is cancelled.
+        // Enqueue it behind any accepted state change without inheriting the
+        // caller's cancellation state.
+        await Task.detached { [self] in
+            try? await transactionGate.withLock { [self] in
+                if let opaqueController {
+                    BLNGoldenGateAssessmentInvalidate(opaqueController)
+                }
+                temporaryRevealLedger = TemporaryRevealLedger()
+                appliedResolution = nil
+            }
+        }.value
+    }
+
+    private func applyCurrentState(
+        temporaryRevealLedger: TemporaryRevealLedger? = nil
+    ) async throws {
         guard let opaqueController else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
         }
-        let temporarilyVisible = Set(temporaryRevealCounts.keys)
+        let temporarilyVisible = (temporaryRevealLedger ?? self.temporaryRevealLedger).visibleItemIDs
         let configuration = MenuBarConcealmentConfiguration(
             visibleItemIDs: desiredConfiguration.visibleItemIDs + temporarilyVisible,
             concealedItemIDs: desiredConfiguration.concealedItemIDs.filter {
@@ -84,24 +94,43 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         )
         let bundles = resolved.concealedBundleIdentifiers.sorted() as CFArray
         let systemItems = resolved.allowedSystemItemIdentifiers.sorted().map(NSNumber.init) as CFArray
-        guard BLNGoldenGateAssessmentApply(opaqueController, bundles, systemItems) else {
+        let transaction = BLNGoldenGateAssessmentBegin(opaqueController, bundles, systemItems)
+        guard transaction != 0 else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
         }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
-        while ContinuousClock.now < deadline {
-            try Task.checkCancellation()
-            switch BLNGoldenGateAssessmentActivationState(opaqueController) {
-            case 1:
-                appliedResolution = resolved
-                return
-            case -1:
-                throw MenuBarBackendError.operationFailed(
-                    "Golden Gate native concealment rejected"
-                )
-            default:
-                try await Task.sleep(for: .milliseconds(10))
+        var committed = false
+        defer {
+            if !committed {
+                _ = BLNGoldenGateAssessmentAbort(opaqueController, transaction)
             }
         }
-        throw MenuBarBackendError.timedOut
+        do {
+            let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+            while ContinuousClock.now < deadline {
+                try Task.checkCancellation()
+                switch BLNGoldenGateAssessmentActivationState(opaqueController, transaction) {
+                case 1:
+                    try Task.checkCancellation()
+                    guard BLNGoldenGateAssessmentCommit(opaqueController, transaction) else {
+                        throw MenuBarBackendError.interrupted
+                    }
+                    committed = true
+                    appliedResolution = resolved
+                    return
+                case -1:
+                    throw MenuBarBackendError.operationFailed(
+                        "Golden Gate native concealment rejected"
+                    )
+                case -2:
+                    throw MenuBarBackendError.interrupted
+                default:
+                    try await Task.sleep(for: .milliseconds(10))
+                }
+            }
+            throw MenuBarBackendError.timedOut
+        } catch {
+            logger.error("Golden Gate assertion transaction aborted before commit")
+            throw error
+        }
     }
 }

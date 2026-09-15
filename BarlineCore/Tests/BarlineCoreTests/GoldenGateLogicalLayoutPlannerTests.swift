@@ -21,6 +21,23 @@ struct GoldenGateLogicalLayoutPlannerTests {
         #expect(after.items.filter { $0.section == .visible }.map(\.id) == [id(2)])
     }
 
+    @Test("Cross-section assignment preserves native order regardless of synthetic drop index")
+    func crossSectionAssignmentIgnoresDropIndex() throws {
+        let before = snapshot([
+            item(1, section: .visible, order: 0),
+            item(2, section: .hidden, order: 1),
+            item(3, section: .hidden, order: 2),
+        ])
+
+        let after = try GoldenGateLogicalLayoutPlanner().applying(
+            MenuBarMoveOperation(itemID: id(1), section: .hidden, index: 3),
+            to: before
+        )
+
+        #expect(after.items.map(\.id) == [id(1), id(2), id(3)])
+        #expect(after.items.allSatisfy { $0.section == .hidden })
+    }
+
     @Test("Moves a hidden item back to its native visible-order position")
     func restoresVisibleItem() throws {
         let before = snapshot([

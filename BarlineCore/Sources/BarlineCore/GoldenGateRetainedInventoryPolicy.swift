@@ -8,12 +8,13 @@ public enum GoldenGateRetainedInventoryPolicy {
         live snapshot: MenuBarSnapshot,
         retainedDescriptors: [MenuBarItemID: MenuBarItemDescriptor],
         assignments: [MenuBarItemID: GoldenGateLogicalAssignment],
-        runningBundleIdentifiers: Set<String>
+        runningBundleIdentifiers: Set<String>,
+        barlineBundleIdentifier: String
     ) -> MenuBarSnapshot {
         let normalizedRunningBundles = Set(runningBundleIdentifiers.map {
             $0.lowercased()
         })
-        let liveIDs = Set(snapshot.items.map(\.id))
+        let liveIDSet = Set(snapshot.items.map(\.id))
         let fallbackDisplayID = snapshot.displayIDs.count == 1
             ? snapshot.displayIDs.first
             : nil
@@ -21,20 +22,11 @@ public enum GoldenGateRetainedInventoryPolicy {
         let retained = assignments.values
             .filter { assignment in
                 assignment.section != .visible &&
-                    !liveIDs.contains(assignment.itemID) &&
+                    !liveIDSet.contains(assignment.itemID) &&
                     assignment.itemID.isPlausiblyStable &&
                     normalizedRunningBundles.contains(
                         assignment.itemID.bundleIdentifier.lowercased()
                     )
-            }
-            .sorted { lhs, rhs in
-                if lhs.section != rhs.section {
-                    return lhs.section.rawValue < rhs.section.rawValue
-                }
-                if lhs.rank != rhs.rank {
-                    return lhs.rank < rhs.rank
-                }
-                return lhs.itemID.description < rhs.itemID.description
             }
             .compactMap { assignment -> MenuBarItemDescriptor? in
                 guard let descriptor = retainedDescriptors[assignment.itemID],
@@ -46,7 +38,9 @@ public enum GoldenGateRetainedInventoryPolicy {
                 return MenuBarItemDescriptor(
                     id: descriptor.id,
                     section: assignment.section,
-                    order: assignment.rank,
+                    // `order` is global native order. Section-relative ranks
+                    // are not a safe substitute after AX drops a hidden item.
+                    order: descriptor.order,
                     displayID: displayID,
                     isSystemItem: descriptor.isSystemItem,
                     sourceOwnership: descriptor.sourceOwnership,
@@ -56,7 +50,7 @@ public enum GoldenGateRetainedInventoryPolicy {
                     displayName: descriptor.displayName,
                     bounds: .zero,
                     isOnScreen: false,
-                    isMovable: descriptor.isMovable,
+                    isMovable: false,
                     canBeHidden: descriptor.canBeHidden,
                     isBentoBox: descriptor.isBentoBox,
                     isSystemClone: descriptor.isSystemClone,
@@ -64,8 +58,70 @@ public enum GoldenGateRetainedInventoryPolicy {
                 )
             }
 
-        let items = (snapshot.items + retained).enumerated().map { index, item in
-            item.replacing(order: index)
+        let retainedByID = Dictionary(uniqueKeysWithValues: retained.map { ($0.id, $0) })
+        let liveByID = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
+        let eligibleIDs = Set(liveByID.keys).union(retainedByID.keys)
+        let previousOrder = retainedDescriptors.values
+            .filter { eligibleIDs.contains($0.id) }
+            .sorted {
+                $0.order == $1.order
+                    ? $0.id.description < $1.id.description
+                    : $0.order < $1.order
+            }
+            .map(\.id)
+
+        // Keep prior slots for AX-absent items, while letting the current live
+        // sequence authoritatively reorder every item it can still observe.
+        let previousIDSet = Set(previousOrder)
+        var currentKnownLive = snapshot.items.map(\.id).filter(previousIDSet.contains)
+        var orderedIDs = previousOrder.map { priorID -> MenuBarItemID in
+            if liveByID[priorID] != nil, !currentKnownLive.isEmpty {
+                return currentKnownLive.removeFirst()
+            }
+            return priorID
+        }
+
+        // Insert newly observed live items adjacent to their nearest live
+        // neighbor. This preserves live AX order without moving retained gaps.
+        let liveIDs = snapshot.items.map(\.id)
+        for (liveIndex, liveID) in liveIDs.enumerated() where !orderedIDs.contains(liveID) {
+            if let nextID = liveIDs.dropFirst(liveIndex + 1).first(where: orderedIDs.contains),
+               let index = orderedIDs.firstIndex(of: nextID)
+            {
+                orderedIDs.insert(liveID, at: index)
+            } else if let previousID = liveIDs[..<liveIndex].last(where: orderedIDs.contains),
+                      let index = orderedIDs.firstIndex(of: previousID)
+            {
+                orderedIDs.insert(liveID, at: index + 1)
+            } else {
+                orderedIDs.append(liveID)
+            }
+        }
+
+        let ordered = orderedIDs.compactMap { liveByID[$0] ?? retainedByID[$0] }
+        let configuration = MenuBarConcealmentConfiguration(
+            visibleItemIDs: ordered.filter { !$0.isBarlineControlItem && $0.section == .visible }.map(\.id),
+            concealedItemIDs: ordered.filter { !$0.isBarlineControlItem && $0.section != .visible }.map(\.id)
+        )
+        let resolved = GoldenGateConcealmentPolicy.resolve(
+            configuration,
+            barlineBundleIdentifier: barlineBundleIdentifier
+        )
+        let allItemIDs = ordered.map(\.id)
+        let items = ordered.enumerated().map { index, item in
+            let section = !item.isBarlineControlItem &&
+                item.section != .visible &&
+                !GoldenGateConcealmentPolicy.supportsConcealing(item.id, in: resolved)
+                ? MenuBarSection.visible
+                : item.section
+            let isMovable = item.canBeHidden &&
+                !item.isBarlineControlItem &&
+                GoldenGateConcealmentPolicy.supportsIndependentAssignment(
+                    item.id,
+                    among: allItemIDs,
+                    barlineBundleIdentifier: barlineBundleIdentifier
+                )
+            return item.replacing(section: section, order: index, isMovable: isMovable)
         }
         return MenuBarSnapshot(
             generation: snapshot.generation,

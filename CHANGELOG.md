@@ -1,5 +1,22 @@
 # Changelog
 
+## 1.0.16 (build 84) — September 15, 2026
+
+- Make macOS 27 native concealment a token-bound two-phase transaction. A
+  timeout, cancellation, delayed callback, or missing callback aborts only the
+  pending candidate and can no longer replace the last accepted assertion.
+- Serialize native configuration changes across suspension and preserve
+  reference-counted reveal ownership, so retries and overlapping activation
+  cannot race each other or report a temporary collision as missing support.
+- Reveal AX-absent hidden items natively before resolving fresh Accessibility
+  identity and geometry, then retry reconcealment until the accepted logical
+  state is restored. macOS 26 keeps its established physical-move workflow.
+- Preserve retained items in their stable global native slots, accept
+  cross-section assignment without inventing a physical reorder, and recompute
+  bundle-level assignment eligibility over the complete merged inventory.
+- Persist retained inventory without runtime process identifiers, geometry, or
+  live-screen state.
+
 ## 1.0.16 (build 83) — September 15, 2026
 
 - Keep successfully concealed macOS 27 items in a bounded retained inventory,

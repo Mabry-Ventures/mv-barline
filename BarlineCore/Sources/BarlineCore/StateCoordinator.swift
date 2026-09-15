@@ -460,6 +460,7 @@ public actor MenuBarStateCoordinator {
             throw MenuBarBackendError.operationFailed("no last-known-good snapshot")
         }
         let before = try await validatedStartingSnapshot(now: now)
+        let moveDestinationSupport = await backend.capabilities.moveDestinationSupport
         guard !before.menuTrackingIsActive else {
             throw MenuBarBackendError.unsafeMenuTracking
         }
@@ -483,7 +484,8 @@ public actor MenuBarStateCoordinator {
                    !MenuBarMovePlanner().resultMatches(
                        operation,
                        in: snapshot,
-                       from: before
+                       from: before,
+                       destinationSupport: moveDestinationSupport
                    )
                 {
                     throw MenuBarBackendError.operationFailed(
@@ -523,7 +525,11 @@ public actor MenuBarStateCoordinator {
             guard await backend.capabilities.canRestore else {
                 currentSnapshot = nil
                 activeProfileID = nil
-                throw mutationError
+                // Once apply has started, an error is not evidence that the
+                // native side effect did not occur. Without a verified restore
+                // path, report the layout as unknown instead of promising that
+                // the prior state survived.
+                throw MenuBarBackendError.mutationRecoveryFailed
             }
             do {
                 let rollbackCandidate = try await compensationSnapshot(restoring: before)
@@ -539,12 +545,9 @@ public actor MenuBarStateCoordinator {
                 lastKnownGoodSnapshot = rollbackSnapshot
                 lastKnownGoodProfileID = activeProfileID
             } catch {
-                let rollbackError = error
                 currentSnapshot = nil
                 activeProfileID = nil
-                throw MenuBarBackendError.operationFailed(
-                    "mutation failed: \(mutationError); rollback failed: \(rollbackError)"
-                )
+                throw MenuBarBackendError.mutationRecoveryFailed
             }
             throw mutationError
         }
