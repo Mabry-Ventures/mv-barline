@@ -581,7 +581,11 @@ extension MenuBarItemManager {
         guard #available(macOS 27.0, *) else { return }
         goldenGateConcealmentSyncTask?.cancel()
         goldenGateConcealmentSyncTask = Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(50))
+            // The macOS 27 inventory provider caches snapshots for 100 ms.
+            // Debounce beyond that window so the ordinary path obtains a fresh
+            // generation immediately; the coordinator's bounded retry remains
+            // the safety net for scheduler delay and transient provider errors.
+            try? await Task.sleep(for: .milliseconds(125))
             guard !Task.isCancelled, let self, let appState else { return }
 
             var concealedSections = [BarlineCore.MenuBarSection]()

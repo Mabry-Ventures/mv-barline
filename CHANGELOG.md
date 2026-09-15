@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.16 (build 87) — September 15, 2026
+## 1.0.16 (build 88) — September 15, 2026
 
 - Serialize macOS 27 presentation synchronization with moves, saved-layout
   activation, Focus changes, history, rollback, and helper recovery. A delayed
@@ -19,6 +19,8 @@
   deadline-bounded handshakes in the coordinator concurrency regression tests.
 - Retry a serialized macOS 27 presentation refresh through the provider's
   short discovery-cache window instead of dropping the native update.
+- Schedule routine presentation reconciliation beyond the provider cache window
+  to avoid unnecessary mutation-turn contention while retaining bounded retry.
 
 ## 1.0.16 (build 84) — September 15, 2026
 
