@@ -31,7 +31,10 @@ module InstalledEvidenceWriter
     text.each_line.with_index do |line, index|
       stripped = line.strip
       if stripped.start_with?('{')
-        object = JSON.parse(stripped, object_class: InstalledEvidence::UniqueKeys, max_nesting: 16)
+        object = JSON.parse(
+          stripped, object_class: InstalledEvidence::UniqueKeys,
+          allow_duplicate_key: false, max_nesting: 16
+        )
         check(object.is_a?(Hash), 'log_record_not_object')
         %w[verdict interactionVerdict].each do |key|
           check(!object.key?(key) || object[key] == 'PASS', 'failed_log_record')

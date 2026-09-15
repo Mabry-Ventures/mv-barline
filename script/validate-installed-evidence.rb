@@ -112,7 +112,10 @@ module InstalledEvidence
       path = File.join(directory, name)
       require_check(File.file?(path) && !File.symlink?(path), 'receipt_not_regular_file')
       require_check(File.size(path).between?(2, MAX_BYTES), 'invalid_receipt_size')
-      receipt = JSON.parse(File.read(path, MAX_BYTES + 1), object_class: UniqueKeys, max_nesting: 16)
+      receipt = JSON.parse(
+        File.read(path, MAX_BYTES + 1), object_class: UniqueKeys,
+        allow_duplicate_key: false, max_nesting: 16
+      )
       key = validate_receipt(receipt, options[:source], options[:executable])
       require_check(!seen.key?(key), 'duplicate_evidence_receipt')
       seen[key] = true
