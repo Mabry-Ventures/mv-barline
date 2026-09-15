@@ -1271,3 +1271,8 @@ that host. The generic input-idle guard treated the device flag as a held key,
 timed out after ten seconds, and rejected every item activation. Build 74 limits
 that guard to modifiers that can actually change pointer routing. Build 73 is
 rejected; both exact OS lanes and installed journeys must be repeated.
+
+Build 74 was rejected before packaging because the clean application compile
+found the modifier adapter's missing explicit AppKit import. Build 75 adds that
+dependency at the app boundary; all qualification evidence must bind to its new
+source SHA and executable.

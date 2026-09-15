@@ -4,6 +4,7 @@
 //
 
 import BarlineCore
+import AppKit
 import CoreGraphics
 import OSLog
 

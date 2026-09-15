@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.15 (build 75) — September 14, 2026
+
+- Complete the input-idle fix with an explicit AppKit dependency at the app
+  boundary. Build 74 was rejected by the clean Debug and Release compile gate.
+
 ## 1.0.15 (build 74) — September 14, 2026
 
 - Ignore persistent keyboard-device flags such as Numeric Pad and Caps Lock
