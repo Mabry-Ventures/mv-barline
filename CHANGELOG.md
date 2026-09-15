@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.15 (build 72) — September 14, 2026
+
+- Render the macOS 27 menu bar inventory entirely with SwiftUI semantic
+  foregrounds and backgrounds so dark and tinted Settings appearances cannot
+  produce invisible labels on a light AppKit-resolved surface.
+- Stop consuming unreliable macOS 27 per-item captures in the read-only layout
+  inventory. Application items use their app icon, while system items receive
+  a named, deterministic SF Symbol instead of blank or stretched placeholders.
+
 ## 1.0.15 (build 71) — September 14, 2026
 
 - Fail the dropped-control-click recovery closed unless AppKit exposes a

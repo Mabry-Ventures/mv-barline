@@ -183,6 +183,46 @@ public enum MenuBarFallbackArtworkLayout {
     }
 }
 
+/// Stable presentation choices for status items whose native pixels are not
+/// available. macOS 27 exposes item semantics through Accessibility, but no
+/// longer guarantees a usable per-item WindowServer image.
+public enum MenuBarInventoryPresentation {
+    public static func fallbackSymbolName(displayName: String, title: String?) -> String {
+        let value = "\(displayName) \(title ?? "")".lowercased()
+        if value.contains("wi-fi") || value.contains("wifi") {
+            return "wifi"
+        }
+        if value.contains("battery") || value.contains("power") {
+            return "battery.100"
+        }
+        if value.contains("clock") || value.contains("date") || value.contains("time") {
+            return "clock"
+        }
+        if value.contains("controlcenter") || value.contains("control center") {
+            return "switch.2"
+        }
+        if value.contains("bluetooth") {
+            return "wave.3.right"
+        }
+        if value.contains("volume") || value.contains("sound") || value.contains("audio") {
+            return "speaker.wave.2"
+        }
+        if value.contains("focus") || value.contains("do not disturb") {
+            return "moon"
+        }
+        if value.contains("spotlight") || value.contains("search") {
+            return "magnifyingglass"
+        }
+        if value.contains("display") || value.contains("screen mirroring") {
+            return "rectangle.on.rectangle"
+        }
+        if value.contains("vpn") {
+            return "lock.shield"
+        }
+        return "circle.grid.2x2"
+    }
+}
+
 /// The source application is distinct from the WindowServer host. On macOS 26,
 /// Control Center hosts third-party items; an unresolved host is not a system item.
 public enum MenuBarSourceOwnership: String, Codable, Hashable, Sendable {

@@ -3,6 +3,7 @@
 //  Barline
 //
 
+import BarlineCore
 import SwiftUI
 
 struct LayoutBar: View {
@@ -34,12 +35,15 @@ struct LayoutBar: View {
         if #available(macOS 27.0, *) {
             MenuBarInventoryBar(
                 itemManager: appState.itemManager,
-                imageCache: imageCache,
                 section: section
             )
             .frame(height: 48)
             .frame(maxWidth: .infinity)
-            .background(Color(nsColor: .controlBackgroundColor))
+            // Keep foreground and background inside the same SwiftUI
+            // appearance environment. NSColor.controlBackgroundColor can
+            // resolve as Aqua on macOS 27 while this window remains dark,
+            // producing light labels on a light surface.
+            .background(Color.primary.opacity(0.055))
             .containerShape(backgroundShape)
             .clipShape(backgroundShape)
             .contentShape([.interaction, .focusEffect], backgroundShape)
@@ -73,7 +77,6 @@ struct LayoutBar: View {
 @available(macOS 27.0, *)
 private struct MenuBarInventoryBar: View {
     @ObservedObject var itemManager: MenuBarItemManager
-    @ObservedObject var imageCache: MenuBarItemImageCache
 
     let section: MenuBarSection.Name
 
@@ -91,10 +94,7 @@ private struct MenuBarInventoryBar: View {
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
                     ForEach(items, id: \.stableID) { item in
-                        MenuBarInventoryItem(
-                            item: item,
-                            capturedImage: imageCache.images[item.stableID]
-                        )
+                        MenuBarInventoryItem(item: item)
                     }
                 }
                 .padding(.horizontal, 10)
@@ -119,34 +119,47 @@ private struct MenuBarInventoryBar: View {
 @available(macOS 27.0, *)
 private struct MenuBarInventoryItem: View {
     let item: MenuBarItem
-    let capturedImage: MenuBarItemImageCache.CapturedImage?
 
     private var displayName: String {
         item.isControlItem ? "Barline" : item.displayName
     }
 
-    private var image: NSImage {
-        capturedImage?.nsImage
-            ?? item.sourceApplication?.icon
-            ?? item.owningApplication?.icon
-            ?? NSImage(systemSymbolName: "app.dashed", accessibilityDescription: displayName)
-            ?? NSImage()
+    private var applicationIcon: NSImage? {
+        guard item.isControlItem || !item.stableID.bundleIdentifier.hasPrefix("com.apple.") else {
+            return nil
+        }
+        return item.sourceApplication?.icon ?? item.owningApplication?.icon
+    }
+
+    private var fallbackSymbolName: String {
+        MenuBarInventoryPresentation.fallbackSymbolName(
+            displayName: displayName,
+            title: item.title
+        )
     }
 
     var body: some View {
         HStack(spacing: 7) {
-            Image(nsImage: image)
-                .resizable()
-                .scaledToFit()
-                .frame(width: 22, height: 22)
+            if let applicationIcon {
+                Image(nsImage: applicationIcon)
+                    .resizable()
+                    .scaledToFit()
+                    .frame(width: 20, height: 20)
+            } else {
+                Image(systemName: fallbackSymbolName)
+                    .symbolRenderingMode(.monochrome)
+                    .foregroundStyle(.secondary)
+                    .frame(width: 20, height: 20)
+            }
 
             Text(displayName)
                 .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(.primary)
                 .lineLimit(1)
         }
         .padding(.horizontal, 10)
         .frame(height: 34)
-        .background(Color.secondary.opacity(0.12), in: Capsule())
+        .background(Color.primary.opacity(0.075), in: Capsule())
         .overlay {
             Capsule().strokeBorder(Color.secondary.opacity(0.16))
         }

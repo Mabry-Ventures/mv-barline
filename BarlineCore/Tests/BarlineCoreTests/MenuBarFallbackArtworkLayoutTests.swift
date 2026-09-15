@@ -3,6 +3,13 @@ import Testing
 
 @Suite("Menu bar fallback artwork layout")
 struct MenuBarFallbackArtworkLayoutTests {
+    @Test("macOS 27 inventory fallbacks remain semantic")
+    func inventoryFallbackSymbols() {
+        #expect(MenuBarInventoryPresentation.fallbackSymbolName(displayName: "Wi-Fi", title: nil) == "wifi")
+        #expect(MenuBarInventoryPresentation.fallbackSymbolName(displayName: "Control Center", title: "Battery") == "battery.100")
+        #expect(MenuBarInventoryPresentation.fallbackSymbolName(displayName: "Unknown", title: nil) == "circle.grid.2x2")
+    }
+
     @Test("A wide item keeps its geometry while its fallback stays icon-sized and centered")
     func wideItem() {
         let rect = MenuBarFallbackArtworkLayout.drawingRect(

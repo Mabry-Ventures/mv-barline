@@ -1249,3 +1249,10 @@ target menu action was then misclassified through the hosted button's broad
 scene geometry and armed the same recovery fallback. Build 70 is rejected.
 Build 71 requires exact status-item-sized accessibility geometry and a true
 menu-bar event before recovery is eligible.
+
+Build 71 passed both exact clean full OS gates, but macOS 27 visual inspection
+found that the read-only inventory mixed an AppKit-resolved light control
+background with the dark SwiftUI Settings foreground and still consumed
+unreliable per-item captures. Build 72 uses one semantic SwiftUI appearance
+boundary and deterministic named artwork for macOS 27. Exact signed visual,
+installed-journey, and both-OS release qualification remain required.
