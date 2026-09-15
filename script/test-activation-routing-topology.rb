@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 manager = File.read('Barline/MenuBar/MenuBarItems/MenuBarItemManager.swift')
+coordinator = File.read('BarlineCore/Sources/BarlineCore/StateCoordinator.swift')
 backend = File.read('Barline/MenuBar/MenuBarItems/XPCMenuBarBackend.swift')
 shelf = File.read('Barline/MenuBar/BarlineShelf/BarlineShelf.swift')
 helper_backend = File.read('BarlineMenuService/Backends/CompatibilityBackends.swift')
@@ -19,8 +20,10 @@ item_projection = shelf.split('private struct BarlineShelfItemView', 2).last
 abort('shelf activation bypasses the compatibility coordinator') if
   manager.include?('BarlineMenuService.Connection.shared.activate')
 
-unless manager.match?(/compatibilityCoordinator\.perform\(\s*\.activate/m)
-  abort('shelf activation is not routed through the compatibility coordinator')
+unless manager.match?(/compatibilityCoordinator\.activateItem\(/) &&
+       coordinator.match?(/public func activateItem\(.*?try await backend\.activate/m) &&
+       !coordinator.match?(/case activate\(MenuBarItemID, MenuBarMouseButton\)/)
+  abort('shelf activation is not isolated from transactional layout mutations')
 end
 
 unless backend.match?(/#available\(macOS 27\.0, \*\).*goldenGateProvider\.activate/m)

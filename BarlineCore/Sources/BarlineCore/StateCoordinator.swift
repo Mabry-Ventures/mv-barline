@@ -13,13 +13,10 @@ public enum MenuBarMutation: Sendable {
     case move(MenuBarMoveOperation)
     case transientMove(MenuBarMoveOperation)
     case reveal(MenuBarItemID)
-    case activate(MenuBarItemID, MenuBarMouseButton)
     case restoreLastKnownGood
 
     fileprivate var recordsLayoutHistory: Bool {
-        if case .activate = self {
-            false
-        } else if case .transientMove = self {
+        if case .transientMove = self {
             false
         } else {
             true
@@ -30,7 +27,7 @@ public enum MenuBarMutation: Sendable {
         switch self {
         case let .move(operation), let .transientMove(operation):
             operation
-        case .reveal, .activate, .restoreLastKnownGood:
+        case .reveal, .restoreLastKnownGood:
             nil
         }
     }
@@ -402,6 +399,38 @@ public actor MenuBarStateCoordinator {
         interactionID: UUID? = nil
     ) async throws -> MenuBarSnapshot {
         try await perform(mutation, expectedGeneration: expectedGeneration as UInt64?, now: now, interactionID: interactionID)
+    }
+
+    /// Delivers a status-item activation without treating the click as a
+    /// transactional layout mutation. The target may open a menu, mutate its
+    /// own status item, or perform a direct action while handling the event;
+    /// none of those side effects are a Barline layout postcondition.
+    public func activateItem(
+        _ itemID: MenuBarItemID,
+        button: MenuBarMouseButton,
+        expectedGeneration: UInt64? = nil,
+        now: Date? = nil,
+        interactionID: UUID? = nil
+    ) async throws {
+        await acquireMutationTurn()
+        defer { releaseMutationTurn() }
+        try requireItemInteraction(interactionID)
+        try Task.checkCancellation()
+        if let expectedGeneration {
+            try requireCurrentGeneration(expectedGeneration)
+        }
+        let before = try await validatedStartingSnapshot(now: now)
+        guard !before.menuTrackingIsActive else {
+            throw MenuBarBackendError.unsafeMenuTracking
+        }
+        guard before.items.contains(where: { $0.id == itemID }) else {
+            throw MenuBarBackendError.staleItem(itemID)
+        }
+
+        // A successful transport return is the activation acknowledgement.
+        // Do not snapshot, validate, roll back, or check cancellation after
+        // delivery: the target owns every side effect from this point onward.
+        try await backend.activate(itemID, button: button)
     }
 
     private func perform(
@@ -1617,7 +1646,7 @@ public actor MenuBarStateCoordinator {
         let itemID: MenuBarItemID? = switch mutation {
         case let .move(operation), let .transientMove(operation):
             operation.itemID
-        case let .reveal(referencedItemID), let .activate(referencedItemID, _):
+        case let .reveal(referencedItemID):
             referencedItemID
         case .restoreLastKnownGood:
             nil
@@ -1777,8 +1806,6 @@ public actor MenuBarStateCoordinator {
             _ = try await backend.move(operation)
         case let .reveal(itemID):
             _ = try await backend.reveal(itemID)
-        case let .activate(itemID, button):
-            try await backend.activate(itemID, button: button)
         case .restoreLastKnownGood:
             guard let restoreTarget else {
                 throw MenuBarBackendError.operationFailed("no last-known-good snapshot")

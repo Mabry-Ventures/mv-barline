@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.15 (build 68) — September 14, 2026
+
+- Treat status-item activation as an acknowledged command instead of a
+  transactional layout mutation. After a target accepts its click, Barline no
+  longer performs a post-delivery inventory validation or rollback that can
+  misclassify the successful activation and reopen the shelf on macOS 27.
+
 ## 1.0.15 (build 67) — September 14, 2026
 
 - Treat every click owned by Barline's shelf as a shelf interaction, even in

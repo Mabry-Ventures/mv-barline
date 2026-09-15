@@ -1099,8 +1099,9 @@ extension MenuBarItemManager {
             ) else {
                 throw MenuBarBackendError.staleItem(item.stableID)
             }
-            _ = try await appState.compatibilityCoordinator.perform(
-                .activate(resolvedID, button),
+            try await appState.compatibilityCoordinator.activateItem(
+                resolvedID,
+                button: button,
                 expectedGeneration: snapshot.generation,
                 interactionID: interactionID
             )

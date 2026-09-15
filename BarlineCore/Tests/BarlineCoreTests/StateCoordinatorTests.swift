@@ -2820,7 +2820,7 @@ struct StateCoordinatorTests {
         #expect(await coordinator.backendHealth.state == .healthy)
     }
 
-    @Test("Move and activate mutation branches use validated stable IDs")
+    @Test("Move and status-item activation use validated stable IDs")
     func appliesMoveAndActivateBranches() async throws {
         let first = makeSnapshot(generation: 1, count: 2)
         let second = makeProfileSnapshot(
@@ -2840,13 +2840,19 @@ struct StateCoordinatorTests {
 
         // No explicit refresh: the mutation must establish a validated starting snapshot itself.
         _ = try await coordinator.perform(.move(move), now: first.capturedAt)
-        _ = try await coordinator.perform(
-            .activate(first.items[1].id, .right),
+        try await coordinator.activateItem(
+            first.items[1].id,
+            button: .right,
+            expectedGeneration: second.generation,
             now: third.capturedAt
         )
 
         #expect(await backend.moveOperations == [move])
         #expect(await backend.activations == [.init(itemID: first.items[1].id, button: .right)])
+        #expect(await backend.snapshotCallCount == 2)
+        #expect(await coordinator.currentSnapshot == second)
+
+        _ = try await coordinator.refresh(now: third.capturedAt)
         #expect(await coordinator.currentSnapshot == third)
     }
 
@@ -2910,22 +2916,29 @@ struct StateCoordinatorTests {
         #expect(await coordinator.canRedo == false)
     }
 
-    @Test("Click activation does not create a layout undo checkpoint")
+    @Test("Click delivery does not validate a post-activation snapshot or create undo history")
     func clickDoesNotCreateUndoHistory() async throws {
         let before = makeSnapshot(generation: 1, count: 2)
-        let afterClick = makeSnapshot(generation: 2, count: 2)
-        let backend = FakeBackend(snapshots: [before, afterClick])
+        // If activation incorrectly requests another snapshot, this unchanged
+        // generation would be rejected as stale after the target handled the click.
+        let staleAfterClick = makeSnapshot(generation: 1, count: 2)
+        let backend = FakeBackend(snapshots: [before, staleAfterClick])
         let coordinator = MenuBarStateCoordinator(
             backend: backend,
             retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
         )
         _ = try await coordinator.refresh(now: before.capturedAt)
 
-        _ = try await coordinator.perform(
-            .activate(before.items[0].id, .left),
-            now: afterClick.capturedAt
+        try await coordinator.activateItem(
+            before.items[0].id,
+            button: .left,
+            expectedGeneration: before.generation,
+            now: staleAfterClick.capturedAt
         )
 
+        #expect(await backend.snapshotCallCount == 1)
+        #expect(await backend.activations == [.init(itemID: before.items[0].id, button: .left)])
+        #expect(await coordinator.currentSnapshot == before)
         #expect(await coordinator.canUndo == false)
         #expect(await coordinator.canRedo == false)
     }
@@ -2936,15 +2949,13 @@ struct StateCoordinatorTests {
         let afterReveal = makeSnapshot(generation: 2, count: 2)
         let liveAfterReveal = makeSnapshot(generation: 3, count: 2)
         let restoredBefore = makeSnapshot(generation: 4, count: 2)
-        let afterClick = makeSnapshot(generation: 5, count: 2)
-        let liveAfterClick = makeSnapshot(generation: 6, count: 2)
-        let restoredAfter = makeSnapshot(generation: 7, count: 2)
+        let liveAfterClick = makeSnapshot(generation: 5, count: 2)
+        let restoredAfter = makeSnapshot(generation: 6, count: 2)
         let backend = FakeBackend(snapshots: [
             before,
             afterReveal,
             liveAfterReveal,
             restoredBefore,
-            afterClick,
             liveAfterClick,
             restoredAfter,
         ])
@@ -2956,9 +2967,11 @@ struct StateCoordinatorTests {
         _ = try await coordinator.perform(.reveal(before.items[0].id), now: afterReveal.capturedAt)
         _ = try await coordinator.undo(now: restoredBefore.capturedAt)
 
-        _ = try await coordinator.perform(
-            .activate(before.items[1].id, .right),
-            now: afterClick.capturedAt
+        try await coordinator.activateItem(
+            before.items[1].id,
+            button: .right,
+            expectedGeneration: restoredBefore.generation,
+            now: liveAfterClick.capturedAt
         )
 
         #expect(await coordinator.canRedo)
