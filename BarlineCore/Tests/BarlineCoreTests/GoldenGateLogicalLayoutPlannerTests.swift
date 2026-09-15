@@ -21,7 +21,7 @@ struct GoldenGateLogicalLayoutPlannerTests {
         #expect(after.items.filter { $0.section == .visible }.map(\.id) == [id(2)])
     }
 
-    @Test("Moves a hidden item back to visible at the requested insertion point")
+    @Test("Moves a hidden item back to its native visible-order position")
     func restoresVisibleItem() throws {
         let before = snapshot([
             item(1, section: .hidden, order: 0),
@@ -30,29 +30,28 @@ struct GoldenGateLogicalLayoutPlannerTests {
         ])
 
         let after = try GoldenGateLogicalLayoutPlanner().applying(
-            MenuBarMoveOperation(itemID: id(1), section: .visible, index: 1),
+            MenuBarMoveOperation(itemID: id(1), section: .visible, index: 0),
             to: before
         )
 
         #expect(after.items.filter { $0.section == .hidden }.isEmpty)
-        #expect(after.items.filter { $0.section == .visible }.map(\.id) == [id(2), id(1), id(3)])
+        #expect(after.items.filter { $0.section == .visible }.map(\.id) == [id(1), id(2), id(3)])
     }
 
-    @Test("Reorders an item in its current section without duplicating it")
-    func reordersWithinSection() throws {
+    @Test("Rejects a same-section reorder that native concealment cannot perform")
+    func rejectsReorderWithinSection() {
         let before = snapshot([
             item(1, section: .visible, order: 0),
             item(2, section: .visible, order: 1),
             item(3, section: .visible, order: 2),
         ])
 
-        let after = try GoldenGateLogicalLayoutPlanner().applying(
-            MenuBarMoveOperation(itemID: id(1), section: .visible, index: 3),
-            to: before
-        )
-
-        #expect(after.items.map(\.id) == [id(2), id(3), id(1)])
-        #expect(Set(after.items.map(\.id)).count == before.items.count)
+        #expect(throws: MenuBarBackendError.self) {
+            try GoldenGateLogicalLayoutPlanner().applying(
+                MenuBarMoveOperation(itemID: id(1), section: .visible, index: 3),
+                to: before
+            )
+        }
     }
 
     @Test("Rejects unsupported independent assignments")
@@ -157,8 +156,8 @@ struct GoldenGateLogicalLayoutPlannerTests {
         let restored = try GoldenGateLogicalLayoutPlanner().restoring(target, to: current)
 
         #expect(restored.generation == current.generation + 1)
-        #expect(restored.items.map(\.id) == [id(2), id(1)])
-        #expect(restored.items.map(\.section) == [.visible, .hidden])
+        #expect(restored.items.map(\.id) == [id(1), id(2)])
+        #expect(restored.items.map(\.section) == [.hidden, .visible])
     }
 
     @Test("Restore rejects moving an immovable item")
@@ -195,6 +194,22 @@ struct GoldenGateLogicalLayoutPlannerTests {
         let target = snapshot([
             item(1, section: .visible, order: 0),
             item(1, section: .hidden, order: 1),
+        ])
+
+        #expect(throws: MenuBarBackendError.self) {
+            try GoldenGateLogicalLayoutPlanner().restoring(target, to: current)
+        }
+    }
+
+    @Test("Restore rejects an order that native concealment cannot perform")
+    func restoreRejectsNativeReorder() {
+        let current = snapshot([
+            item(1, section: .visible, order: 0),
+            item(2, section: .visible, order: 1),
+        ])
+        let target = snapshot([
+            item(2, section: .visible, order: 0),
+            item(1, section: .visible, order: 1),
         ])
 
         #expect(throws: MenuBarBackendError.self) {

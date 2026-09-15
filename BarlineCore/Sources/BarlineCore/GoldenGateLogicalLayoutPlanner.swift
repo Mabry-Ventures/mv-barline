@@ -32,28 +32,13 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
             throw MenuBarBackendError.operationFailed("menu bar item cannot be hidden")
         }
 
-        var destinationItems = snapshot.items.filter {
-            $0.section == operation.section && $0.id != operation.itemID
-        }
-        let previousItems = snapshot.items.filter { $0.section == operation.section }
-        var insertionIndex = min(max(operation.index, 0), previousItems.count)
-        if let priorIndex = previousItems.firstIndex(where: { $0.id == operation.itemID }),
-           priorIndex < insertionIndex
-        {
-            insertionIndex -= 1
-        }
-        insertionIndex = min(insertionIndex, destinationItems.count)
-        destinationItems.insert(source.replacingSection(operation.section), at: insertionIndex)
-
-        var ordered = [MenuBarItemDescriptor]()
-        for section in MenuBarSection.allCases {
-            if section == operation.section {
-                ordered.append(contentsOf: destinationItems)
-            } else {
-                ordered.append(contentsOf: snapshot.items.filter {
-                    $0.section == section && $0.id != operation.itemID
-                })
-            }
+        // Native concealment changes visibility only; macOS retains physical
+        // status-item order. Preserve that order and reject any operation whose
+        // requested insertion slot would require an unperformed native reorder.
+        let ordered = snapshot.items.map { item in
+            item.id == operation.itemID
+                ? item.replacingSection(operation.section)
+                : item
         }
         let candidate = replacingItems(
             ordered,
@@ -61,7 +46,9 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
             generation: snapshot.generation &+ 1
         )
         guard MenuBarMovePlanner().resultMatches(operation, in: candidate, from: snapshot) else {
-            throw MenuBarBackendError.operationFailed("menu bar assignment did not reach requested section")
+            throw MenuBarBackendError.operationFailed(
+                "menu bar assignment would require changing native item order"
+            )
         }
         return candidate
     }
@@ -145,9 +132,9 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
         guard current.items.allSatisfy({ targetByID[$0.id] != nil }) else {
             throw MenuBarBackendError.operationFailed("saved layout no longer matches the menu bar")
         }
-        let ordered: [MenuBarItemDescriptor] = try target.items.enumerated().compactMap { index, targetItem in
-            guard let currentItem = current.items.first(where: { $0.id == targetItem.id }) else {
-                return nil
+        let ordered: [MenuBarItemDescriptor] = try current.items.enumerated().map { index, currentItem in
+            guard let targetItem = targetByID[currentItem.id] else {
+                throw MenuBarBackendError.operationFailed("saved layout no longer matches the menu bar")
             }
             if currentItem.section != targetItem.section {
                 guard currentItem.isMovable else {
@@ -162,6 +149,18 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
                 }
             }
             return currentItem.replacing(section: targetItem.section, order: index)
+        }
+        let currentIDs = Set(current.items.map(\.id))
+        for section in MenuBarSection.allCases {
+            let requestedOrder = target.items
+                .filter { $0.section == section && currentIDs.contains($0.id) }
+                .map(\.id)
+            let nativeOrder = ordered.filter { $0.section == section }.map(\.id)
+            guard requestedOrder == nativeOrder else {
+                throw MenuBarBackendError.operationFailed(
+                    "saved layout would require changing native item order"
+                )
+            }
         }
         return replacingItems(
             ordered,

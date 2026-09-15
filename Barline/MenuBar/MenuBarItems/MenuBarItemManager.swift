@@ -1081,7 +1081,7 @@ extension MenuBarItemManager {
     func assign(
         itemID: MenuBarItemID,
         to section: MenuBarSection.Name,
-        index: Int
+        index _: Int
     ) async throws {
         appState?.contextualRules.pauseForManualChange()
         goldenGateConcealmentSyncTask?.cancel()
@@ -1104,12 +1104,16 @@ extension MenuBarItemManager {
             case .hidden: .hidden
             case .alwaysHidden: .alwaysHidden
             }
+            guard descriptor.section != destinationSection else { return }
+            let physicalDestinationIndex = snapshot.items.count {
+                $0.section == destinationSection && $0.order < descriptor.order
+            }
             let priorProfileID = await appState.compatibilityCoordinator.activeProfileID
             _ = try await appState.compatibilityCoordinator.perform(
                 .move(MenuBarMoveOperation(
                     itemID: resolvedID,
                     section: destinationSection,
-                    index: max(index, 0),
+                    index: physicalDestinationIndex,
                     destinationDisplayID: descriptor.displayID
                 )),
                 expectedGeneration: snapshot.generation
