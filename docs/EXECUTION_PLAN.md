@@ -1236,3 +1236,9 @@ required before distribution.
 The lead owns all project-file, scheme, test-plan, configuration, entitlement,
 identifier, dependency, and integration changes. Delegated audits are advisory
 until their findings are incorporated and rerun by the lead.
+Build 69 passed the clean source gates and distribution pipeline, but its first
+installed macOS 27 native journey exposed a separate status-control recovery
+collision: the target opened and completed successfully, then a shelf click was
+misclassified as a missing control click and reopened the shelf. Build 69 is
+rejected. Build 70 narrows recovery to exact button screen geometry and rejects
+shelf-owned events before scheduling the fallback.

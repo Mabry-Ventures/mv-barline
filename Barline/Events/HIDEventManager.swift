@@ -187,7 +187,17 @@ extension HIDEventManager {
         guard
             let click = event.cgEvent,
             let control = appState.menuBarManager.controlItem(withName: .visible),
-            control.containsEventLocation(click.unflippedLocation)
+            StatusItemActionRecoveryCoordinator.shouldSchedulePrimaryRecovery(
+                eventTargetsShelf: {
+                    let shelf = appState.menuBarManager.barlineShelfPanel
+                    return event.window === shelf || (
+                        shelf.isVisible && shelf.frame.contains(click.unflippedLocation)
+                    )
+                }(),
+                eventLocationIsInsideExactButtonFrame: control.containsEventLocation(
+                    click.unflippedLocation
+                )
+            )
         else { return }
 
         control.schedulePrimaryActionRecovery(

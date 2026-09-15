@@ -517,9 +517,17 @@ final class ControlItem {
     }
 
     /// Global hosted events may not expose an NSWindow. Resolve their captured
-    /// point against live button geometry before considering the cached frame.
+    /// point against the button's exact screen geometry before considering the
+    /// cached frame. A scene-backed button's window can span the whole menu bar
+    /// on macOS 27, so the window frame is not proof that the control was hit.
     func containsEventLocation(_ location: CGPoint) -> Bool {
-        (statusItem.button?.window?.frame ?? frame)?.contains(location) == true
+        if let button = statusItem.button, let window = button.window {
+            let buttonFrame = window.convertToScreen(button.convert(button.bounds, to: nil))
+            if !buttonFrame.isEmpty {
+                return buttonFrame.contains(location)
+            }
+        }
+        return frame?.contains(location) == true
     }
 
     /// Performs the control item's action.

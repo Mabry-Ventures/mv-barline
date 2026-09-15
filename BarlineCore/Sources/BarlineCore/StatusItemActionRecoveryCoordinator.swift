@@ -18,6 +18,16 @@ public struct StatusItemActionRecoveryCoordinator: Sendable {
 
     public init() {}
 
+    /// Decides whether a global mouse-down is eligible for status-item action
+    /// recovery. A shelf click is already owned by Barline and must never be
+    /// reinterpreted as a missing click on the menu-bar control.
+    public static func shouldSchedulePrimaryRecovery(
+        eventTargetsShelf: Bool,
+        eventLocationIsInsideExactButtonFrame: Bool
+    ) -> Bool {
+        !eventTargetsShelf && eventLocationIsInsideExactButtonFrame
+    }
+
     /// Registers a globally observed mouse-down.
     ///
     /// Returns `true` when the caller should schedule a delayed fallback. If the

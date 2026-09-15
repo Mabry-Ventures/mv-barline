@@ -3,6 +3,26 @@ import Testing
 
 @Suite("Status item action recovery")
 struct StatusItemActionRecoveryCoordinatorTests {
+    @Test("shelf events are never eligible for control-action recovery")
+    func shelfEventIsExcluded() {
+        #expect(!StatusItemActionRecoveryCoordinator.shouldSchedulePrimaryRecovery(
+            eventTargetsShelf: true,
+            eventLocationIsInsideExactButtonFrame: true
+        ))
+    }
+
+    @Test("only the exact control button is eligible for recovery")
+    func exactButtonFrameIsRequired() {
+        #expect(StatusItemActionRecoveryCoordinator.shouldSchedulePrimaryRecovery(
+            eventTargetsShelf: false,
+            eventLocationIsInsideExactButtonFrame: true
+        ))
+        #expect(!StatusItemActionRecoveryCoordinator.shouldSchedulePrimaryRecovery(
+            eventTargetsShelf: false,
+            eventLocationIsInsideExactButtonFrame: false
+        ))
+    }
+
     @Test("native action cancels the pending fallback")
     func nativeActionWins() {
         var coordinator = StatusItemActionRecoveryCoordinator()

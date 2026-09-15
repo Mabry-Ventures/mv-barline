@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.15 (build 70) — September 14, 2026
+
+- Restrict the scene-backed status-item recovery fallback to the exact Barline
+  button bounds. On macOS 27, a hosted status-item window can span far beyond
+  the button; clicks inside Barline's shelf are now explicitly excluded so a
+  successful hidden-item activation cannot reopen the shelf 100 ms later.
+
 ## 1.0.15 (build 69) — September 14, 2026
 
 - Route natural-language search activation through the same dedicated
