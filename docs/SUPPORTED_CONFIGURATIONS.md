@@ -20,5 +20,7 @@ the secondary shelf and graphical layout editor become available again.
 Runtime qualification must distinguish always-visible desktop, native fallback
 under auto-hide, and full-screen Spaces. A runtime result for one does not
 certify the others. macOS 27 and release-duration soak remain separate deferred
-lanes. macOS 27 discovery has a separate read-only compatibility backend;
-arrangement there uses native Command-drag rather than helper-owned mutation.
+lanes. macOS 27 uses a separate compatibility backend: its graphical editor
+assigns supported items as visible or hidden through native concealment, while
+Command-drag remains the way to change physical system-menu-bar ordering.
+Items macOS cannot identify or conceal independently stay visible and disabled.

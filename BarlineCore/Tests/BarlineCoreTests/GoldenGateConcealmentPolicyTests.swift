@@ -64,6 +64,25 @@ struct GoldenGateConcealmentPolicyTests {
         #expect(resolved.concealedBundleIdentifiers.isEmpty)
     }
 
+    @Test func singleThirdPartyItemCanBeAssignedIndependently() {
+        let utility = item("com.example.utility", "status")
+        #expect(GoldenGateConcealmentPolicy.supportsIndependentAssignment(
+            utility,
+            among: [utility],
+            barlineBundleIdentifier: barlineID
+        ))
+    }
+
+    @Test func multipleThirdPartyItemsCannotBeAssignedIndependently() {
+        let first = item("com.example.utility", "first")
+        let second = item("com.example.utility", "second")
+        #expect(!GoldenGateConcealmentPolicy.supportsIndependentAssignment(
+            first,
+            among: [first, second],
+            barlineBundleIdentifier: barlineID
+        ))
+    }
+
     private func item(_ bundleIdentifier: String, _ title: String) -> MenuBarItemID {
         MenuBarItemID(bundleIdentifier: bundleIdentifier, title: title)
     }

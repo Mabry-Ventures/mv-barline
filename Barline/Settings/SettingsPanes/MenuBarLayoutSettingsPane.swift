@@ -58,14 +58,14 @@ struct MenuBarLayoutSettingsPane: View {
 
     private var layoutInstruction: String {
         if #available(macOS 27.0, *) {
-            return "Review the menu bar items Barline can currently see."
+            return "Drag to choose which menu bar items stay visible."
         }
         return "Drag to arrange your menu bar items into different sections."
     }
 
     private var menuBarInstruction: String {
         if #available(macOS 27.0, *) {
-            return "To arrange items on macOS 27, hold ⌘ Command and drag them in the menu bar."
+            return "Items macOS cannot conceal independently remain disabled. Use ⌘ Command-drag to reorder the system menu bar."
         }
         return "Items can also be arranged by ⌘ Command + dragging them in the menu bar."
     }

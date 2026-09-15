@@ -27,7 +27,10 @@ actor XPCMenuBarBackend: MenuBarBackend {
     }
 
     func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
-        try await connection.move(operation)
+        if #available(macOS 27.0, *) {
+            return try await goldenGateProvider.move(operation)
+        }
+        return try await connection.move(operation)
     }
 
     func reveal(_ item: MenuBarItemID) async throws -> MenuBarMutationResult {
@@ -78,7 +81,10 @@ actor XPCMenuBarBackend: MenuBarBackend {
     }
 
     func restore(_ snapshot: MenuBarSnapshot) async throws -> MenuBarMutationResult {
-        try await connection.restore(snapshot)
+        if #available(macOS 27.0, *) {
+            return try await goldenGateProvider.restore(snapshot)
+        }
+        return try await connection.restore(snapshot)
     }
 
     func health() async -> MenuBarBackendHealth {

@@ -15,6 +15,11 @@ import os
 /// embedded XPC service. Keep public AX inventory here in the trusted app and
 /// leave all private WindowServer access isolated in BarlineMenuService.
 actor GoldenGateAXSnapshotProvider {
+    private struct ExplicitLayout: Codable {
+        let version: Int
+        let assignments: [GoldenGateLogicalAssignment]
+    }
+
     private struct RememberedAssignment: Codable {
         let itemID: MenuBarItemID
         let section: BarlineCore.MenuBarSection
@@ -42,6 +47,7 @@ actor GoldenGateAXSnapshotProvider {
     private static let cacheLifetimeNanoseconds: UInt64 = 100_000_000
     private static let menuBarAgentBundleIdentifier = "com.apple.MenuBarAgent"
     private static let rememberedSectionsKey = "GoldenGateRememberedMenuBarSections"
+    private static let explicitLayoutKey = "GoldenGateExplicitMenuBarLayout"
     private static let maximumRememberedBytes = 256 * 1024
     private static let maximumRememberedAssignments = 512
 
@@ -50,17 +56,20 @@ actor GoldenGateAXSnapshotProvider {
     private var cachedAt: UInt64?
     private var cachedSnapshot: MenuBarSnapshot?
     private var rememberedSections = GoldenGateAXSnapshotProvider.loadRememberedSections()
+    private var explicitAssignments = GoldenGateAXSnapshotProvider.loadExplicitAssignments()
+    private let logicalLayoutPlanner = GoldenGateLogicalLayoutPlanner()
 
     var capabilities: MenuBarCapabilities {
         get async {
             let canSnapshot = (try? snapshot()) != nil
             return MenuBarCapabilities(
                 canSnapshot: canSnapshot,
-                canMove: false,
+                canMove: canSnapshot,
                 canReveal: false,
                 canActivate: false,
-                canRestore: false,
-                canCapture: false
+                canRestore: canSnapshot,
+                canCapture: false,
+                moveDestinationSupport: .emptySectionAllowed
             )
         }
     }
@@ -108,7 +117,7 @@ actor GoldenGateAXSnapshotProvider {
                     height: observation.bounds.height
                 ))
         }
-        let result = try GoldenGateMenuBarSnapshotBuilder.build(
+        let built = try GoldenGateMenuBarSnapshotBuilder.build(
             observations: observations,
             displayIdentities: displayIdentities,
             activeDisplayID: stableDisplayID(activeScreen.displayID),
@@ -120,9 +129,17 @@ actor GoldenGateAXSnapshotProvider {
             ),
             appSigningIdentifier: signingIdentifier,
             rememberedSections: hiddenControlUsesLiveGeometry ? [:] : rememberedSections,
+            assignedSections: Dictionary(uniqueKeysWithValues: explicitAssignments.map {
+                ($0.key, $0.value.section)
+            }),
             generation: generation
         )
-        if hiddenControlUsesLiveGeometry {
+        let result = logicalLayoutPlanner.applyingExplicitOrder(
+            to: built,
+            assignments: explicitAssignments,
+            fallbackRank: Self.maximumRememberedAssignments
+        )
+        if hiddenControlUsesLiveGeometry, explicitAssignments.isEmpty {
             rememberSections(from: result)
         }
         cachedAt = now
@@ -131,6 +148,64 @@ actor GoldenGateAXSnapshotProvider {
             "Main-process Golden Gate inventory completed: items=\(result.items.count, privacy: .public), controls=\(result.items.count(where: \.isBarlineControlItem), privacy: .public)"
         )
         return result
+    }
+
+    func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
+        let before = try snapshot()
+        guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
+            throw MenuBarBackendError.staleItem(operation.itemID)
+        }
+        guard source.isMovable else {
+            throw MenuBarBackendError.operationFailed("menu bar item cannot be assigned independently")
+        }
+        if operation.section != .visible, !source.canBeHidden {
+            throw MenuBarBackendError.operationFailed("menu bar item cannot be hidden")
+        }
+
+        let candidate = try logicalLayoutPlanner.applying(operation, to: before)
+        try await BarlineMenuService.Connection.shared.configureConcealment(
+            concealmentConfiguration(for: candidate)
+        )
+        rememberExplicitLayout(from: candidate)
+        cachedAt = DispatchTime.now().uptimeNanoseconds
+        cachedSnapshot = candidate
+        return MenuBarMutationResult(
+            generation: candidate.generation,
+            changedItemIDs: [source.id]
+        )
+    }
+
+    func restore(_ target: MenuBarSnapshot) async throws -> MenuBarMutationResult {
+        let current = try snapshot()
+        let targetByID = Dictionary(uniqueKeysWithValues: target.items.map { ($0.id, $0) })
+        guard current.items.allSatisfy({ targetByID[$0.id] != nil }) else {
+            throw MenuBarBackendError.operationFailed("saved layout no longer matches the menu bar")
+        }
+        let ordered = target.items.enumerated().compactMap { index, targetItem in
+            current.items.first(where: { $0.id == targetItem.id })?.replacing(
+                section: targetItem.section,
+                order: index
+            )
+        }
+        let candidate = MenuBarSnapshot(
+            generation: current.generation &+ 1,
+            capturedAt: Date(),
+            items: ordered,
+            displayIDs: current.displayIDs,
+            displayIdentities: current.displayIdentities,
+            activeSpaceIsValid: current.activeSpaceIsValid,
+            menuTrackingIsActive: false
+        )
+        try await BarlineMenuService.Connection.shared.configureConcealment(
+            concealmentConfiguration(for: candidate)
+        )
+        rememberExplicitLayout(from: candidate)
+        cachedAt = DispatchTime.now().uptimeNanoseconds
+        cachedSnapshot = candidate
+        return MenuBarMutationResult(
+            generation: candidate.generation,
+            changedItemIDs: candidate.items.map(\.id)
+        )
     }
 
     func health() async -> MenuBarBackendHealth {
@@ -202,6 +277,53 @@ actor GoldenGateAXSnapshotProvider {
             }
         }
         return result
+    }
+
+    private static func loadExplicitAssignments() -> [MenuBarItemID: GoldenGateLogicalAssignment] {
+        guard let data = UserDefaults.standard.data(forKey: explicitLayoutKey),
+              data.count <= maximumRememberedBytes,
+              let document = try? JSONDecoder().decode(ExplicitLayout.self, from: data),
+              document.version == 1,
+              document.assignments.count <= maximumRememberedAssignments
+        else { return [:] }
+        var result = [MenuBarItemID: GoldenGateLogicalAssignment]()
+        for assignment in document.assignments {
+            guard assignment.itemID.isPlausiblyStable,
+                  assignment.rank >= 0,
+                  result.updateValue(assignment, forKey: assignment.itemID) == nil
+            else { return [:] }
+        }
+        return result
+    }
+
+    private func rememberExplicitLayout(from snapshot: MenuBarSnapshot) {
+        let assignments = BarlineCore.MenuBarSection.allCases.flatMap { section in
+            snapshot.items.filter { $0.section == section }.enumerated().map { rank, item in
+                GoldenGateLogicalAssignment(itemID: item.id, section: section, rank: rank)
+            }
+        }
+        .prefix(Self.maximumRememberedAssignments)
+        let document = ExplicitLayout(version: 1, assignments: Array(assignments))
+        guard let data = try? JSONEncoder().encode(document),
+              data.count <= Self.maximumRememberedBytes
+        else { return }
+        explicitAssignments = Dictionary(uniqueKeysWithValues: document.assignments.map {
+            ($0.itemID, $0)
+        })
+        UserDefaults.standard.set(data, forKey: Self.explicitLayoutKey)
+    }
+
+    private func concealmentConfiguration(
+        for snapshot: MenuBarSnapshot
+    ) -> MenuBarConcealmentConfiguration {
+        MenuBarConcealmentConfiguration(
+            visibleItemIDs: snapshot.items.filter {
+                !$0.isBarlineControlItem && $0.section == .visible
+            }.map(\.id),
+            concealedItemIDs: snapshot.items.filter {
+                !$0.isBarlineControlItem && $0.section != .visible
+            }.map(\.id)
+        )
     }
 
     private func rememberSections(from snapshot: MenuBarSnapshot) {

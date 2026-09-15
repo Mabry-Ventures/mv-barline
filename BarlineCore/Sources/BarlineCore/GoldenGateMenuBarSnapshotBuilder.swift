@@ -66,6 +66,7 @@ public enum GoldenGateMenuBarSnapshotBuilder {
         activeDisplayBounds: MenuBarRect,
         appSigningIdentifier: String,
         rememberedSections: [MenuBarItemID: MenuBarSection] = [:],
+        assignedSections: [MenuBarItemID: MenuBarSection] = [:],
         generation: UInt64,
         capturedAt: Date = Date()
     ) throws -> MenuBarSnapshot {
@@ -130,6 +131,9 @@ public enum GoldenGateMenuBarSnapshotBuilder {
                 default: .visible
                 }
             } else {
+                if let assigned = assignedSections[descriptor.id] {
+                    return descriptor.replacingSection(assigned)
+                }
                 if let remembered = rememberedSections[descriptor.id] {
                     return descriptor.replacingSection(remembered)
                 }
@@ -165,10 +169,22 @@ public enum GoldenGateMenuBarSnapshotBuilder {
             return descriptor.replacingSection(.visible)
         }
 
+        let allItemIDs = normalizedDescriptors.map(\.id)
+        let movableDescriptors = normalizedDescriptors.map { descriptor in
+            let isMovable = descriptor.canBeHidden &&
+                !descriptor.isBarlineControlItem &&
+                GoldenGateConcealmentPolicy.supportsIndependentAssignment(
+                    descriptor.id,
+                    among: allItemIDs,
+                    barlineBundleIdentifier: appSigningIdentifier
+                )
+            return descriptor.replacing(isMovable: isMovable)
+        }
+
         return MenuBarSnapshot(
             generation: generation,
             capturedAt: capturedAt,
-            items: normalizedDescriptors,
+            items: movableDescriptors,
             displayIDs: displayIDs,
             displayIdentities: displayIdentities,
             activeSpaceIsValid: !displayIDs.isEmpty,

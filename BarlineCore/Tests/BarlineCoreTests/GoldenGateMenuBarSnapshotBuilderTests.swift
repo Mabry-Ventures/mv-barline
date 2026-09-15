@@ -23,7 +23,10 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
             .alwaysHidden, .alwaysHidden, .hidden, .hidden, .visible, .visible,
         ])
         #expect(snapshot.items.filter(\.isBarlineControlItem).count == 3)
-        #expect(snapshot.items.allSatisfy { !$0.isMovable })
+        #expect(snapshot.items.first { $0.id.bundleIdentifier == "com.example.always" }?.isMovable == true)
+        #expect(snapshot.items.first { $0.id.bundleIdentifier == "com.example.hidden" }?.isMovable == true)
+        #expect(snapshot.items.first { $0.id.bundleIdentifier == "com.example.visible" }?.isMovable == true)
+        #expect(snapshot.items.filter(\.isBarlineControlItem).allSatisfy { !$0.isMovable })
     }
 
     @Test("Fails closed without the hidden section control")
@@ -103,6 +106,37 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
         #expect(snapshot.items.filter { !$0.isBarlineControlItem }.allSatisfy { $0.section == .visible })
     }
 
+    @Test("Explicit assignments override live divider geometry")
+    func explicitAssignmentOverridesGeometry() throws {
+        let item = observation(bundle: "com.example.utility", title: "Utility", x: 1600)
+        let identifier = MenuBarItemID(
+            bundleIdentifier: item.bundleIdentifier,
+            accessibilityIdentifier: item.identifier,
+            title: item.stableTitle,
+            alias: "occurrence-0",
+            fallbackFingerprint: item.fallbackFingerprint
+        )
+        let snapshot = try build([
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 1550),
+            item,
+        ], assignedSections: [identifier: .hidden])
+
+        #expect(snapshot.items.first { $0.id == identifier }?.section == .hidden)
+        #expect(snapshot.items.first { $0.id == identifier }?.isMovable == true)
+    }
+
+    @Test("Multiple items from one application cannot be assigned independently")
+    func multipleApplicationItemsAreNotMovable() throws {
+        let snapshot = try build([
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 1500),
+            observation(bundle: "com.example.multiple", title: "First", x: 1550),
+            observation(bundle: "com.example.multiple", title: "Second", x: 1600),
+        ])
+        #expect(snapshot.items.filter {
+            $0.id.bundleIdentifier == "com.example.multiple"
+        }.allSatisfy { !$0.isMovable })
+    }
+
     @Test("Meaningful item labels distinguish multiple controls from one application")
     func meaningfulItemLabels() throws {
         let snapshot = try build([
@@ -141,7 +175,8 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
 
     private func build(
         _ observations: [GoldenGateMenuBarObservation],
-        rememberedSections: [MenuBarItemID: MenuBarSection] = [:]
+        rememberedSections: [MenuBarItemID: MenuBarSection] = [:],
+        assignedSections: [MenuBarItemID: MenuBarSection] = [:]
     ) throws -> MenuBarSnapshot {
         try GoldenGateMenuBarSnapshotBuilder.build(
             observations: observations,
@@ -150,6 +185,7 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
             activeDisplayBounds: displayBounds,
             appSigningIdentifier: appID,
             rememberedSections: rememberedSections,
+            assignedSections: assignedSections,
             generation: 7
         )
     }
@@ -171,7 +207,6 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
             ownerProcessIdentifier: 42
         )
     }
-
 
     private func itemID(bundle: String, title: String, alias: String) -> MenuBarItemID {
         MenuBarItemID(

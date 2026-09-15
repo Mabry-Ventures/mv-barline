@@ -6,8 +6,10 @@ determines which backend gets the first opportunity to probe.
 
 - `TahoeMenuBarBackend` is the macOS 26 implementation.
 - `GoldenGateMenuBarBackend` is the macOS 27 implementation. It uses public
-  Accessibility inventory for read-only snapshots and does not claim helper
-  mutation capabilities. Native Command-drag remains the arrangement path.
+  Accessibility inventory and commits supported visible/hidden assignments
+  through macOS's native concealment controller. Unknown Apple items and
+  applications with multiple independently ambiguous status items fail visible.
+  Native Command-drag remains the physical ordering path.
 - `FallbackMenuBarBackend` exposes no unsupported mutation capability. The app
   must keep settings, profiles, search metadata, diagnostics, import/export,
   System Settings handoff, and reset/recovery accessible in this state.

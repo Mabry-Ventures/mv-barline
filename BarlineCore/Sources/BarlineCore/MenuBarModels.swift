@@ -337,6 +337,34 @@ public struct MenuBarItemDescriptor: Codable, Hashable, Sendable {
             isResponsive: isResponsive
         )
     }
+
+    public func replacing(
+        section: MenuBarSection? = nil,
+        order: Int? = nil,
+        isMovable: Bool? = nil
+    ) -> MenuBarItemDescriptor {
+        MenuBarItemDescriptor(
+            id: id,
+            section: section ?? self.section,
+            order: order ?? self.order,
+            displayID: displayID,
+            isSystemItem: isSystemItem,
+            sourceOwnership: sourceOwnership,
+            isBarlineControlItem: isBarlineControlItem,
+            tagNamespace: tagNamespace,
+            title: title,
+            displayName: displayName,
+            ownerProcessIdentifier: ownerProcessIdentifier,
+            sourceProcessIdentifier: sourceProcessIdentifier,
+            bounds: bounds,
+            isOnScreen: isOnScreen,
+            isMovable: isMovable ?? self.isMovable,
+            canBeHidden: canBeHidden,
+            isBentoBox: isBentoBox,
+            isSystemClone: isSystemClone,
+            isResponsive: isResponsive
+        )
+    }
 }
 
 public struct MenuBarSnapshot: Codable, Hashable, Sendable {

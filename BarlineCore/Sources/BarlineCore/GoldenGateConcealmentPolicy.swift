@@ -88,4 +88,23 @@ public enum GoldenGateConcealmentPolicy {
         }
         return resolution.concealedBundleIdentifiers.contains(item.bundleIdentifier)
     }
+
+    /// Returns whether macOS 27 can independently assign an item between
+    /// Barline's visible and concealed sections. Third-party applications are
+    /// controlled at bundle granularity, so an application exposing multiple
+    /// status items cannot safely move just one of them. Apple items require a
+    /// known native assessment identifier.
+    public static func supportsIndependentAssignment(
+        _ item: MenuBarItemID,
+        among allItems: [MenuBarItemID],
+        barlineBundleIdentifier: String
+    ) -> Bool {
+        guard item.bundleIdentifier != barlineBundleIdentifier.lowercased() else {
+            return false
+        }
+        if item.bundleIdentifier.hasPrefix("com.apple.") {
+            return systemItemIdentifier(for: item) != nil
+        }
+        return allItems.count { $0.bundleIdentifier == item.bundleIdentifier } == 1
+    }
 }

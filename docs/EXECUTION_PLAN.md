@@ -1,5 +1,18 @@
 # Barline execution plan
 
+## Barline 1.0.16 macOS 27 layout parity candidate — September 15, 2026
+
+The macOS 27 layout inventory no longer advertises a read-only compatibility
+boundary. Supported single-item applications and explicitly mapped Apple system
+items can be assigned between visible and hidden sections. Each operation builds
+and validates a complete logical candidate, asks the helper's native concealment
+controller to apply it, and persists the new state only after that call succeeds.
+Ambiguous multi-item applications and unmapped Apple items remain disabled and
+fail visible. Pure empty-section, reverse, same-section, persistence-order, and
+unsupported-item cases pass alongside both operating-system fast gates. Exact
+installed persistence/reversal evidence and the full release gates remain
+required before 1.0.16 is eligible for publication.
+
 ## Barline 1.0.14 macOS 27 compatibility release published — September 14, 2026
 
 Barline 1.0.14 (build 62), annotated tag `v1.0.14` at
