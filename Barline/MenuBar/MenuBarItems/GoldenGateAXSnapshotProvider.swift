@@ -30,6 +30,11 @@ actor GoldenGateAXSnapshotProvider {
         let assignments: [RememberedAssignment]
     }
 
+    private struct RetainedInventory: Codable {
+        let version: Int
+        let descriptors: [MenuBarItemDescriptor]
+    }
+
     private struct ElementMetadata {
         let identifier: String?
         let accessibilityDescription: String?
@@ -48,6 +53,7 @@ actor GoldenGateAXSnapshotProvider {
     private static let menuBarAgentBundleIdentifier = "com.apple.MenuBarAgent"
     private static let rememberedSectionsKey = "GoldenGateRememberedMenuBarSections"
     private static let explicitLayoutKey = "GoldenGateExplicitMenuBarLayout"
+    private static let retainedInventoryKey = "GoldenGateRetainedMenuBarInventory"
     private static let maximumRememberedBytes = 256 * 1024
     private static let maximumRememberedAssignments = 512
 
@@ -57,6 +63,7 @@ actor GoldenGateAXSnapshotProvider {
     private var cachedSnapshot: MenuBarSnapshot?
     private var rememberedSections = GoldenGateAXSnapshotProvider.loadRememberedSections()
     private var explicitAssignments = GoldenGateAXSnapshotProvider.loadExplicitAssignments()
+    private var retainedDescriptors = GoldenGateAXSnapshotProvider.loadRetainedInventory()
     private let logicalLayoutPlanner = GoldenGateLogicalLayoutPlanner()
 
     var capabilities: MenuBarCapabilities {
@@ -134,10 +141,18 @@ actor GoldenGateAXSnapshotProvider {
             }),
             generation: generation
         )
-        let result = built
+        let result = GoldenGateRetainedInventoryPolicy.merging(
+            live: built,
+            retainedDescriptors: retainedDescriptors,
+            assignments: explicitAssignments,
+            runningBundleIdentifiers: Set(
+                NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+            )
+        )
         if hiddenControlUsesLiveGeometry, explicitAssignments.isEmpty {
             rememberSections(from: result)
         }
+        rememberRetainedInventory(from: result)
         cachedAt = now
         cachedSnapshot = result
         logger.info(
@@ -160,21 +175,14 @@ actor GoldenGateAXSnapshotProvider {
 
         let candidate = try logicalLayoutPlanner.applying(operation, to: before)
         let previousConfiguration = concealmentConfiguration(for: before)
-        do {
-            try await BarlineMenuService.Connection.shared.configureConcealment(
-                concealmentConfiguration(for: candidate)
-            )
-            try await verifyNativeAssignments([
-                source.id: operation.section == .visible,
-            ])
-        } catch {
-            try? await BarlineMenuService.Connection.shared.configureConcealment(
-                previousConfiguration
-            )
-            throw error
-        }
+        try await applyNativeConfiguration(
+            concealmentConfiguration(for: candidate),
+            previousConfiguration: previousConfiguration,
+            expectations: [source.id: operation.section == .visible]
+        )
         generation = candidate.generation
         rememberExplicitLayout(from: candidate)
+        rememberRetainedInventory(from: candidate)
         cachedAt = DispatchTime.now().uptimeNanoseconds
         cachedSnapshot = candidate
         return MenuBarMutationResult(
@@ -190,23 +198,16 @@ actor GoldenGateAXSnapshotProvider {
         let changedItems = candidate.items.filter { candidateItem in
             current.items.first(where: { $0.id == candidateItem.id })?.section != candidateItem.section
         }
-        do {
-            try await BarlineMenuService.Connection.shared.configureConcealment(
-                concealmentConfiguration(for: candidate)
-            )
-            try await verifyNativeAssignments(
-                Dictionary(uniqueKeysWithValues: changedItems.map {
-                    ($0.id, $0.section == .visible)
-                })
-            )
-        } catch {
-            try? await BarlineMenuService.Connection.shared.configureConcealment(
-                previousConfiguration
-            )
-            throw error
-        }
+        try await applyNativeConfiguration(
+            concealmentConfiguration(for: candidate),
+            previousConfiguration: previousConfiguration,
+            expectations: Dictionary(uniqueKeysWithValues: changedItems.map {
+                ($0.id, $0.section == .visible)
+            })
+        )
         generation = candidate.generation
         rememberExplicitLayout(from: candidate)
+        rememberRetainedInventory(from: candidate)
         cachedAt = DispatchTime.now().uptimeNanoseconds
         cachedSnapshot = candidate
         return MenuBarMutationResult(
@@ -303,6 +304,23 @@ actor GoldenGateAXSnapshotProvider {
         return result
     }
 
+    private static func loadRetainedInventory() -> [MenuBarItemID: MenuBarItemDescriptor] {
+        guard let data = UserDefaults.standard.data(forKey: retainedInventoryKey),
+              data.count <= maximumRememberedBytes,
+              let document = try? JSONDecoder().decode(RetainedInventory.self, from: data),
+              document.version == 1,
+              document.descriptors.count <= maximumRememberedAssignments
+        else { return [:] }
+        var result = [MenuBarItemID: MenuBarItemDescriptor]()
+        for descriptor in document.descriptors {
+            guard descriptor.id.isPlausiblyStable,
+                  !descriptor.isBarlineControlItem,
+                  result.updateValue(descriptor, forKey: descriptor.id) == nil
+            else { return [:] }
+        }
+        return result
+    }
+
     private func rememberExplicitLayout(from snapshot: MenuBarSnapshot) {
         let assignments = logicalLayoutPlanner.assignmentsForPersistence(
             from: snapshot,
@@ -321,6 +339,26 @@ actor GoldenGateAXSnapshotProvider {
         UserDefaults.standard.set(data, forKey: Self.explicitLayoutKey)
     }
 
+    private func rememberRetainedInventory(from snapshot: MenuBarSnapshot) {
+        var merged = retainedDescriptors
+        for descriptor in snapshot.items where
+            !descriptor.isBarlineControlItem && descriptor.id.isPlausiblyStable
+        {
+            merged[descriptor.id] = descriptor
+        }
+        let descriptors = merged.values.sorted {
+            $0.id.description < $1.id.description
+        }.prefix(Self.maximumRememberedAssignments)
+        let document = RetainedInventory(version: 1, descriptors: Array(descriptors))
+        guard let data = try? JSONEncoder().encode(document),
+              data.count <= Self.maximumRememberedBytes
+        else { return }
+        retainedDescriptors = Dictionary(uniqueKeysWithValues: document.descriptors.map {
+            ($0.id, $0)
+        })
+        UserDefaults.standard.set(data, forKey: Self.retainedInventoryKey)
+    }
+
     private func concealmentConfiguration(
         for snapshot: MenuBarSnapshot
     ) -> MenuBarConcealmentConfiguration {
@@ -334,25 +372,73 @@ actor GoldenGateAXSnapshotProvider {
         )
     }
 
-    /// The private assertion acknowledges asynchronously and the AX tree
-    /// settles independently. Never publish or persist a logical assignment
-    /// until the native menu bar has reached the requested visibility.
+    /// Native activation is atomic: a rejected candidate leaves the prior
+    /// assertion active. Only a successful candidate followed by a failed
+    /// reveal postcondition requires rollback, and that rollback must itself
+    /// be acknowledged before the logical transaction can fail safely.
+    private func applyNativeConfiguration(
+        _ candidateConfiguration: MenuBarConcealmentConfiguration,
+        previousConfiguration: MenuBarConcealmentConfiguration,
+        expectations: [MenuBarItemID: Bool]
+    ) async throws {
+        logger.info(
+            "Golden Gate layout transaction started: assignments=\(expectations.count, privacy: .public)"
+        )
+        do {
+            try await BarlineMenuService.Connection.shared.configureConcealment(
+                candidateConfiguration
+            )
+        } catch {
+            logger.error(
+                "Golden Gate native configuration rejected: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+            )
+            throw error
+        }
+
+        do {
+            try await verifyNativeAssignments(expectations)
+            logger.info("Golden Gate layout transaction reached its native postcondition")
+        } catch {
+            let postconditionError = error
+            do {
+                try await BarlineMenuService.Connection.shared.configureConcealment(
+                    previousConfiguration
+                )
+                logger.info("Golden Gate layout transaction rollback was acknowledged")
+            } catch {
+                logger.fault(
+                    "Golden Gate layout transaction rollback failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+                )
+                throw MenuBarBackendError.operationFailed(
+                    "native concealment rollback failed"
+                )
+            }
+            throw postconditionError
+        }
+    }
+
+    /// A successful native assertion callback is authoritative for concealment.
+    /// Accessibility presence cannot prove that an item is visible because
+    /// macOS may retain a concealed node. For reveal operations, however, a
+    /// fresh AX observation is a strong postcondition and prevents committing a
+    /// logical state before the item can actually be used.
     private func verifyNativeAssignments(
         _ expectations: [MenuBarItemID: Bool]
     ) async throws {
         guard !expectations.isEmpty else { return }
+        let visibleExpectations = expectations.filter(\.value)
+        guard !visibleExpectations.isEmpty else { return }
         let deadline = ContinuousClock.now.advanced(by: .seconds(3))
         repeat {
             try Task.checkCancellation()
             let observedIDs = GoldenGateMenuBarSnapshotBuilder.identifiers(
                 for: collectEntries().map(\.observation)
             )
-            let didConverge = expectations.allSatisfy { itemID, shouldBeVisible in
-                let isVisible = GoldenGateMenuBarIdentityResolver.resolve(
-                    itemID,
+            let didConverge = visibleExpectations.keys.allSatisfy {
+                GoldenGateMenuBarIdentityResolver.resolve(
+                    $0,
                     among: observedIDs
                 ) != nil
-                return isVisible == shouldBeVisible
             }
             if didConverge {
                 return

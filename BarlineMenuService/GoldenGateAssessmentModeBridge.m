@@ -5,8 +5,11 @@
 
 @interface BLNGoldenGateAssessmentController : NSObject
 @property(nonatomic, strong, nullable) id assertion;
+@property(nonatomic, strong, nullable) id pendingAssertion;
+@property(nonatomic) int32_t activationState;
 - (BOOL)applyConcealedBundleIdentifiers:(NSArray<NSString *> *)concealedBundleIdentifiers
            allowedSystemItemIdentifiers:(NSArray<NSNumber *> *)allowedSystemItemIdentifiers;
+- (int32_t)currentActivationState;
 - (void)invalidate;
 @end
 
@@ -39,6 +42,9 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
            allowedSystemItemIdentifiers:(NSArray<NSNumber *> *)allowedSystemItemIdentifiers {
     if (concealedBundleIdentifiers.count == 0 && allowedSystemItemIdentifiers.count == 9) {
         [self invalidate];
+        @synchronized (self) {
+            self.activationState = 1;
+        }
         return YES;
     }
 
@@ -82,13 +88,45 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
         allowedSystemItemIdentifiers,
         allowedBundles.array
     );
-    id candidate = ((id (*)(id, SEL))objc_msgSend)(assertionClass, @selector(new));
-    if (!configuration || !candidate) return NO;
+    if (!configuration) return NO;
 
+    id candidate = ((id (*)(id, SEL))objc_msgSend)(assertionClass, @selector(new));
+    if (!candidate) return NO;
+
+    @synchronized (self) {
+        if (self.pendingAssertion) {
+            ((void (*)(id, SEL))objc_msgSend)(candidate, invalidationSelector);
+            return NO;
+        }
+        self.pendingAssertion = candidate;
+        self.activationState = 0;
+    }
+
+    __weak BLNGoldenGateAssessmentController *weakSelf = self;
     void (^completion)(NSError *) = ^(NSError *error) {
+        BLNGoldenGateAssessmentController *strongSelf = weakSelf;
+        if (!strongSelf) return;
+
+        id previous = nil;
+        @synchronized (strongSelf) {
+            // Ignore a callback for an assertion invalidated by shutdown.
+            if (strongSelf.pendingAssertion != candidate) return;
+            strongSelf.pendingAssertion = nil;
+            if (error) {
+                strongSelf.activationState = -1;
+            } else {
+                previous = strongSelf.assertion;
+                strongSelf.assertion = candidate;
+                strongSelf.activationState = 1;
+            }
+        }
+
         if (error) {
+            ((void (*)(id, SEL))objc_msgSend)(candidate, invalidationSelector);
             NSLog(@"[BarlineAssessment] activation rejected domain=%@ code=%ld",
                   error.domain, (long)error.code);
+        } else if (previous) {
+            ((void (*)(id, SEL))objc_msgSend)(previous, invalidationSelector);
         }
     };
     @try {
@@ -96,25 +134,39 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
             candidate, activationSelector, configuration, completion
         );
     } @catch (__unused NSException *exception) {
+        @synchronized (self) {
+            if (self.pendingAssertion == candidate) {
+                self.pendingAssertion = nil;
+                self.activationState = -1;
+            }
+        }
+        ((void (*)(id, SEL))objc_msgSend)(candidate, invalidationSelector);
         return NO;
     }
-
-    // Activation completion can be delivered on the same serial executor that
-    // entered this bridge on macOS 27. Blocking that executor while waiting
-    // for the callback creates a self-inflicted timeout. Retain the issued
-    // assertion immediately; the app independently polls the AX tree and only
-    // commits the logical layout after native visibility reaches the target.
-    id previous = self.assertion;
-    self.assertion = candidate;
-    if (previous) ((void (*)(id, SEL))objc_msgSend)(previous, invalidationSelector);
     return YES;
 }
 
+- (int32_t)currentActivationState {
+    @synchronized (self) {
+        return self.activationState;
+    }
+}
+
 - (void)invalidate {
-    id current = self.assertion;
-    self.assertion = nil;
+    id current = nil;
+    id pending = nil;
+    @synchronized (self) {
+        current = self.assertion;
+        pending = self.pendingAssertion;
+        self.assertion = nil;
+        self.pendingAssertion = nil;
+        self.activationState = -1;
+    }
     if (current) {
         ((void (*)(id, SEL))objc_msgSend)(current, NSSelectorFromString(@"invalidate"));
+    }
+    if (pending && pending != current) {
+        ((void (*)(id, SEL))objc_msgSend)(pending, NSSelectorFromString(@"invalidate"));
     }
 }
 
@@ -137,6 +189,11 @@ bool BLNGoldenGateAssessmentApply(
     BLNGoldenGateAssessmentController *controller = (__bridge BLNGoldenGateAssessmentController *)opaqueController;
     return [controller applyConcealedBundleIdentifiers:(__bridge NSArray *)concealedBundleIdentifiers
                           allowedSystemItemIdentifiers:(__bridge NSArray *)allowedSystemItemIdentifiers];
+}
+
+int32_t BLNGoldenGateAssessmentActivationState(void *opaqueController) {
+    BLNGoldenGateAssessmentController *controller = (__bridge BLNGoldenGateAssessmentController *)opaqueController;
+    return [controller currentActivationState];
 }
 
 void BLNGoldenGateAssessmentInvalidate(void *opaqueController) {

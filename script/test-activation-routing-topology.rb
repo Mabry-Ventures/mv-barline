@@ -68,8 +68,10 @@ end
 
 unless concealment.include?('BLNGoldenGateAssessmentCreate()') &&
        concealment.include?('BLNGoldenGateAssessmentApply(') &&
+       concealment.include?('BLNGoldenGateAssessmentActivationState(') &&
        bridge_header.include?('BLNGoldenGateAssessmentCreate') &&
        bridge_header.include?('BLNGoldenGateAssessmentApply') &&
+       bridge_header.include?('BLNGoldenGateAssessmentActivationState') &&
        !concealment.include?('resolve("BLNGoldenGateAssessment')
   abort('Golden Gate concealment bridge is not compile-time linked')
 end
@@ -78,8 +80,17 @@ if assessment_bridge.include?('dispatch_semaphore_wait')
   abort('Golden Gate assertion activation blocks the callback executor')
 end
 
+unless assessment_bridge.include?('strongSelf.activationState = -1;') &&
+       assessment_bridge.include?('strongSelf.assertion = candidate;') &&
+       assessment_bridge.include?('strongSelf.activationState = 1;') &&
+       assessment_bridge.match?(/if \(error\).*?candidate, invalidationSelector.*?else if \(previous\).*?previous, invalidationSelector/m) &&
+       !assessment_bridge.match?(/Activation completion.*?self\.assertion = candidate/m)
+  abort('Golden Gate assertion replacement is not callback-acknowledged and atomic')
+end
+
 unless golden_gate_provider.include?('verifyNativeAssignments') &&
-       golden_gate_provider.match?(/catch \{.*?configureConcealment\(.*?previousConfiguration/m) &&
+       golden_gate_provider.include?('GoldenGateRetainedInventoryPolicy.merging(') &&
+       golden_gate_provider.match?(/applyNativeConfiguration\(.*?configureConcealment\(.*?candidateConfiguration.*?catch.*?verifyNativeAssignments\(expectations\).*?catch.*?configureConcealment\(.*?previousConfiguration.*?catch.*?native concealment rollback failed/m) &&
        service_connection.match?(/case \.configureConcealment = request,.*?case \.activation\(\.success\) = response/m)
   abort('Golden Gate concealment is not verified, rolled back, and replayed transactionally')
 end

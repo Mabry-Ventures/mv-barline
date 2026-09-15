@@ -157,11 +157,13 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
         try client.pointContext(point)
     }
 
-    func beginRevealObservation(_ item: MenuBarItemID) throws -> MenuBarRevealObservationToken {
+    func beginRevealObservation(
+        _ item: MenuBarItemID
+    ) async throws -> MenuBarRevealObservationToken {
         let resolved = try GoldenGateAXInventory.resolve(item)
         let token = client.beginRevealObservation(sourcePID: resolved.ownerPID)
         do {
-            try concealmentController.beginTemporaryReveal(resolved.id)
+            try await concealmentController.beginTemporaryReveal(resolved.id)
             revealedItemsByObservation[token] = resolved.id
             return token
         } catch {
@@ -174,15 +176,15 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
         client.revealObservationIsVisible(token)
     }
 
-    func endRevealObservation(_ token: MenuBarRevealObservationToken) {
+    func endRevealObservation(_ token: MenuBarRevealObservationToken) async {
         client.endRevealObservation(token)
         if let item = revealedItemsByObservation.removeValue(forKey: token) {
-            concealmentController.endTemporaryReveal(item)
+            await concealmentController.endTemporaryReveal(item)
         }
     }
 
-    func configureConcealment(_ configuration: MenuBarConcealmentConfiguration) throws {
-        try concealmentController.configure(configuration)
+    func configureConcealment(_ configuration: MenuBarConcealmentConfiguration) async throws {
+        try await concealmentController.configure(configuration)
     }
 
     func restore(_: MenuBarSnapshot) async throws -> MenuBarMutationResult {

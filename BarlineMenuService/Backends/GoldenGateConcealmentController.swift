@@ -27,21 +27,21 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         opaqueController != nil
     }
 
-    func configure(_ configuration: MenuBarConcealmentConfiguration) throws {
+    func configure(_ configuration: MenuBarConcealmentConfiguration) async throws {
         let previousConfiguration = desiredConfiguration
         desiredConfiguration = configuration
         do {
-            try applyCurrentState()
+            try await applyCurrentState()
         } catch {
             desiredConfiguration = previousConfiguration
             throw error
         }
     }
 
-    func beginTemporaryReveal(_ item: MenuBarItemID) throws {
+    func beginTemporaryReveal(_ item: MenuBarItemID) async throws {
         temporaryRevealCounts[item, default: 0] += 1
         do {
-            try applyCurrentState()
+            try await applyCurrentState()
         } catch {
             temporaryRevealCounts[item, default: 0] -= 1
             if temporaryRevealCounts[item] == 0 {
@@ -51,11 +51,11 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         }
     }
 
-    func endTemporaryReveal(_ item: MenuBarItemID) {
+    func endTemporaryReveal(_ item: MenuBarItemID) async {
         guard let count = temporaryRevealCounts[item] else { return }
         temporaryRevealCounts[item] = count > 1 ? count - 1 : nil
         do {
-            try applyCurrentState()
+            try await applyCurrentState()
         } catch {
             logger.error("Failed to restore Golden Gate concealment after temporary reveal")
         }
@@ -67,7 +67,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         appliedResolution = nil
     }
 
-    private func applyCurrentState() throws {
+    private func applyCurrentState() async throws {
         guard let opaqueController else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
         }
@@ -87,6 +87,21 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         guard BLNGoldenGateAssessmentApply(opaqueController, bundles, systemItems) else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
         }
-        appliedResolution = resolved
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while ContinuousClock.now < deadline {
+            try Task.checkCancellation()
+            switch BLNGoldenGateAssessmentActivationState(opaqueController) {
+            case 1:
+                appliedResolution = resolved
+                return
+            case -1:
+                throw MenuBarBackendError.operationFailed(
+                    "Golden Gate native concealment rejected"
+                )
+            default:
+                try await Task.sleep(for: .milliseconds(10))
+            }
+        }
+        throw MenuBarBackendError.timedOut
     }
 }

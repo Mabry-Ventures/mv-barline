@@ -7,5 +7,6 @@ bool BLNGoldenGateAssessmentApply(
     CFArrayRef _Nonnull concealedBundleIdentifiers,
     CFArrayRef _Nonnull allowedSystemItemIdentifiers
 );
+int32_t BLNGoldenGateAssessmentActivationState(void * _Nonnull opaqueController);
 void BLNGoldenGateAssessmentInvalidate(void * _Nonnull opaqueController);
 void BLNGoldenGateAssessmentDestroy(void * _Nonnull opaqueController);

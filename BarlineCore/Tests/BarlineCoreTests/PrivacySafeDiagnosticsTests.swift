@@ -64,6 +64,12 @@ struct PrivacySafeDiagnosticsTests {
         #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.operationFailed(
             "native concealment did not reach requested visibility"
         )) == "concealment_postcondition_failed")
+        #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.operationFailed(
+            "Golden Gate native concealment rejected"
+        )) == "concealment_native_rejected")
+        #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.operationFailed(
+            "native concealment rollback failed"
+        )) == "concealment_rollback_failed")
     }
 
     @Test func payloadsAreNeverFormatted() {

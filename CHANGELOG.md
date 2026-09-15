@@ -1,6 +1,15 @@
 # Changelog
 
-## 1.0.16 (build 82) — September 15, 2026
+## 1.0.16 (build 83) — September 15, 2026
+
+- Keep successfully concealed macOS 27 items in a bounded retained inventory,
+  so Hidden remains actionable after Accessibility removes those items from its
+  live tree and after Barline relaunches.
+- Wait for the native assessment assertion's asynchronous acceptance before
+  committing a layout. A rejected replacement leaves the prior assertion and
+  persisted layout intact instead of reporting issuance as success.
+- Treat native assertion acceptance as concealment authority while requiring a
+  fresh Accessibility observation when revealing an item.
 
 - Publish the borderless, nonactivating Barline Bar as an explicit
   Accessibility window. Its native item controls are now traversable from the
