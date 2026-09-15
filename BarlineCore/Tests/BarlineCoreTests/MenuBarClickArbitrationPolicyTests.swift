@@ -72,6 +72,20 @@ struct MenuBarClickArbitrationPolicyTests {
         )
     }
 
+    @Test("A shelf item owns its click even where the shelf overlaps the menu bar")
+    func shelfOwnsOverlappingClick() {
+        #expect(
+            !MenuBarClickArbitrationPolicy.isEmptyMenuBarSpace(
+                isInsideMenuBar: true,
+                isInsideApplicationMenu: false,
+                isInsidePrimaryControlItem: false,
+                eventTargetsShelf: true,
+                isInsideCachedMenuBarItem: false,
+                isInsideNotch: false
+            )
+        )
+    }
+
     @Test("A cold cache cannot classify the primary control item as empty space")
     func primaryControlItemWinsOverColdCache() {
         #expect(

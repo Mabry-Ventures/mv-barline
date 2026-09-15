@@ -1,6 +1,11 @@
 # Changelog
 
-## 1.0.15 (build 66) — September 14, 2026
+## 1.0.15 (build 67) — September 14, 2026
+
+- Treat every click owned by Barline's shelf as a shelf interaction, even in
+  the narrow area where the macOS 27 menu bar and shelf geometries overlap.
+  Activating a custom popover can no longer schedule a delayed empty-space
+  toggle that reopens the shelf over the target interface.
 
 - Present macOS 27 menu bar inventory as readable, named items using native
   Settings colors instead of placing tiny fallback artwork in an imitation

@@ -204,6 +204,10 @@ extension HIDEventManager {
         // geometry or the global cursor snapshot is temporarily out of date.
         let targetsPrimaryControl = appState.menuBarManager.controlItem(withName: .visible)?
             .ownsEventWindow(event.window) == true
+        let shelf = appState.menuBarManager.barlineShelfPanel
+        let targetsShelf = event.window === shelf || (
+            shelf.isVisible && event.cgEvent.map { shelf.frame.contains($0.unflippedLocation) } == true
+        )
         guard
             appState.settings.general.showOnClick,
             let click = event.cgEvent,
@@ -212,7 +216,8 @@ extension HIDEventManager {
                 screen: screen,
                 appKitLocation: click.unflippedLocation,
                 coreGraphicsLocation: click.location,
-                eventTargetsPrimaryControlItem: targetsPrimaryControl
+                eventTargetsPrimaryControlItem: targetsPrimaryControl,
+                eventTargetsShelf: targetsShelf
             )
         else {
             return
@@ -604,7 +609,8 @@ extension HIDEventManager {
         screen: NSScreen,
         appKitLocation: CGPoint? = MouseHelpers.locationAppKit,
         coreGraphicsLocation: CGPoint? = MouseHelpers.locationCoreGraphics,
-        eventTargetsPrimaryControlItem: Bool = false
+        eventTargetsPrimaryControlItem: Bool = false,
+        eventTargetsShelf: Bool = false
     ) -> Bool {
         MenuBarClickArbitrationPolicy.isEmptyMenuBarSpace(
             isInsideMenuBar: isMouseInsideMenuBar(appState: appState, screen: screen, location: appKitLocation),
@@ -614,6 +620,7 @@ extension HIDEventManager {
             // item frame remains authoritative and prevents the same click
             // from toggling once here and again through target-action.
             isInsidePrimaryControlItem: isMouseInsideBarlineIcon(appState: appState, location: appKitLocation),
+            eventTargetsShelf: eventTargetsShelf,
             isInsideCachedMenuBarItem: isMouseInsideMenuBarItem(appState: appState, screen: screen, location: coreGraphicsLocation),
             isInsideNotch: isMouseInsideNotch(appState: appState, screen: screen, location: appKitLocation),
             eventTargetsPrimaryControlItem: eventTargetsPrimaryControlItem,
