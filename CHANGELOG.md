@@ -1,6 +1,10 @@
 # Changelog
 
-## 1.0.15 (build 64) — September 14, 2026
+## 1.0.15 (build 66) — September 14, 2026
+
+- Present macOS 27 menu bar inventory as readable, named items using native
+  Settings colors instead of placing tiny fallback artwork in an imitation
+  menu bar. Empty sections now state clearly that they contain no items.
 
 - Keep macOS 27 menu bar item fallbacks at native icon size instead of
   stretching generic artwork across each item's measured width. Prefer the
