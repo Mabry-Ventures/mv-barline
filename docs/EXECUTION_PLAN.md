@@ -1276,3 +1276,11 @@ Build 74 was rejected before packaging because the clean application compile
 found the modifier adapter's missing explicit AppKit import. Build 75 adds that
 dependency at the app boundary; all qualification evidence must bind to its new
 source SHA and executable.
+
+Build 75 passed the exact clean full gate on macOS 26 and macOS 27, confirming
+the pointer-modifier correction across both toolchains. It is rejected before
+packaging because installed macOS 27 visual inspection found the inventory
+surface resolving light while its semantic labels remained light and became
+invisible. Build 76 uses explicit opaque, contrast-safe light and dark palette
+pairs at that compatibility boundary. Exact signed visual inspection and the
+complete installed journey matrix remain required on both operating systems.

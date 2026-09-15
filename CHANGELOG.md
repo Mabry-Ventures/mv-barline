@@ -341,6 +341,10 @@ certification.
 
 ## Unreleased
 
+- Build 76 fixes a macOS 27 Settings appearance mismatch that could render the
+  menu-bar inventory on a light surface with invisible light labels. The
+  inventory now uses explicit, contrast-safe light and dark palettes.
+
 ### 1.0.8 local candidate corrections
 
 - Route shelf-item clicks through the macOS session event stream with ordered

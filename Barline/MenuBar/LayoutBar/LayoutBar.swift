@@ -19,6 +19,7 @@ struct LayoutBar: View {
     }
 
     @EnvironmentObject var appState: AppState
+    @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var imageCache: MenuBarItemImageCache
 
     let section: MenuBarSection.Name
@@ -31,25 +32,37 @@ struct LayoutBar: View {
         }
     }
 
+    private var inventoryBackground: Color {
+        colorScheme == .dark
+            ? Color(red: 0.19, green: 0.17, blue: 0.17)
+            : Color(red: 0.95, green: 0.95, blue: 0.96)
+    }
+
+    private var inventoryBorder: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.12)
+            : Color.black.opacity(0.12)
+    }
+
     var body: some View {
         if #available(macOS 27.0, *) {
             MenuBarInventoryBar(
                 itemManager: appState.itemManager,
-                section: section
+                section: section,
+                colorScheme: colorScheme
             )
             .frame(height: 48)
             .frame(maxWidth: .infinity)
-            // Keep foreground and background inside the same SwiftUI
-            // appearance environment. NSColor.controlBackgroundColor can
-            // resolve as Aqua on macOS 27 while this window remains dark,
-            // producing light labels on a light surface.
-            .background(Color.primary.opacity(0.055))
+            // macOS 27 can resolve semantic foreground and background styles
+            // against different effective appearances inside Settings. Use an
+            // explicit, opaque pair so labels can never disappear into the bar.
+            .background(inventoryBackground)
             .containerShape(backgroundShape)
             .clipShape(backgroundShape)
             .contentShape([.interaction, .focusEffect], backgroundShape)
             .overlay {
                 backgroundShape
-                    .strokeBorder(.quaternary)
+                    .strokeBorder(inventoryBorder)
             }
         } else {
             mainContent
@@ -79,6 +92,11 @@ private struct MenuBarInventoryBar: View {
     @ObservedObject var itemManager: MenuBarItemManager
 
     let section: MenuBarSection.Name
+    let colorScheme: ColorScheme
+
+    private var emptyForeground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.65) : Color.black.opacity(0.58)
+    }
 
     private var items: [MenuBarItem] {
         itemManager.itemCache.managedItems(for: section)
@@ -88,13 +106,13 @@ private struct MenuBarInventoryBar: View {
         if items.isEmpty {
             Text(emptyMessage)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(emptyForeground)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else {
             ScrollView(.horizontal) {
                 HStack(spacing: 8) {
                     ForEach(items, id: \.stableID) { item in
-                        MenuBarInventoryItem(item: item)
+                        MenuBarInventoryItem(item: item, colorScheme: colorScheme)
                     }
                 }
                 .padding(.horizontal, 10)
@@ -119,6 +137,27 @@ private struct MenuBarInventoryBar: View {
 @available(macOS 27.0, *)
 private struct MenuBarInventoryItem: View {
     let item: MenuBarItem
+    let colorScheme: ColorScheme
+
+    private var foregroundColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.92) : Color.black.opacity(0.84)
+    }
+
+    private var secondaryColor: Color {
+        colorScheme == .dark ? Color.white.opacity(0.65) : Color.black.opacity(0.58)
+    }
+
+    private var capsuleColor: Color {
+        colorScheme == .dark
+            ? Color(red: 0.27, green: 0.24, blue: 0.24)
+            : Color.white
+    }
+
+    private var capsuleBorder: Color {
+        colorScheme == .dark
+            ? Color.white.opacity(0.16)
+            : Color.black.opacity(0.14)
+    }
 
     private var displayName: String {
         item.isControlItem ? "Barline" : item.displayName
@@ -148,20 +187,20 @@ private struct MenuBarInventoryItem: View {
             } else {
                 Image(systemName: fallbackSymbolName)
                     .symbolRenderingMode(.monochrome)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(secondaryColor)
                     .frame(width: 20, height: 20)
             }
 
             Text(displayName)
                 .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(.primary)
+                .foregroundStyle(foregroundColor)
                 .lineLimit(1)
         }
         .padding(.horizontal, 10)
         .frame(height: 34)
-        .background(Color.primary.opacity(0.075), in: Capsule())
+        .background(capsuleColor, in: Capsule())
         .overlay {
-            Capsule().strokeBorder(Color.secondary.opacity(0.16))
+            Capsule().strokeBorder(capsuleBorder)
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(displayName)
