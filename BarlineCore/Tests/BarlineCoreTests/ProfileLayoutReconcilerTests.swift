@@ -145,6 +145,16 @@ struct ProfileLayoutReconcilerTests {
         #expect(!ProfileLayoutReconciler.matches(layout: saved, items: live + [live[0]]))
     }
 
+    @Test("Legacy authority agrees with the layout activation target")
+    func legacyAuthorityMatchesActivationTarget() throws {
+        let saved = ProfileLayout(visible: [id("a"), id("b")])
+        let live = [item("new", 0), item("a", 1), item("b", 2)]
+        let plan = try ProfileLayoutReconciler.planAcrossDisplays(layout: saved, items: live)
+
+        #expect(plan.targets.first?.layout == ProfileLayout(visible: [id("a"), id("b"), id("new")]))
+        #expect(!ProfileLayoutReconciler.matches(layout: saved, items: live))
+    }
+
     @Test("Transaction verification rejects additions, missing anchors, and incorrect order")
     func verifiesCompleteTarget() throws {
         let live = [item("a", 0), item("new", 1), item("fixed", 2, movable: false), item("b", 3)]

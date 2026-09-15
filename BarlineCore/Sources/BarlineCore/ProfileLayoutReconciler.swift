@@ -66,9 +66,7 @@ public enum ProfileLayoutReconciler {
                 hidden: layout.hidden.filter { ids.contains($0) },
                 alwaysHidden: layout.alwaysHidden.filter { ids.contains($0) }
             )
-            if let target = try? logicalSectionTarget(layout: localLayout, items: localItems),
-               observedLayout(items: localItems) == target
-            {
+            if observedLayout(items: localItems) == localLayout {
                 return true
             }
             guard let target = try? reconcile(layout: localLayout, items: localItems) else { return false }
