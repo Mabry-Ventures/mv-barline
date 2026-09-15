@@ -1084,7 +1084,7 @@ extension MenuBarItemManager {
         index: Int
     ) async throws {
         appState?.contextualRules.pauseForManualChange()
-        try await waitForUserToPauseInput()
+        goldenGateConcealmentSyncTask?.cancel()
         guard let appState,
               appState.permissions.accessibility.hasPermission
         else { throw EventError.cannotComplete }

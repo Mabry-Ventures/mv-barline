@@ -134,11 +134,7 @@ actor GoldenGateAXSnapshotProvider {
             }),
             generation: generation
         )
-        let result = logicalLayoutPlanner.applyingExplicitOrder(
-            to: built,
-            assignments: explicitAssignments,
-            fallbackRank: Self.maximumRememberedAssignments
-        )
+        let result = built
         if hiddenControlUsesLiveGeometry, explicitAssignments.isEmpty {
             rememberSections(from: result)
         }
@@ -166,6 +162,7 @@ actor GoldenGateAXSnapshotProvider {
         try await BarlineMenuService.Connection.shared.configureConcealment(
             concealmentConfiguration(for: candidate)
         )
+        generation = candidate.generation
         rememberExplicitLayout(from: candidate)
         cachedAt = DispatchTime.now().uptimeNanoseconds
         cachedSnapshot = candidate
@@ -177,28 +174,11 @@ actor GoldenGateAXSnapshotProvider {
 
     func restore(_ target: MenuBarSnapshot) async throws -> MenuBarMutationResult {
         let current = try snapshot()
-        let targetByID = Dictionary(uniqueKeysWithValues: target.items.map { ($0.id, $0) })
-        guard current.items.allSatisfy({ targetByID[$0.id] != nil }) else {
-            throw MenuBarBackendError.operationFailed("saved layout no longer matches the menu bar")
-        }
-        let ordered = target.items.enumerated().compactMap { index, targetItem in
-            current.items.first(where: { $0.id == targetItem.id })?.replacing(
-                section: targetItem.section,
-                order: index
-            )
-        }
-        let candidate = MenuBarSnapshot(
-            generation: current.generation &+ 1,
-            capturedAt: Date(),
-            items: ordered,
-            displayIDs: current.displayIDs,
-            displayIdentities: current.displayIdentities,
-            activeSpaceIsValid: current.activeSpaceIsValid,
-            menuTrackingIsActive: false
-        )
+        let candidate = try logicalLayoutPlanner.restoring(target, to: current)
         try await BarlineMenuService.Connection.shared.configureConcealment(
             concealmentConfiguration(for: candidate)
         )
+        generation = candidate.generation
         rememberExplicitLayout(from: candidate)
         cachedAt = DispatchTime.now().uptimeNanoseconds
         cachedSnapshot = candidate
@@ -297,13 +277,14 @@ actor GoldenGateAXSnapshotProvider {
     }
 
     private func rememberExplicitLayout(from snapshot: MenuBarSnapshot) {
-        let assignments = BarlineCore.MenuBarSection.allCases.flatMap { section in
-            snapshot.items.filter { $0.section == section }.enumerated().map { rank, item in
-                GoldenGateLogicalAssignment(itemID: item.id, section: section, rank: rank)
-            }
-        }
-        .prefix(Self.maximumRememberedAssignments)
-        let document = ExplicitLayout(version: 1, assignments: Array(assignments))
+        let assignments = logicalLayoutPlanner.assignmentsForPersistence(
+            from: snapshot,
+            preserving: explicitAssignments,
+            barlineBundleIdentifier: Bundle.main.bundleIdentifier
+                ?? "com.mabryventures.Barline",
+            maximumCount: Self.maximumRememberedAssignments
+        )
+        let document = ExplicitLayout(version: 1, assignments: assignments)
         guard let data = try? JSONEncoder().encode(document),
               data.count <= Self.maximumRememberedBytes
         else { return }

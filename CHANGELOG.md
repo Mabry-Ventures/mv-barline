@@ -9,6 +9,12 @@
 - Keep unsupported per-item assignments disabled when macOS exposes multiple
   status items for one application or cannot map an Apple system item safely.
   Physical menu bar ordering remains available through Command-drag.
+- Make each supported macOS 27 item a direct click target as well as a drag
+  source, so visible and hidden assignment remains reliable across SwiftUI
+  drag-session behavior changes.
+- Preserve assignments for temporarily absent applications, advance helper
+  generations after every accepted change, and reject unsafe saved-layout
+  restores without altering the current menu bar.
 
 ## 1.0.15 (build 76) — September 14, 2026
 

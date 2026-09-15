@@ -87,6 +87,121 @@ struct GoldenGateLogicalLayoutPlannerTests {
         #expect(after.items.map(\.id) == [id(2), id(1), id(3)])
     }
 
+    @Test("Persistence retains absent apps and excludes Barline controls")
+    func persistenceRetainsAbsentAssignments() {
+        let absentID = id(9)
+        let controlID = MenuBarItemID(
+            bundleIdentifier: "com.mabryventures.Barline",
+            accessibilityIdentifier: "barline-control",
+            title: "Barline",
+            alias: "occurrence-0"
+        )
+        let before = snapshot([
+            item(1, section: .hidden, order: 0),
+            item(
+                controlID,
+                section: .visible,
+                order: 1,
+                isBarlineControlItem: true
+            ),
+        ])
+        let existing = [
+            absentID: GoldenGateLogicalAssignment(itemID: absentID, section: .hidden, rank: 3),
+            id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .visible, rank: 8),
+        ]
+
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: before,
+            preserving: existing,
+            barlineBundleIdentifier: "com.mabryventures.Barline",
+            maximumCount: 10
+        )
+
+        #expect(assignments.map(\.itemID) == [id(1), absentID])
+        #expect(assignments[0].section == .hidden)
+        #expect(!assignments.contains(where: { $0.itemID == controlID }))
+    }
+
+    @Test("Persistence is deterministically bounded")
+    func persistenceIsBounded() {
+        let before = snapshot([item(1, section: .visible, order: 0)])
+        let existing = Dictionary(uniqueKeysWithValues: (2 ... 5).map { value in
+            let itemID = id(value)
+            return (
+                itemID,
+                GoldenGateLogicalAssignment(itemID: itemID, section: .hidden, rank: value)
+            )
+        })
+
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: before,
+            preserving: existing,
+            barlineBundleIdentifier: "com.mabryventures.Barline",
+            maximumCount: 3
+        )
+
+        #expect(assignments.map(\.itemID) == [id(1), id(2), id(3)])
+    }
+
+    @Test("Restore applies target sections and advances generation")
+    func restoresTargetSections() throws {
+        let current = snapshot([
+            item(1, section: .visible, order: 0),
+            item(2, section: .hidden, order: 1),
+        ])
+        let target = snapshot([
+            item(2, section: .visible, order: 0),
+            item(1, section: .hidden, order: 1),
+        ])
+
+        let restored = try GoldenGateLogicalLayoutPlanner().restoring(target, to: current)
+
+        #expect(restored.generation == current.generation + 1)
+        #expect(restored.items.map(\.id) == [id(2), id(1)])
+        #expect(restored.items.map(\.section) == [.visible, .hidden])
+    }
+
+    @Test("Restore rejects moving an immovable item")
+    func restoreRejectsImmovableItem() {
+        let current = snapshot([
+            item(1, section: .visible, order: 0, isMovable: false),
+        ])
+        let target = snapshot([
+            item(1, section: .hidden, order: 0),
+        ])
+
+        #expect(throws: MenuBarBackendError.self) {
+            try GoldenGateLogicalLayoutPlanner().restoring(target, to: current)
+        }
+    }
+
+    @Test("Restore rejects hiding a non-hideable item")
+    func restoreRejectsNonHideableItem() {
+        let current = snapshot([
+            item(1, section: .visible, order: 0, canBeHidden: false),
+        ])
+        let target = snapshot([
+            item(1, section: .hidden, order: 0),
+        ])
+
+        #expect(throws: MenuBarBackendError.self) {
+            try GoldenGateLogicalLayoutPlanner().restoring(target, to: current)
+        }
+    }
+
+    @Test("Restore rejects duplicate item identities")
+    func restoreRejectsDuplicates() {
+        let current = snapshot([item(1, section: .visible, order: 0)])
+        let target = snapshot([
+            item(1, section: .visible, order: 0),
+            item(1, section: .hidden, order: 1),
+        ])
+
+        #expect(throws: MenuBarBackendError.self) {
+            try GoldenGateLogicalLayoutPlanner().restoring(target, to: current)
+        }
+    }
+
     private func snapshot(_ items: [MenuBarItemDescriptor]) -> MenuBarSnapshot {
         MenuBarSnapshot(
             generation: 10,
@@ -101,15 +216,35 @@ struct GoldenGateLogicalLayoutPlannerTests {
         _ value: Int,
         section: MenuBarSection,
         order: Int,
-        isMovable: Bool = true
+        isMovable: Bool = true,
+        canBeHidden: Bool = true
+    ) -> MenuBarItemDescriptor {
+        item(
+            id(value),
+            section: section,
+            order: order,
+            isMovable: isMovable,
+            canBeHidden: canBeHidden
+        )
+    }
+
+    private func item(
+        _ itemID: MenuBarItemID,
+        section: MenuBarSection,
+        order: Int,
+        isBarlineControlItem: Bool = false,
+        isMovable: Bool = true,
+        canBeHidden: Bool = true
     ) -> MenuBarItemDescriptor {
         MenuBarItemDescriptor(
-            id: id(value),
+            id: itemID,
             section: section,
             order: order,
             displayID: MenuBarDisplayID("display"),
-            displayName: "Item \(value)",
-            isMovable: isMovable
+            isBarlineControlItem: isBarlineControlItem,
+            displayName: itemID.title ?? "Menu Bar Item",
+            isMovable: isMovable,
+            canBeHidden: canBeHidden
         )
     }
 

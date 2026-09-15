@@ -84,6 +84,92 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
         return replacingItems(ordered, in: snapshot)
     }
 
+    /// Produces a bounded, deterministic persistence document. Assignments for
+    /// temporarily absent applications are retained, while control items and
+    /// identities currently observed as invalid are removed.
+    public func assignmentsForPersistence(
+        from snapshot: MenuBarSnapshot,
+        preserving existing: [MenuBarItemID: GoldenGateLogicalAssignment],
+        barlineBundleIdentifier: String,
+        maximumCount: Int
+    ) -> [GoldenGateLogicalAssignment] {
+        guard maximumCount > 0 else { return [] }
+        let observedIDs = Set(snapshot.items.map(\.id))
+        let current = MenuBarSection.allCases.flatMap { section in
+            snapshot.items
+                .filter {
+                    $0.section == section &&
+                        !$0.isBarlineControlItem &&
+                        $0.id.isPlausiblyStable
+                }
+                .enumerated()
+                .map { rank, item in
+                    GoldenGateLogicalAssignment(
+                        itemID: item.id,
+                        section: section,
+                        rank: rank
+                    )
+                }
+        }
+        let retained = existing.values
+            .filter {
+                !observedIDs.contains($0.itemID) &&
+                    $0.itemID.isPlausiblyStable &&
+                    $0.itemID.bundleIdentifier != barlineBundleIdentifier.lowercased() &&
+                    $0.rank >= 0
+            }
+            .sorted {
+                if $0.section != $1.section {
+                    return $0.section.rawValue < $1.section.rawValue
+                }
+                if $0.rank != $1.rank {
+                    return $0.rank < $1.rank
+                }
+                return $0.itemID.description < $1.itemID.description
+            }
+        return Array((current + retained).prefix(maximumCount))
+    }
+
+    /// Reconciles a saved target with the current inventory while enforcing
+    /// the same independent-assignment policy as a direct move.
+    public func restoring(
+        _ target: MenuBarSnapshot,
+        to current: MenuBarSnapshot
+    ) throws -> MenuBarSnapshot {
+        guard Set(target.items.map(\.id)).count == target.items.count,
+              Set(current.items.map(\.id)).count == current.items.count
+        else {
+            throw MenuBarBackendError.operationFailed("saved layout contains duplicate menu bar items")
+        }
+        let targetByID = Dictionary(uniqueKeysWithValues: target.items.map { ($0.id, $0) })
+        guard current.items.allSatisfy({ targetByID[$0.id] != nil }) else {
+            throw MenuBarBackendError.operationFailed("saved layout no longer matches the menu bar")
+        }
+        let ordered: [MenuBarItemDescriptor] = try target.items.enumerated().compactMap { index, targetItem in
+            guard let currentItem = current.items.first(where: { $0.id == targetItem.id }) else {
+                return nil
+            }
+            if currentItem.section != targetItem.section {
+                guard currentItem.isMovable else {
+                    throw MenuBarBackendError.operationFailed(
+                        "saved layout contains an item that cannot be assigned independently"
+                    )
+                }
+                if targetItem.section != .visible, !currentItem.canBeHidden {
+                    throw MenuBarBackendError.operationFailed(
+                        "saved layout contains an item that cannot be hidden"
+                    )
+                }
+            }
+            return currentItem.replacing(section: targetItem.section, order: index)
+        }
+        return replacingItems(
+            ordered,
+            in: current,
+            generation: current.generation &+ 1
+        )
+    }
+
     private func replacingItems(
         _ items: [MenuBarItemDescriptor],
         in snapshot: MenuBarSnapshot,
