@@ -120,6 +120,7 @@ private struct MenuBarInventoryBar: View {
                             MenuBarInventoryItem(
                                 item: item,
                                 colorScheme: colorScheme,
+                                canAssign: item.isMovable && (section != .visible || item.canBeHidden),
                                 onAssign: { assign(item.stableID) }
                             )
                         }
@@ -203,6 +204,7 @@ private struct MenuBarInventoryBar: View {
 private struct MenuBarInventoryItem: View {
     let item: MenuBarItem
     let colorScheme: ColorScheme
+    let canAssign: Bool
     let onAssign: () -> Void
 
     private var foregroundColor: Color {
@@ -276,7 +278,7 @@ private struct MenuBarInventoryItem: View {
         .accessibilityHint("Move to the other visibility section")
         .onDrag {
             let provider = NSItemProvider()
-            guard item.isMovable,
+            guard canAssign,
                   let data = try? JSONEncoder().encode(item.stableID)
             else { return provider }
             provider.registerDataRepresentation(
@@ -288,7 +290,7 @@ private struct MenuBarInventoryItem: View {
             }
             return provider
         }
-        .disabled(!item.isMovable)
+        .disabled(!canAssign)
     }
 }
 

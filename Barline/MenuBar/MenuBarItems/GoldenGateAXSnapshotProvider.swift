@@ -66,7 +66,7 @@ actor GoldenGateAXSnapshotProvider {
                 canSnapshot: canSnapshot,
                 canMove: canSnapshot,
                 canReveal: false,
-                canActivate: false,
+                canActivate: canSnapshot,
                 canRestore: canSnapshot,
                 canCapture: false,
                 moveDestinationSupport: .logicalSectionsPreserveNativeOrder
