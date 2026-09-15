@@ -45,6 +45,20 @@ func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
     return value
 }
 
+func frame(_ element: AXUIElement) -> CGRect? {
+    guard let position = attribute(element, kAXPositionAttribute),
+          let size = attribute(element, kAXSizeAttribute),
+          CFGetTypeID(position) == AXValueGetTypeID(),
+          CFGetTypeID(size) == AXValueGetTypeID()
+    else { return nil }
+    var point = CGPoint.zero
+    var extent = CGSize.zero
+    guard AXValueGetValue(unsafeDowncast(position, to: AXValue.self), .cgPoint, &point),
+          AXValueGetValue(unsafeDowncast(size, to: AXValue.self), .cgSize, &extent)
+    else { return nil }
+    return CGRect(origin: point, size: extent)
+}
+
 func identifiesShelf(_ element: AXUIElement) -> Bool {
     let namedShelf = [kAXTitleAttribute, kAXDescriptionAttribute, "AXIdentifier"].contains {
         (attribute(element, $0) as? String) == "Barline Bar"
@@ -124,6 +138,8 @@ do {
     guard app.bundleURL?.standardizedFileURL == expectedURL else {
         throw SmokeFailure.wrongBundleURL(app.bundleURL)
     }
+    let applicationElement = AXUIElementCreateApplication(app.processIdentifier)
+    AXUIElementSetMessagingTimeout(applicationElement, 0.2)
 
     let deadline = Date().addingTimeInterval(3)
     var windows = [CGRect]()
@@ -158,13 +174,40 @@ do {
         guard let bounds = record[kCGWindowBounds] as? [String: NSNumber] else { return false }
         return (bounds["Width"]?.doubleValue ?? 0) > 0 && (bounds["Height"]?.doubleValue ?? 0) > 0
     }
-    guard !windows.isEmpty || statusItem != nil else {
+    var sourceStatusItems = [AXUIElement]()
+    if let extrasValue = attribute(applicationElement, "AXExtrasMenuBar"),
+       CFGetTypeID(extrasValue) == AXUIElementGetTypeID()
+    {
+        let extras = unsafeDowncast(extrasValue, to: AXUIElement.self)
+        let children = attribute(extras, kAXChildrenAttribute) as? [AXUIElement] ?? []
+        sourceStatusItems = children.filter {
+            (attribute($0, "AXIdentifier") as? String) == "Barline.ControlItem.Visible" &&
+                (attribute($0, kAXRoleAttribute) as? String) == kAXMenuBarItemRole
+        }
+    }
+    var compositedStatusItemVisible = false
+    if sourceStatusItems.count == 1,
+       let sourceFrame = frame(sourceStatusItems[0]),
+       sourceFrame.width > 0,
+       sourceFrame.height > 0
+    {
+        compositedStatusItemVisible = records.contains { record in
+            guard record[kCGWindowName] as? String == "Menubar",
+                  (record[kCGWindowLayer] as? NSNumber)?.intValue == 24,
+                  let bounds = record[kCGWindowBounds] as? [String: NSNumber],
+                  let x = bounds["X"]?.doubleValue,
+                  let y = bounds["Y"]?.doubleValue,
+                  let width = bounds["Width"]?.doubleValue,
+                  let height = bounds["Height"]?.doubleValue
+            else { return false }
+            return CGRect(x: x, y: y, width: width, height: height)
+                .contains(CGPoint(x: sourceFrame.midX, y: sourceFrame.midY))
+        }
+    }
+    guard !windows.isEmpty || statusItem != nil || compositedStatusItemVisible else {
         throw SmokeFailure.noVisibleSurface
     }
     guard !app.isActive else { throw SmokeFailure.shelfActivatedApplication }
-
-    let applicationElement = AXUIElementCreateApplication(app.processIdentifier)
-    AXUIElementSetMessagingTimeout(applicationElement, 0.2)
 
     let shelfCycleCount = 20
     for _ in 0 ..< shelfCycleCount {
