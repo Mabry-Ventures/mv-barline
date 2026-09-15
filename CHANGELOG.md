@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.15 (build 69) — September 14, 2026
+
+- Route natural-language search activation through the same dedicated
+  status-item command path as shelf and item-search activation. No activation
+  entry point can fall back to the transactional layout-mutation API.
+
 ## 1.0.15 (build 68) — September 14, 2026
 
 - Treat status-item activation as an acknowledged command instead of a

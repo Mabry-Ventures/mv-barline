@@ -1188,11 +1188,13 @@ The later build-67 installed reuse journey exposed a successful macOS 27 target
 activation followed by a rejected stale inventory snapshot. Status-item clicks
 are commands owned by the target application, not transactional Barline layout
 mutations: opening a menu may legitimately change status-item state before the
-click returns. Build 68 therefore validates authority and target identity only
+click returns. Build 69 therefore validates authority and target identity only
 before delivery, treats the backend return as the acknowledgement, and performs
 no post-delivery snapshot validation, rollback, or shelf reopen. A regression
 supplies the exact unchanged-generation condition and proves it is never read
-after delivery. Exact build-68 macOS 26 and macOS 27 installed journeys remain
+after delivery. The full build-68 gate also found and rejected a stale generic
+activation call in natural-language search; build 69 routes that final entry
+point through the dedicated API. Exact build-69 macOS 26 and macOS 27 installed journeys remain
 required before distribution.
 
 | Milestone | Owner | Status | Dependencies | Evidence |

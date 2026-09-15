@@ -2,6 +2,7 @@
 # frozen_string_literal: true
 
 manager = File.read('Barline/MenuBar/MenuBarItems/MenuBarItemManager.swift')
+search = File.read('Barline/MenuBar/Search/MenuBarSearchPanel.swift')
 coordinator = File.read('BarlineCore/Sources/BarlineCore/StateCoordinator.swift')
 backend = File.read('Barline/MenuBar/MenuBarItems/XPCMenuBarBackend.swift')
 shelf = File.read('Barline/MenuBar/BarlineShelf/BarlineShelf.swift')
@@ -21,6 +22,7 @@ abort('shelf activation bypasses the compatibility coordinator') if
   manager.include?('BarlineMenuService.Connection.shared.activate')
 
 unless manager.match?(/compatibilityCoordinator\.activateItem\(/) &&
+       search.match?(/case \.activate:.*?compatibilityCoordinator\.activateItem\(/m) &&
        coordinator.match?(/public func activateItem\(.*?try await backend\.activate/m) &&
        !coordinator.match?(/case activate\(MenuBarItemID, MenuBarMouseButton\)/)
   abort('shelf activation is not isolated from transactional layout mutations')

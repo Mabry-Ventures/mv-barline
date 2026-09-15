@@ -756,8 +756,9 @@ private struct MenuBarSearchContentView: View {
                     await profileManager.clearActiveProfileAuthority(ifMatches: priorProfileID)
                 case .activate:
                     guard let itemID = command.targetItemIDs.first else { return }
-                    _ = try await appState.compatibilityCoordinator.perform(
-                        .activate(itemID, .left),
+                    try await appState.compatibilityCoordinator.activateItem(
+                        itemID,
+                        button: .left,
                         expectedGeneration: snapshot.generation
                     )
                 case .show, .hide:
