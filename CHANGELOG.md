@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.16 (build 78) — September 15, 2026
+## 1.0.16 (build 79) — September 15, 2026
 
 - Let macOS 27 users assign supported menu bar items between Barline's visible
   and hidden sections. Barline commits the complete visibility state through
@@ -18,6 +18,8 @@
 - Keep macOS 27 saved layouts and Focus Filters aligned with native status-item
   order while allowing supported items to change visibility sections. Profiles
   no longer depend on the older physical-divider ordering rule on this backend.
+- Keep an explicitly selected Xcode toolchain pinned across every nested
+  validation gate so mixed installations cannot contaminate release evidence.
 
 ## 1.0.15 (build 76) — September 14, 2026
 

@@ -96,6 +96,12 @@ barline_xcode_developer_dir() {
     xcode-select -p
 }
 
+barline_export_developer_dir() {
+    local requested="${1:-}"
+    DEVELOPER_DIR="$(barline_xcode_developer_dir "$requested")"
+    export DEVELOPER_DIR
+}
+
 # SwiftPM in Xcode 27 emits a single product object and places the module next
 # to it. Earlier toolchains emit per-source objects under BarlineCore.build and
 # keep importable modules in a Modules directory. Resolve either layout so the

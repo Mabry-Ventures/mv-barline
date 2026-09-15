@@ -73,7 +73,8 @@ STATUS_CONTEXT="local/macos-arm64"
 DEVELOPER_PATH=""
 if [[ "$MODE" != fast || -n "$XCODE_PATH" ]]; then
     [[ "$(uname -s)" == Darwin && "$(uname -m)" == arm64 ]] || barline_die "$MODE requires an Apple Silicon macOS host"
-    DEVELOPER_PATH="$(barline_xcode_developer_dir "$XCODE_PATH")"
+    barline_export_developer_dir "$XCODE_PATH"
+    DEVELOPER_PATH="$DEVELOPER_DIR"
 fi
 
 command_string() {
