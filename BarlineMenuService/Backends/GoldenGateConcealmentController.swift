@@ -28,8 +28,14 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     }
 
     func configure(_ configuration: MenuBarConcealmentConfiguration) throws {
+        let previousConfiguration = desiredConfiguration
         desiredConfiguration = configuration
-        try applyCurrentState()
+        do {
+            try applyCurrentState()
+        } catch {
+            desiredConfiguration = previousConfiguration
+            throw error
+        }
     }
 
     func beginTemporaryReveal(_ item: MenuBarItemID) throws {

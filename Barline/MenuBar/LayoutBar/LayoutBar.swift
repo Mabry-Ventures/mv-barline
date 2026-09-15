@@ -4,6 +4,7 @@
 //
 
 import BarlineCore
+import CoreTransferable
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -138,11 +139,15 @@ private struct MenuBarInventoryBar: View {
                     .strokeBorder(Color.accentColor, lineWidth: 2)
             }
         }
-        .onDrop(
-            of: [.barlineLayoutItem],
-            isTargeted: $isDropTargeted,
-            perform: acceptDrop
-        )
+        .dropDestination(for: MenuBarLayoutTransfer.self) { transfers, _ in
+            guard let transfer = transfers.first else { return false }
+            Task { @MainActor in
+                await assign(transfer.itemID, to: section)
+            }
+            return true
+        } isTargeted: { targeted in
+            isDropTargeted = targeted
+        }
         .alert("Layout could not be changed", isPresented: $assignmentFailed) {
             Button("OK", role: .cancel) {}
         } message: {
@@ -159,24 +164,6 @@ private struct MenuBarInventoryBar: View {
         case .alwaysHidden:
             "No always-hidden items"
         }
-    }
-
-    private func acceptDrop(_ providers: [NSItemProvider]) -> Bool {
-        guard let provider = providers.first(where: {
-            $0.hasItemConformingToTypeIdentifier(UTType.barlineLayoutItem.identifier)
-        }) else { return false }
-        provider.loadDataRepresentation(forTypeIdentifier: UTType.barlineLayoutItem.identifier) { data, _ in
-            guard let data,
-                  let itemID = try? JSONDecoder().decode(MenuBarItemID.self, from: data)
-            else {
-                Task { @MainActor in assignmentFailed = true }
-                return
-            }
-            Task { @MainActor in
-                await assign(itemID, to: section)
-            }
-        }
-        return true
     }
 
     private func assign(_ itemID: MenuBarItemID) {
@@ -276,21 +263,18 @@ private struct MenuBarInventoryItem: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(displayName)
         .accessibilityHint("Move to the other visibility section")
-        .onDrag {
-            let provider = NSItemProvider()
-            guard canAssign,
-                  let data = try? JSONEncoder().encode(item.stableID)
-            else { return provider }
-            provider.registerDataRepresentation(
-                forTypeIdentifier: UTType.barlineLayoutItem.identifier,
-                visibility: .ownProcess
-            ) { completion in
-                completion(data, nil)
-                return nil
-            }
-            return provider
-        }
+        .draggable(MenuBarLayoutTransfer(itemID: item.stableID))
+        .help(canAssign ? "Click or drag to move this item" : "This item cannot be moved independently")
         .disabled(!canAssign)
+    }
+}
+
+@available(macOS 27.0, *)
+private struct MenuBarLayoutTransfer: Codable, Transferable {
+    let itemID: MenuBarItemID
+
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .barlineLayoutItem)
     }
 }
 

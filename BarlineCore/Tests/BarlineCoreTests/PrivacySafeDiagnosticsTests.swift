@@ -61,6 +61,9 @@ struct PrivacySafeDiagnosticsTests {
         #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.operationFailed(
             "Menu bar event delivery timed out /Users/private"
         )) == "operation_failed")
+        #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.operationFailed(
+            "native concealment did not reach requested visibility"
+        )) == "concealment_postcondition_failed")
     }
 
     @Test func payloadsAreNeverFormatted() {

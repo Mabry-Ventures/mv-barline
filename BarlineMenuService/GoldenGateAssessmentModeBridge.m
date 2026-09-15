@@ -85,11 +85,11 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
     id candidate = ((id (*)(id, SEL))objc_msgSend)(assertionClass, @selector(new));
     if (!configuration || !candidate) return NO;
 
-    dispatch_semaphore_t completionSemaphore = dispatch_semaphore_create(0);
-    __block BOOL activationSucceeded = NO;
-    void (^completion)(id) = ^(id error) {
-        activationSucceeded = error == nil;
-        dispatch_semaphore_signal(completionSemaphore);
+    void (^completion)(NSError *) = ^(NSError *error) {
+        if (error) {
+            NSLog(@"[BarlineAssessment] activation rejected domain=%@ code=%ld",
+                  error.domain, (long)error.code);
+        }
     };
     @try {
         ((void (*)(id, SEL, id, id))objc_msgSend)(
@@ -98,14 +98,12 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
     } @catch (__unused NSException *exception) {
         return NO;
     }
-    if (dispatch_semaphore_wait(
-            completionSemaphore,
-            dispatch_time(DISPATCH_TIME_NOW, (int64_t)(NSEC_PER_SEC))
-        ) != 0 || !activationSucceeded) {
-        ((void (*)(id, SEL))objc_msgSend)(candidate, invalidationSelector);
-        return NO;
-    }
 
+    // Activation completion can be delivered on the same serial executor that
+    // entered this bridge on macOS 27. Blocking that executor while waiting
+    // for the callback creates a self-inflicted timeout. Retain the issued
+    // assertion immediately; the app independently polls the AX tree and only
+    // commits the logical layout after native visibility reaches the target.
     id previous = self.assertion;
     self.assertion = candidate;
     if (previous) ((void (*)(id, SEL))objc_msgSend)(previous, invalidationSelector);

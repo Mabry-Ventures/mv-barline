@@ -6,7 +6,9 @@ The macOS 27 layout inventory no longer advertises a read-only compatibility
 boundary. Supported single-item applications and explicitly mapped Apple system
 items can be assigned between visible and hidden sections. Each operation builds
 and validates a complete logical candidate, asks the helper's native concealment
-controller to apply it, and persists the new state only after that call succeeds.
+controller to apply it, and persists the new state only after Accessibility
+inventory proves that the requested native visibility has converged. Failed
+operations restore the previously verified configuration.
 Ambiguous multi-item applications and unmapped Apple items remain disabled and
 fail visible. Pure empty-section, reverse, same-section, persistence-order, and
 unsupported-item cases pass alongside both operating-system fast gates. Exact

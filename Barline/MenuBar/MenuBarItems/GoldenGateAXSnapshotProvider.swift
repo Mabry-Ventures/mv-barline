@@ -159,9 +159,20 @@ actor GoldenGateAXSnapshotProvider {
         }
 
         let candidate = try logicalLayoutPlanner.applying(operation, to: before)
-        try await BarlineMenuService.Connection.shared.configureConcealment(
-            concealmentConfiguration(for: candidate)
-        )
+        let previousConfiguration = concealmentConfiguration(for: before)
+        do {
+            try await BarlineMenuService.Connection.shared.configureConcealment(
+                concealmentConfiguration(for: candidate)
+            )
+            try await verifyNativeAssignments([
+                source.id: operation.section == .visible,
+            ])
+        } catch {
+            try? await BarlineMenuService.Connection.shared.configureConcealment(
+                previousConfiguration
+            )
+            throw error
+        }
         generation = candidate.generation
         rememberExplicitLayout(from: candidate)
         cachedAt = DispatchTime.now().uptimeNanoseconds
@@ -175,16 +186,32 @@ actor GoldenGateAXSnapshotProvider {
     func restore(_ target: MenuBarSnapshot) async throws -> MenuBarMutationResult {
         let current = try snapshot()
         let candidate = try logicalLayoutPlanner.restoring(target, to: current)
-        try await BarlineMenuService.Connection.shared.configureConcealment(
-            concealmentConfiguration(for: candidate)
-        )
+        let previousConfiguration = concealmentConfiguration(for: current)
+        let changedItems = candidate.items.filter { candidateItem in
+            current.items.first(where: { $0.id == candidateItem.id })?.section != candidateItem.section
+        }
+        do {
+            try await BarlineMenuService.Connection.shared.configureConcealment(
+                concealmentConfiguration(for: candidate)
+            )
+            try await verifyNativeAssignments(
+                Dictionary(uniqueKeysWithValues: changedItems.map {
+                    ($0.id, $0.section == .visible)
+                })
+            )
+        } catch {
+            try? await BarlineMenuService.Connection.shared.configureConcealment(
+                previousConfiguration
+            )
+            throw error
+        }
         generation = candidate.generation
         rememberExplicitLayout(from: candidate)
         cachedAt = DispatchTime.now().uptimeNanoseconds
         cachedSnapshot = candidate
         return MenuBarMutationResult(
             generation: candidate.generation,
-            changedItemIDs: candidate.items.map(\.id)
+            changedItemIDs: changedItems.map(\.id)
         )
     }
 
@@ -304,6 +331,36 @@ actor GoldenGateAXSnapshotProvider {
             concealedItemIDs: snapshot.items.filter {
                 !$0.isBarlineControlItem && $0.section != .visible
             }.map(\.id)
+        )
+    }
+
+    /// The private assertion acknowledges asynchronously and the AX tree
+    /// settles independently. Never publish or persist a logical assignment
+    /// until the native menu bar has reached the requested visibility.
+    private func verifyNativeAssignments(
+        _ expectations: [MenuBarItemID: Bool]
+    ) async throws {
+        guard !expectations.isEmpty else { return }
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        repeat {
+            try Task.checkCancellation()
+            let observedIDs = GoldenGateMenuBarSnapshotBuilder.identifiers(
+                for: collectEntries().map(\.observation)
+            )
+            let didConverge = expectations.allSatisfy { itemID, shouldBeVisible in
+                let isVisible = GoldenGateMenuBarIdentityResolver.resolve(
+                    itemID,
+                    among: observedIDs
+                ) != nil
+                return isVisible == shouldBeVisible
+            }
+            if didConverge {
+                return
+            }
+            try await Task.sleep(for: .milliseconds(100))
+        } while ContinuousClock.now < deadline
+        throw MenuBarBackendError.operationFailed(
+            "native concealment did not reach requested visibility"
         )
     }
 

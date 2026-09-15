@@ -1,11 +1,11 @@
 # Changelog
 
-## 1.0.16 (build 79) — September 15, 2026
+## 1.0.16 (build 80) — September 15, 2026
 
 - Let macOS 27 users assign supported menu bar items between Barline's visible
   and hidden sections. Barline commits the complete visibility state through
-  macOS's native concealment controller and persists it only after the system
-  accepts the change.
+  macOS's native concealment controller and persists it only after Accessibility
+  inventory proves the system reached the requested visibility.
 - Keep unsupported per-item assignments disabled when macOS exposes multiple
   status items for one application or cannot map an Apple system item safely.
   Physical menu bar ordering remains available through Command-drag.
@@ -20,6 +20,9 @@
   no longer depend on the older physical-divider ordering rule on this backend.
 - Keep an explicitly selected Xcode toolchain pinned across every nested
   validation gate so mixed installations cannot contaminate release evidence.
+- Use macOS 27's typed drag-and-drop path for Settings assignments, verify the
+  native menu bar reaches the requested visibility before persisting a change,
+  and restore the prior configuration after any rejected or timed-out update.
 
 ## 1.0.15 (build 76) — September 14, 2026
 

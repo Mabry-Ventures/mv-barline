@@ -351,9 +351,6 @@ extension BarlineMenuService {
         }
 
         func send(request: Request) -> Response? {
-            if case .configureConcealment = request {
-                latestConcealmentRequest.withLock { $0 = request }
-            }
             let semaphore = DispatchSemaphore(value: 0)
             let result = OSAllocatedUnfairLock<Response?>(initialState: nil)
             transportQueue.async { [self] in
@@ -377,7 +374,16 @@ extension BarlineMenuService {
                 cancel(reason: "Request timed out")
                 return nil
             }
-            return result.withLock { $0.take() }
+            let response = result.withLock { $0.take() }
+            if case .configureConcealment = request,
+               case .activation(.success) = response
+            {
+                // Recovery may only replay a configuration the helper
+                // actually accepted. A rejected request must not become the
+                // next process's startup state.
+                latestConcealmentRequest.withLock { $0 = request }
+            }
+            return response
         }
 
         private func performSendReplayingConcealmentIfNeeded(request: Request) -> Response? {

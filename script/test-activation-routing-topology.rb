@@ -10,6 +10,10 @@ helper_backend = File.read('BarlineMenuService/Backends/CompatibilityBackends.sw
 helper_inventory = File.read('BarlineMenuService/WindowServer/GoldenGateAXInventory.swift')
 helper_client = File.read('BarlineMenuService/WindowServer/WindowServerClient.swift')
 concealment = File.read('BarlineMenuService/Backends/GoldenGateConcealmentController.swift')
+assessment_bridge = File.read('BarlineMenuService/GoldenGateAssessmentModeBridge.m')
+golden_gate_provider = File.read('Barline/MenuBar/MenuBarItems/GoldenGateAXSnapshotProvider.swift')
+service_connection = File.read('Barline/MenuBar/MenuBarItems/BarlineMenuServiceConnection.swift')
+layout_bar = File.read('Barline/MenuBar/LayoutBar/LayoutBar.swift')
 bridge_header = File.read('BarlineMenuService/BarlineMenuService-Bridging-Header.h')
 click_delivery = helper_client.split('private func deliverClick', 2).last
   .split('private enum MovePlacement', 2).first
@@ -64,6 +68,21 @@ unless concealment.include?('BLNGoldenGateAssessmentCreate()') &&
        bridge_header.include?('BLNGoldenGateAssessmentApply') &&
        !concealment.include?('resolve("BLNGoldenGateAssessment')
   abort('Golden Gate concealment bridge is not compile-time linked')
+end
+
+if assessment_bridge.include?('dispatch_semaphore_wait')
+  abort('Golden Gate assertion activation blocks the callback executor')
+end
+
+unless golden_gate_provider.include?('verifyNativeAssignments') &&
+       golden_gate_provider.match?(/catch \{.*?configureConcealment\(.*?previousConfiguration/m) &&
+       service_connection.match?(/case \.configureConcealment = request,.*?case \.activation\(\.success\) = response/m)
+  abort('Golden Gate concealment is not verified, rolled back, and replayed transactionally')
+end
+
+unless layout_bar.include?('.draggable(MenuBarLayoutTransfer(') &&
+       layout_bar.include?('.dropDestination(for: MenuBarLayoutTransfer.self)')
+  abort('macOS 27 layout assignment does not use typed drag and drop')
 end
 
 unless helper_client.match?(/func activate\(_ itemID:.*?synthesizeClick\(item: item, pid: resolvedEventPID/m) &&
