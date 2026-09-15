@@ -1768,8 +1768,15 @@ final class ProfileManager: ObservableObject {
     private func profileMatchesCheckpoint(
         _ profile: BarlineProfile,
         checkpoint: MenuBarWorkspaceCheckpoint
-    ) -> Bool {
-        ProfileAuthorityMatcher.matches(profile: profile, checkpoint: checkpoint)
+    ) async -> Bool {
+        guard let appState else { return false }
+        let destinationSupport = await appState.compatibilityCoordinator.capabilities
+            .moveDestinationSupport ?? .existingItemRequired
+        return ProfileAuthorityMatcher.matches(
+            profile: profile,
+            checkpoint: checkpoint,
+            destinationSupport: destinationSupport
+        )
     }
 
     private func decodeFocusCheckpoint(_ data: Data) -> MenuBarWorkspaceCheckpoint? {
@@ -1887,7 +1894,7 @@ final class ProfileManager: ObservableObject {
             setActiveProfileAuthorityToken(nil)
             return nil
         }
-        guard profileMatchesCheckpoint(profile, checkpoint: checkpoint) else {
+        guard await profileMatchesCheckpoint(profile, checkpoint: checkpoint) else {
             _ = await appState.compatibilityCoordinator.clearActiveProfileAuthority(
                 ifMatches: profileID
             )
