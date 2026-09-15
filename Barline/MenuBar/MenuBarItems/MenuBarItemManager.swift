@@ -27,10 +27,10 @@ final class MenuBarItemManager: ObservableObject {
 
     private var isRestoringItems = false
     private var visibleInterfaceTasks = [MenuBarRevealObservationToken: Task<Void, Never>]()
-    private var goldenGateConcealmentSyncTask: Task<Void, Never>?
+    private let goldenGateConcealmentSyncDebouncer = GoldenGateConcealmentSyncDebouncer()
 
     deinit {
-        goldenGateConcealmentSyncTask?.cancel()
+        goldenGateConcealmentSyncDebouncer.cancel()
         for task in visibleInterfaceTasks.values {
             task.cancel()
         }
@@ -579,14 +579,8 @@ extension MenuBarItemManager {
 
     func scheduleGoldenGateConcealmentSync() {
         guard #available(macOS 27.0, *) else { return }
-        goldenGateConcealmentSyncTask?.cancel()
-        goldenGateConcealmentSyncTask = Task { [weak self] in
-            // The macOS 27 inventory provider caches snapshots for 100 ms.
-            // Debounce beyond that window so the ordinary path obtains a fresh
-            // generation immediately; the coordinator's bounded retry remains
-            // the safety net for scheduler delay and transient provider errors.
-            try? await Task.sleep(for: .milliseconds(125))
-            guard !Task.isCancelled, let self, let appState else { return }
+        goldenGateConcealmentSyncDebouncer.schedule { [weak self] in
+            guard let self, let appState else { return }
 
             var concealedSections = [BarlineCore.MenuBarSection]()
             for sectionName in MenuBarSection.Name.allCases {
@@ -1086,11 +1080,7 @@ extension MenuBarItemManager {
         index _: Int
     ) async throws {
         appState?.contextualRules.pauseForManualChange()
-        if let syncTask = goldenGateConcealmentSyncTask {
-            syncTask.cancel()
-            await syncTask.value
-            goldenGateConcealmentSyncTask = nil
-        }
+        await goldenGateConcealmentSyncDebouncer.cancelAndWait()
         guard let appState,
               appState.permissions.accessibility.hasPermission
         else { throw EventError.cannotComplete }

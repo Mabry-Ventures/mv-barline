@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.16 (build 88) — September 15, 2026
+## 1.0.16 (build 89) — September 15, 2026
 
 - Serialize macOS 27 presentation synchronization with moves, saved-layout
   activation, Focus changes, history, rollback, and helper recovery. A delayed
@@ -21,6 +21,9 @@
   short discovery-cache window instead of dropping the native update.
 - Schedule routine presentation reconciliation beyond the provider cache window
   to avoid unnecessary mutation-turn contention while retaining bounded retry.
+- Define the macOS 27 discovery-cache and presentation-debounce windows from one
+  timing policy, with direct app-layer coverage for burst deduplication and
+  cancellation before assignment.
 
 ## 1.0.16 (build 84) — September 15, 2026
 

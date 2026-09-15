@@ -56,7 +56,6 @@ actor GoldenGateAXSnapshotProvider {
 
     private static let maximumItemHeight: CGFloat = 40
     private static let duplicateTolerance: CGFloat = 1
-    private static let cacheLifetimeNanoseconds: UInt64 = 100_000_000
     private static let menuBarAgentBundleIdentifier = "com.apple.MenuBarAgent"
     private static let rememberedSectionsKey = "GoldenGateRememberedMenuBarSections"
     private static let explicitLayoutKey = "GoldenGateExplicitMenuBarLayout"
@@ -94,7 +93,7 @@ actor GoldenGateAXSnapshotProvider {
         if let cachedAt,
            let cachedSnapshot,
            now >= cachedAt,
-           now - cachedAt < Self.cacheLifetimeNanoseconds
+           now - cachedAt < GoldenGateTiming.snapshotCacheLifetimeNanoseconds
         {
             return cachedSnapshot
         }
