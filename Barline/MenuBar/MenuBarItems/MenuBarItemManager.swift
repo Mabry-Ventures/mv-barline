@@ -908,7 +908,7 @@ extension MenuBarItemManager {
     }
 
     private nonisolated func hasUserPausedInput(for duration: Duration) -> Bool {
-        NSEvent.modifierFlags.isEmpty &&
+        !MouseHelpers.hasActivePointerModifiers() &&
             !MouseHelpers.lastMovementOccurred(within: duration) &&
             !MouseHelpers.lastScrollWheelOccurred(within: duration) &&
             !MouseHelpers.isButtonPressed()

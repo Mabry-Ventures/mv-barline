@@ -1264,3 +1264,10 @@ already moved beyond that frame during asynchronous fallback publication.
 Build 73 disables Golden Gate item capture at the cache boundary, supplies
 fixed-width semantic shelf artwork without Screen Recording, and makes the
 journey wait for stable in-window geometry. Build 72 is rejected.
+
+The exact signed build-73 shelf rendered stable artwork on macOS 27, but its
+native journey exposed a persistent Numeric Pad modifier flag (`0x200000`) on
+that host. The generic input-idle guard treated the device flag as a held key,
+timed out after ten seconds, and rejected every item activation. Build 74 limits
+that guard to modifiers that can actually change pointer routing. Build 73 is
+rejected; both exact OS lanes and installed journeys must be repeated.

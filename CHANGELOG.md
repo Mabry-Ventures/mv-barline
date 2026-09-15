@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.15 (build 74) — September 14, 2026
+
+- Ignore persistent keyboard-device flags such as Numeric Pad and Caps Lock
+  when waiting for pointer input to settle. macOS 27 can report Numeric Pad
+  continuously with no held key; shelf activation now waits only for actual
+  Command, Option, Control, Shift, or Function chords.
+
 ## 1.0.15 (build 73) — September 14, 2026
 
 - Make the macOS 27 shelf use fixed-width application icons and semantic SF

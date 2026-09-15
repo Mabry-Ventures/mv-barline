@@ -3,11 +3,31 @@
 //  Barline
 //
 
+import BarlineCore
 import CoreGraphics
 import OSLog
 
 /// A namespace for mouse helper operations.
 enum MouseHelpers {
+    /// Device and toggle flags such as Numeric Pad and Caps Lock remain set
+    /// while no key is physically held. Only modifiers that can change a menu
+    /// bar pointer action should keep an item transaction waiting.
+    static func hasActivePointerModifiers(
+        _ flags: NSEvent.ModifierFlags = NSEvent.modifierFlags
+    ) -> Bool {
+        let blocking: NSEvent.ModifierFlags = [
+            .command,
+            .option,
+            .control,
+            .shift,
+            .function,
+        ]
+        return PointerInputIdlePolicy.hasActivePointerModifier(
+            flagsRawValue: flags.rawValue,
+            blockingMaskRawValue: blocking.rawValue
+        )
+    }
+
     /// Returns the location of the mouse cursor in the coordinate
     /// space used by `AppKit`, with the origin at the bottom left
     /// of the screen.
@@ -72,7 +92,7 @@ enum MouseHelpers {
         if let button {
             return CGEventSource.buttonState(stateID, button: button)
         }
-        for n: UInt32 in 0...31 {
+        for n: UInt32 in 0 ... 31 {
             guard
                 let button = CGMouseButton(rawValue: n),
                 CGEventSource.buttonState(stateID, button: button)
