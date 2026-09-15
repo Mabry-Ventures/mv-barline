@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.15 (build 76) — September 14, 2026
+
+- Fix a macOS 27 Settings appearance mismatch that could render the menu-bar
+  inventory on a light surface with invisible light labels. The inventory now
+  uses explicit, contrast-safe light and dark palettes.
+
 ## 1.0.15 (build 75) — September 14, 2026
 
 - Complete the input-idle fix with an explicit AppKit dependency at the app
@@ -338,12 +344,6 @@ and per-item global shortcuts remain future work, not release features.
 
 Changes below describe historical development candidates and are not release
 certification.
-
-## Unreleased
-
-- Build 76 fixes a macOS 27 Settings appearance mismatch that could render the
-  menu-bar inventory on a light surface with invisible light labels. The
-  inventory now uses explicit, contrast-safe light and dark palettes.
 
 ### 1.0.8 local candidate corrections
 
