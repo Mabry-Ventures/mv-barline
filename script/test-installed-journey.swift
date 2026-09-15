@@ -422,7 +422,8 @@ do {
             (attribute($0, kAXRoleAttribute) as? String) == kAXMenuBarItemRole
     }
     guard sourceItems.count == 1, let sourceControl = sourceItems.first.flatMap(frame),
-          sourceControl.width > 0, sourceControl.width < 100, sourceControl.height > 0 else {
+          sourceControl.width > 0, sourceControl.width < 100, sourceControl.height > 0
+    else {
         throw JourneyError.failed("status_control_source_unverified")
     }
     let controls = windows().filter { $0[kCGWindowName as String] as? String == "Barline.ControlItem.Visible" }
@@ -492,9 +493,55 @@ do {
         print("{\"stage\":\"shelf_ax_traversal\",\"verdict\":\"FAIL\",\"fallback\":\"bounded_shelf_hit_test\"}")
         shelfItem = hitTestShelfTarget()
     }
-    guard let shelfItem, let verifiedItem = validatedShelfButton(shelfItem), let shelfFrame = frame(verifiedItem) else {
+    guard let shelfItem, let verifiedItem = validatedShelfButton(shelfItem) else {
         throw JourneyError.failed("synthetic_fixture_unresolved_after_scoped_shelf_hit_test")
     }
+    var stableShelfFrame: CGRect?
+    var stableWindowFrame: CGRect?
+    var consecutiveStableSamples = 0
+    try wait("synthetic_fixture_geometry_did_not_stabilize", seconds: 3) {
+        guard let candidate = frame(verifiedItem), let currentWindow = shelfWindowFrame(),
+              candidate.width > 0, candidate.height > 0,
+              currentWindow.contains(CGPoint(x: candidate.midX, y: candidate.midY))
+        else {
+            consecutiveStableSamples = 0
+            stableShelfFrame = nil
+            stableWindowFrame = nil
+            return false
+        }
+        if let priorButton = stableShelfFrame, let priorWindow = stableWindowFrame,
+           sameFrame(priorButton, candidate), sameFrame(priorWindow, currentWindow)
+        {
+            consecutiveStableSamples += 1
+        } else {
+            consecutiveStableSamples = 1
+        }
+        stableShelfFrame = candidate
+        stableWindowFrame = currentWindow
+        return consecutiveStableSamples >= 3
+    }
+    guard let shelfFrame = stableShelfFrame, let currentShelf = stableWindowFrame else {
+        throw JourneyError.failed("synthetic_fixture_stable_geometry_unavailable")
+    }
+    let shelfGeometry: [String: Any] = [
+        "stage": "shelf_target_geometry",
+        "button": [
+            "x": shelfFrame.minX,
+            "y": shelfFrame.minY,
+            "width": shelfFrame.width,
+            "height": shelfFrame.height,
+        ],
+        "window": [
+            "x": currentShelf.minX,
+            "y": currentShelf.minY,
+            "width": currentShelf.width,
+            "height": currentShelf.height,
+        ],
+        "buttonInsideWindow": currentShelf.contains(
+            CGPoint(x: shelfFrame.midX, y: shelfFrame.midY)
+        ),
+    ]
+    try print(String(decoding: JSONSerialization.data(withJSONObject: shelfGeometry, options: [.sortedKeys]), as: UTF8.self))
     try click(shelfFrame, right: right)
     print("{\"stage\":\"shelf_target_clicked\"}")
     try wait("target_did_not_receive_click_and_open_interface") {

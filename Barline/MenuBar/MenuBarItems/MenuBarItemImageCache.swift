@@ -195,6 +195,16 @@ final class MenuBarItemImageCache: ObservableObject {
     /// Updates the cache for the given sections, without checking whether
     /// caching is necessary.
     func updateCacheWithoutChecks(sections: [MenuBarSection.Name]) async {
+        // Golden Gate no longer guarantees per-status-item WindowServer
+        // surfaces. Publishing partial or blank captures after the shelf is
+        // already visible also changes its geometry underneath the pointer.
+        // macOS 27 presentation uses stable application/SF Symbol artwork.
+        if #available(macOS 27.0, *) {
+            if !images.isEmpty {
+                images.removeAll()
+            }
+            return
+        }
         guard
             let appState,
             appState.hasPermission(.screenRecording)
@@ -312,6 +322,9 @@ final class MenuBarItemImageCache: ObservableObject {
     /// failed for the given section.
     @MainActor
     func cacheFailed(for section: MenuBarSection.Name) -> Bool {
+        if #available(macOS 27.0, *) {
+            return false
+        }
         guard ScreenCapture.cachedCheckPermissions() else {
             return true
         }

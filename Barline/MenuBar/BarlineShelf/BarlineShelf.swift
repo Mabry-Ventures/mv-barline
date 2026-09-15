@@ -799,7 +799,11 @@ private struct BarlineShelfContentView: View {
             switch element {
             case let .item(itemID):
                 if let item = itemByID[itemID] {
-                    width += imageCache.images[item.stableID]?.scaledSize.width ?? max(24, item.bounds.width)
+                    if #available(macOS 27.0, *) {
+                        width += 28
+                    } else {
+                        width += imageCache.images[item.stableID]?.scaledSize.width ?? max(24, item.bounds.width)
+                    }
                 }
             case let .spacer(_, spacerWidth):
                 width += spacerWidth
@@ -846,7 +850,7 @@ private struct BarlineShelfContentView: View {
 
     @ViewBuilder
     private var content: some View {
-        if !ScreenCapture.cachedCheckPermissions() {
+        if requiresScreenCapture && !ScreenCapture.cachedCheckPermissions() {
             HStack {
                 Text("The Barline Bar requires screen recording permissions.")
 
@@ -938,6 +942,13 @@ private struct BarlineShelfContentView: View {
                 scrollIndicatorsFlashTrigger += 1
             }
         }
+    }
+
+    private var requiresScreenCapture: Bool {
+        if #available(macOS 27.0, *) {
+            return false
+        }
+        return true
     }
 
     private func toggleGroup(_ id: UUID) {
@@ -1062,10 +1073,44 @@ private struct BarlineShelfItemView: View {
     }
 
     private var image: NSImage? {
+        if #available(macOS 27.0, *) {
+            guard item.isControlItem || !item.stableID.bundleIdentifier.hasPrefix("com.apple.") else {
+                return NSImage(
+                    systemSymbolName: MenuBarInventoryPresentation.fallbackSymbolName(
+                        displayName: item.displayName,
+                        title: item.title
+                    ),
+                    accessibilityDescription: item.displayName
+                )
+            }
+            return item.sourceApplication?.icon
+                ?? item.owningApplication?.icon
+                ?? NSImage(
+                    systemSymbolName: MenuBarInventoryPresentation.fallbackSymbolName(
+                        displayName: item.displayName,
+                        title: item.title
+                    ),
+                    accessibilityDescription: item.displayName
+                )
+        }
         guard let cachedImage = imageCache.images[item.stableID] else {
             return nil
         }
         return cachedImage.nsImage
+    }
+
+    private var itemWidth: CGFloat {
+        if #available(macOS 27.0, *) {
+            return 28
+        }
+        return image?.size.width ?? max(24, item.bounds.width)
+    }
+
+    private var itemHeight: CGFloat {
+        if #available(macOS 27.0, *) {
+            return 24
+        }
+        return image?.size.height ?? 24
     }
 
     var body: some View {
@@ -1076,17 +1121,16 @@ private struct BarlineShelfItemView: View {
             rightClickAction: rightClickAction
         )
         .frame(
-            width: image?.size.width ?? max(24, item.bounds.width),
-            height: image?.size.height ?? 24
+            width: itemWidth,
+            height: itemHeight
         )
     }
 }
 
 // MARK: - BarlineShelfItemClickView
 
-// SwiftUI's hosting view must identify this representable's native control.
-// swiftlint:disable:next private_over_fileprivate
-fileprivate struct BarlineShelfItemClickView: NSViewRepresentable {
+/// Lets the SwiftUI hosting view identify this representable's native control.
+private struct BarlineShelfItemClickView: NSViewRepresentable {
     fileprivate final class Represented: NSButton {
         private let logger = Logger(category: "BarlineShelfItemButton")
         private var suppressLeftMouseUp = false

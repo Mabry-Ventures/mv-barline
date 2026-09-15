@@ -1256,3 +1256,11 @@ background with the dark SwiftUI Settings foreground and still consumed
 unreliable per-item captures. Build 72 uses one semantic SwiftUI appearance
 boundary and deterministic named artwork for macOS 27. Exact signed visual,
 installed-journey, and both-OS release qualification remain required.
+
+The signed build-72 macOS 27 visual gate passed, but its first installed native
+journey exposed a second use of the unsupported capture path in the shelf. The
+shelf window initially measured 216 points wide while its resolved target had
+already moved beyond that frame during asynchronous fallback publication.
+Build 73 disables Golden Gate item capture at the cache boundary, supplies
+fixed-width semantic shelf artwork without Screen Recording, and makes the
+journey wait for stable in-window geometry. Build 72 is rejected.

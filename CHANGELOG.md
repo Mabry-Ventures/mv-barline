@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.15 (build 73) — September 14, 2026
+
+- Make the macOS 27 shelf use fixed-width application icons and semantic SF
+  Symbols immediately instead of attempting unsupported per-item captures
+  after presentation. Its click targets no longer move between mouse-down and
+  mouse-up, and the fallback path no longer requires Screen Recording.
+- Require three consecutive, in-window geometry samples in the installed
+  native-click gate so the test never clicks a shelf that is still laying out.
+
 ## 1.0.15 (build 72) — September 14, 2026
 
 - Render the macOS 27 menu bar inventory entirely with SwiftUI semantic
