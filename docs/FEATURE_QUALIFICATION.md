@@ -1,12 +1,12 @@
 # Reliability-first feature qualification
 
-Published release: **1.0.14, build 62** (September 14, 2026), tag `v1.0.14` at
-`d749eb63dfd114fcdb78f5e5a4e744cf7cca88be`. Its exact signed executable passed
+Published release: **1.0.15, build 76** (September 15, 2026), tag `v1.0.15` at
+`b68f9fc6442849f7b2d48901ffb9686082314d0b`. Its exact signed executable passed
 the six-receipt installed suite on macOS 26.6.2 and macOS 27 RC 26A428. The
 public DMG, ZIP, source archive, SBOM, checksums, and appcast were downloaded
 again and matched the locally qualified artifacts. A signed Sparkle update from
-public 1.0.13 preserved preferences and recovery-state digests.
-Installed build 38 is the update-source runtime evidence baseline.
+public 1.0.14 preserved preferences and installed the exact candidate hash.
+Installed build 62 is the update-source runtime evidence baseline.
 Implementation is not a release certificate.
 Use the final source SHA and signed executable hash for every installed receipt.
 Failed attempts remain in local evidence; do not replace them with a later pass.
@@ -45,23 +45,22 @@ Failed attempts remain in local evidence; do not replace them with a later pass.
 
 ## Current boundary
 
-Build 62 passed 422 Core tests, fixture and independent Accessibility checks,
+Build 76 passed 430 Core tests, fixture and independent Accessibility checks,
 Debug/Release build and analysis, privacy and permission checks, release
 topology, signing, notarization, stapling, Gatekeeper, and repository hygiene.
 On both supported operating systems, native left/right and popover left/reuse
 journeys, a 20-cycle performance receipt, and forced helper recovery passed with
-zero timeouts. Measured shelf p95 was 92.8 ms on macOS 26 and 121.4 ms on macOS
-27, below the 250 ms budget. A clean post-upgrade evidence-directory rerun also
-passed all six receipts at 125.1 ms p95.
+zero timeouts. Measured shelf p95 was 102.2 ms on macOS 26 and 123.3 ms on
+macOS 27, below the 250 ms budget. Signed upgrades from public 1.0.14 and clean DMG installs
+also passed on both systems with the exact candidate executable hash.
 
-One immediate macOS 26 fixture restoration attempt and one additional fresh
-synthetic post-upgrade restoration attempt required recovery/retest. The failed
-attempts and test-only recovery journal remain retained; later passes do not
-erase them. The monolithic Xcode test-plan and XCUITest commands also encountered
-host runner-connection failures, while direct execution of the built unit and
-integration bundles passed. These are explicit evidence boundaries, not hidden
-green results. Physical display-transition, long soak, and manual assistive-
-technology scenarios remain separate from the shipped core qualification.
+Earlier failed fixture and synthetic restoration attempts remain retained; later
+passes do not erase them. Build 76's Xcode test plan passed on both hosts. All
+three XCUITests ran on macOS 26; Xcode 27 ran the non-injection case and explicitly
+skipped two status-item injections that the runner does not deliver. The stronger
+installed physical journeys passed all four target lanes on macOS 27. Physical
+display-transition, long soak, and manual assistive-technology scenarios remain
+separate from the shipped core qualification.
 
 ### Historical candidate evidence
 

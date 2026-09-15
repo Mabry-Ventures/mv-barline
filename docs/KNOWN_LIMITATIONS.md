@@ -1,6 +1,6 @@
 # Known limitations and release status
 
-This page describes the boundaries of Barline 1.0.14. Release evidence is bound
+This page describes the boundaries of Barline 1.0.15. Release evidence is bound
 to its exact source and signed binary; it is not blanket approval for later
 changes.
 
@@ -41,12 +41,12 @@ validation requirements; see [search architecture](SEARCH_AND_APPLE_INTELLIGENCE
 
 ## Current reliability and distribution boundary
 
-Barline 1.0.14 (build 62) was published on September 14, 2026. Its exact
+Barline 1.0.15 (build 76) was published on September 15, 2026. Its exact
 Developer ID executable and disk image are notarized, stapled, Gatekeeper-
-accepted, and hash-bound to tag `v1.0.14`. Native left/right and popover journeys,
+accepted, and hash-bound to tag `v1.0.15`. Native left/right and popover journeys,
 20-cycle shelf performance, and forced helper recovery passed on macOS 26.6.2
-and macOS 27 RC 26A428 with zero timeouts. The signed update from public 1.0.13
-and a fresh public-asset download were verified separately.
+and macOS 27 RC 26A428 with zero timeouts. The signed update from public 1.0.14,
+clean DMG installs, and fresh public-asset downloads passed on both supported systems.
 
 One immediate macOS 26 fixture restoration attempt and one extra fresh
 synthetic post-upgrade restoration attempt did not restore position within the
@@ -56,7 +56,7 @@ journal instead of silently discarding the original position. Physical display
 transitions, release-duration soak, VoiceOver, and Full Keyboard Access remain
 separate open evidence classes.
 
-A rare rapid-close miss was recorded in releases through 1.0.13. Build 62's
+A rare rapid-close miss was recorded in releases through 1.0.13. Build 76's
 candidate-bound performance receipts completed without a shelf-open timeout on
 either supported operating system, but that bounded result is not a claim that
 third-party status items or future macOS updates can never fail.

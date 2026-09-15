@@ -62,8 +62,8 @@ test('every local link and asset resolves, every local fragment exists', async (
 });
 test('production links the qualified release and presents the supported configuration', async () => {
   const html = await readFile(join(output, 'index.html'), 'utf8');
-  assert.match(html, /Download Barline 1\.0\.14/);
-  assert.match(html, /Barline 1\.0\.14 release notes/);
+  assert.match(html, /Download Barline 1\.0\.15/);
+  assert.match(html, /Barline 1\.0\.15 release notes/);
   assert.match(html, /Corresponding source/);
   assert.match(html, /Checksums/);
   assert.match(html, /Apple Silicon · macOS 26 and macOS 27/);
