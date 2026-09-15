@@ -1027,7 +1027,12 @@ public actor MenuBarStateCoordinator {
             activeDisplayID: resolvedPresentation.destinationDisplayID,
             workspace: workspace
         )
-        guard ProfileAuthorityMatcher.matches(profile: profile, checkpoint: checkpoint) else {
+        let destinationSupport = await backend.capabilities.moveDestinationSupport ?? .existingItemRequired
+        guard ProfileAuthorityMatcher.matches(
+            profile: profile,
+            checkpoint: checkpoint,
+            destinationSupport: destinationSupport
+        ) else {
             activeProfileID = nil
             return nil
         }
@@ -1094,7 +1099,12 @@ public actor MenuBarStateCoordinator {
             activeDisplayID: resolvedPresentation.destinationDisplayID,
             workspace: liveWorkspace
         )
-        if ProfileAuthorityMatcher.matches(profile: profile, checkpoint: liveCheckpoint) {
+        let destinationSupport = await backend.capabilities.moveDestinationSupport ?? .existingItemRequired
+        if ProfileAuthorityMatcher.matches(
+            profile: profile,
+            checkpoint: liveCheckpoint,
+            destinationSupport: destinationSupport
+        ) {
             activeProfileID = profile.id
             lastKnownGoodProfileID = profile.id
             return .promoted(resolvedPresentation)
@@ -1316,10 +1326,12 @@ public actor MenuBarStateCoordinator {
             activeDisplayID: activeDisplayID,
             workspace: liveWorkspace
         )
+        let destinationSupport = await backend.capabilities.moveDestinationSupport ?? .existingItemRequired
         guard authorityIsCurrent,
               ProfileAuthorityMatcher.matches(
                   profile: expectedProfile,
-                  checkpoint: liveCheckpoint
+                  checkpoint: liveCheckpoint,
+                  destinationSupport: destinationSupport
               )
         else {
             return .superseded

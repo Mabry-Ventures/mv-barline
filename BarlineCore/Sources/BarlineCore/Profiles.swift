@@ -805,7 +805,8 @@ public struct ProfileDynamicAppearance: Codable, Hashable, Sendable {
 public enum ProfileAuthorityMatcher {
     public static func matches(
         profile: BarlineProfile,
-        checkpoint: MenuBarWorkspaceCheckpoint
+        checkpoint: MenuBarWorkspaceCheckpoint,
+        destinationSupport: MenuBarMoveDestinationSupport = .existingItemRequired
     ) -> Bool {
         let match = checkpoint.activeDisplayID.flatMap { displayID in
             DisplayProfileOverrideResolver().resolve(
@@ -825,7 +826,8 @@ public enum ProfileAuthorityMatcher {
         return ProfileLayoutReconciler.matches(
             layout: presentation.layout,
             items: checkpoint.snapshot.items,
-            displayID: presentation.destinationDisplayID
+            displayID: presentation.destinationDisplayID,
+            destinationSupport: destinationSupport
         )
     }
 }

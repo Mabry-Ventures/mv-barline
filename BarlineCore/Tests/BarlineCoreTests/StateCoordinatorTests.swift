@@ -2310,6 +2310,74 @@ struct StateCoordinatorTests {
         #expect(await mismatchCoordinator.activeProfileID == nil)
     }
 
+    @Test("macOS 27 relaunch authority preserves a logical profile when a new app appears")
+    func rehydratesLogicalAuthorityWithNewItem() async throws {
+        let controlID = MenuBarItemID(
+            bundleIdentifier: "com.mabryventures.Barline",
+            accessibilityIdentifier: "hidden-control"
+        )
+        let savedID = MenuBarItemID(
+            bundleIdentifier: "com.example.saved",
+            accessibilityIdentifier: "saved"
+        )
+        let newID = MenuBarItemID(
+            bundleIdentifier: "com.example.new",
+            accessibilityIdentifier: "new"
+        )
+        let display = MenuBarDisplayID("test-display")
+        let profile = BarlineProfile(
+            id: UUID(151),
+            name: "Golden Gate Durable",
+            layout: ProfileLayout(hidden: [controlID, savedID])
+        )
+        let live = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: Date(),
+            items: [
+                MenuBarItemDescriptor(
+                    id: controlID,
+                    section: .hidden,
+                    order: 0,
+                    displayID: display,
+                    isBarlineControlItem: true,
+                    title: "Barline.ControlItem.Hidden",
+                    isMovable: false
+                ),
+                MenuBarItemDescriptor(id: savedID, section: .hidden, order: 1, displayID: display),
+                MenuBarItemDescriptor(id: newID, section: .visible, order: 2, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let recorder = WorkspaceRecorder(initial: ProfileWorkspaceState(profile: profile))
+        let transaction = MenuBarWorkspaceTransaction(
+            capture: { await recorder.capture() },
+            apply: { try await recorder.apply($0) }
+        )
+        let capabilities = MenuBarCapabilities(
+            canSnapshot: true,
+            canMove: true,
+            canReveal: true,
+            canActivate: true,
+            canRestore: true,
+            moveDestinationSupport: .logicalSectionsPreserveNativeOrder
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: FakeBackend(snapshots: [live], capabilities: capabilities),
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+
+        let retained = try await coordinator.rehydrateActiveProfileAuthority(
+            profile: profile,
+            persistedPresentation: profile.resolvedPresentation(for: nil),
+            workspaceTransaction: transaction,
+            now: live.capturedAt
+        )
+
+        #expect(retained != nil)
+        #expect(await coordinator.activeProfileID == profile.id)
+    }
+
     @Test("Redo captures a live externally changed inverse layout")
     func redoUsesLiveExternalInverse() async throws {
         let before = makeSnapshot(generation: 1, count: 2)

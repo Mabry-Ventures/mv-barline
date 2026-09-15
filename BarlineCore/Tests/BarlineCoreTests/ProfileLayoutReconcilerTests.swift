@@ -113,6 +113,14 @@ struct ProfileLayoutReconcilerTests {
         )
         #expect(reapplied.operations.isEmpty)
         #expect(reapplied.matches(items: applied))
+
+        let withNewVisibleItem = applied + [item("new", 2)]
+        #expect(ProfileLayoutReconciler.matches(
+            layout: captured,
+            items: withNewVisibleItem,
+            destinationSupport: .logicalSectionsPreserveNativeOrder
+        ))
+        #expect(!ProfileLayoutReconciler.matches(layout: captured, items: withNewVisibleItem))
     }
 
     @Test("Logical section profiles reject unsupported native reordering")

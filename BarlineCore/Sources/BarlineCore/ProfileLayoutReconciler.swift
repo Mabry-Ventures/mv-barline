@@ -50,8 +50,18 @@ public enum ProfileLayoutReconciler {
     public static func matches(
         layout: ProfileLayout,
         items: [MenuBarItemDescriptor],
-        displayID: MenuBarDisplayID? = nil
+        displayID: MenuBarDisplayID? = nil,
+        destinationSupport: MenuBarMoveDestinationSupport = .existingItemRequired
     ) -> Bool {
+        if destinationSupport == .logicalSectionsPreserveNativeOrder {
+            guard let plan = try? planAcrossDisplays(
+                layout: layout,
+                items: items,
+                displayID: displayID,
+                destinationSupport: destinationSupport
+            ) else { return false }
+            return plan.matches(items: items)
+        }
         guard Set(items.map(\.id)).count == items.count,
               Set(layout.allItemIDs).count == layout.allItemIDs.count
         else { return false }
