@@ -18,10 +18,12 @@ commands use the Barline App Group container with atomic files, validation, and
 a previous-valid backup. Profile archives are accessed only after an explicit
 user import or export action.
 
-On macOS 27, Barline also stores a bounded set of stable item identifiers and
-their last verified visible or hidden section in `UserDefaults`. This allows a
-collapsed native divider to preserve the user's arrangement after relaunch.
-The data never leaves the Mac, is not included in support bundles, and new or
+On macOS 27, Barline also stores a bounded, sanitized menu bar inventory in
+`UserDefaults`: stable item identifiers, titles and display names, section and
+order, opaque display identity, and semantic capability flags. Process IDs,
+window geometry, and screenshots are not retained in this inventory. This lets
+a collapsed native divider preserve the user's arrangement after relaunch. The
+data never leaves the Mac, is not included in support bundles, and new or
 ambiguous items default to visible.
 
 Search favorites and custom aliases are stored with stable item identifiers in

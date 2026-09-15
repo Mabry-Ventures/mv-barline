@@ -68,6 +68,16 @@ actor XPCMenuBarBackend: MenuBarBackend {
         try await connection.pointContext(at: CGPoint(x: point.x, y: point.y))
     }
 
+    func configureConcealment(
+        _ configuration: MenuBarConcealmentConfiguration
+    ) async throws {
+        if #available(macOS 27.0, *) {
+            try await goldenGateProvider.configureConcealment(configuration)
+        } else {
+            try await connection.configureConcealment(configuration)
+        }
+    }
+
     func beginRevealObservation(_ item: MenuBarItemID) async throws -> MenuBarRevealObservationToken {
         try await connection.beginRevealObservation(for: item)
     }

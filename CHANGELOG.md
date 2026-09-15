@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.0.16 (build 85) — September 15, 2026
+
+- Serialize macOS 27 presentation synchronization with moves, saved-layout
+  activation, Focus changes, history, rollback, and helper recovery. A delayed
+  cache refresh can no longer replay a stale complete visibility configuration
+  after a newer authoritative layout commits.
+- Derive every presentation update from a fresh authoritative snapshot after it
+  acquires the shared transaction turn, and discard canceled queued work before
+  it can reach the native concealment helper.
+- Preserve the latest presentation request across an in-flight shelf-item
+  activation, then apply it after the interaction lease ends without disturbing
+  the temporary reveal/activate/restore journey.
+- Track the helper-acknowledged native configuration independently from the
+  logical inventory so a failed change restores the presentation users actually
+  had, including retained items no longer present in Accessibility.
+
 ## 1.0.16 (build 84) — September 15, 2026
 
 - Make macOS 27 native concealment a token-bound two-phase transaction. A

@@ -71,6 +71,7 @@ actor GoldenGateAXSnapshotProvider {
     private var rememberedSections = GoldenGateAXSnapshotProvider.loadRememberedSections()
     private var explicitAssignments = GoldenGateAXSnapshotProvider.loadExplicitAssignments()
     private var retainedDescriptors = GoldenGateAXSnapshotProvider.loadRetainedInventory()
+    private var appliedConcealmentConfiguration: MenuBarConcealmentConfiguration?
     private let logicalLayoutPlanner = GoldenGateLogicalLayoutPlanner()
 
     var capabilities: MenuBarCapabilities {
@@ -188,7 +189,8 @@ actor GoldenGateAXSnapshotProvider {
             from: candidate,
             requiredItemIDs: [source.id]
         )
-        let previousConfiguration = concealmentConfiguration(for: before)
+        let previousConfiguration = appliedConcealmentConfiguration
+            ?? concealmentConfiguration(for: before)
         try await applyNativeConfiguration(
             concealmentConfiguration(for: candidate),
             previousConfiguration: previousConfiguration,
@@ -207,7 +209,8 @@ actor GoldenGateAXSnapshotProvider {
     func restore(_ target: MenuBarSnapshot) async throws -> MenuBarMutationResult {
         let current = try snapshot()
         let candidate = try logicalLayoutPlanner.restoring(target, to: current)
-        let previousConfiguration = concealmentConfiguration(for: current)
+        let previousConfiguration = appliedConcealmentConfiguration
+            ?? concealmentConfiguration(for: current)
         let changedItems = candidate.items.filter { candidateItem in
             current.items.first(where: { $0.id == candidateItem.id })?.section != candidateItem.section
         }
@@ -238,6 +241,21 @@ actor GoldenGateAXSnapshotProvider {
             backendName: "GoldenGateMainProcessAX",
             state: available ? .healthy : .unavailable,
             message: available ? nil : "Accessibility inventory is unavailable"
+        )
+    }
+
+    /// Presentation-only synchronization shares this actor with logical moves
+    /// and records the last helper-acknowledged complete configuration. A later
+    /// failed mutation can therefore restore the actual native presentation,
+    /// not a logical-layout approximation.
+    func configureConcealment(
+        _ configuration: MenuBarConcealmentConfiguration
+    ) async throws {
+        let previous = appliedConcealmentConfiguration ?? configuration
+        try await applyNativeConfiguration(
+            configuration,
+            previousConfiguration: previous,
+            expectations: [:]
         )
     }
 
@@ -522,6 +540,7 @@ actor GoldenGateAXSnapshotProvider {
 
         do {
             try await verifyNativeAssignments(expectations)
+            appliedConcealmentConfiguration = candidateConfiguration
             logger.info("Golden Gate layout transaction reached its native postcondition")
         } catch {
             let postconditionError = error
@@ -529,6 +548,7 @@ actor GoldenGateAXSnapshotProvider {
                 try await BarlineMenuService.Connection.shared.configureConcealment(
                     previousConfiguration
                 )
+                appliedConcealmentConfiguration = previousConfiguration
                 logger.info("Golden Gate layout transaction rollback was acknowledged")
             } catch {
                 logger.fault(

@@ -584,12 +584,8 @@ extension MenuBarItemManager {
             try? await Task.sleep(for: .milliseconds(50))
             guard !Task.isCancelled, let self, let appState else { return }
 
-            var visible = [MenuBarItemID]()
-            var concealed = [MenuBarItemID]()
+            var concealedSections = [BarlineCore.MenuBarSection]()
             for sectionName in MenuBarSection.Name.allCases {
-                let itemIDs = itemCache[sectionName]
-                    .filter { !$0.isControlItem }
-                    .map(\.stableID)
                 let shelfOwnsPresentation = MenuBarPresentationPolicy.usesShelf(
                     requestedShelf: appState.settings.general.useBarlineShelf,
                     systemAutoHideEnabled: appState.menuBarManager.isMenuBarHiddenBySystemUserDefaults
@@ -601,17 +597,17 @@ extension MenuBarItemManager {
                         appState.menuBarManager.section(withName: sectionName)?.isHidden == true
                 )
                 if shouldConceal {
-                    concealed.append(contentsOf: itemIDs)
-                } else {
-                    visible.append(contentsOf: itemIDs)
+                    let section: BarlineCore.MenuBarSection = switch sectionName {
+                    case .visible: .visible
+                    case .hidden: .hidden
+                    case .alwaysHidden: .alwaysHidden
+                    }
+                    concealedSections.append(section)
                 }
             }
             do {
-                try await BarlineMenuService.Connection.shared.configureConcealment(
-                    MenuBarConcealmentConfiguration(
-                        visibleItemIDs: visible,
-                        concealedItemIDs: concealed
-                    )
+                try await appState.compatibilityCoordinator.synchronizeConcealment(
+                    concealedSections: concealedSections
                 )
             } catch {
                 logger.error(

@@ -229,6 +229,7 @@ public actor MenuBarStateCoordinator {
     private var backendGenerationOffset: UInt64 = 0
     private var lastKnownGoodProfileID: UUID?
     private var activeItemInteractionID: UUID?
+    private var itemInteractionWaiters = [UUID: CheckedContinuation<Void, Never>]()
 
     public init(
         backend: any MenuBarBackend,
@@ -262,11 +263,41 @@ public actor MenuBarStateCoordinator {
         _ body: @Sendable (UUID) async throws -> Value
     ) async throws -> Value {
         let interactionID = try await reserveItemInteraction()
-        defer { activeItemInteractionID = nil }
+        defer { finishItemInteraction(interactionID) }
         try Task.checkCancellation()
         let value = try await body(interactionID)
         try Task.checkCancellation()
         return value
+    }
+
+    private func finishItemInteraction(_ interactionID: UUID) {
+        guard activeItemInteractionID == interactionID else { return }
+        activeItemInteractionID = nil
+        let waiters = itemInteractionWaiters.values
+        itemInteractionWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    private func waitForItemInteractionToFinish() async throws {
+        try Task.checkCancellation()
+        guard activeItemInteractionID != nil else { return }
+        let waiterID = UUID()
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if activeItemInteractionID == nil || Task.isCancelled {
+                    continuation.resume()
+                } else {
+                    itemInteractionWaiters[waiterID] = continuation
+                }
+            }
+        } onCancel: {
+            Task { await self.cancelItemInteractionWaiter(waiterID) }
+        }
+        try Task.checkCancellation()
+    }
+
+    private func cancelItemInteractionWaiter(_ waiterID: UUID) {
+        itemInteractionWaiters.removeValue(forKey: waiterID)?.resume()
     }
 
     private func reserveItemInteraction() async throws -> UUID {
@@ -322,6 +353,55 @@ public actor MenuBarStateCoordinator {
         try requireItemInteraction(interactionID)
         try requireCurrentGeneration(expectedGeneration)
         return try await refreshAssumingMutationTurn(now: now)
+    }
+
+    /// Reconciles transient native presentation with the latest logical layout
+    /// while owning the same mutation turn as move, profile and history
+    /// transactions. Callers provide section presentation only; item identity
+    /// is derived after admission so delayed work cannot replay stale item
+    /// assignments over a newer authoritative mutation.
+    public func synchronizeConcealment(
+        concealedSections: [MenuBarSection]
+    ) async throws {
+        try await acquireUnleasedMutationTurn()
+        defer { releaseMutationTurn() }
+        try Task.checkCancellation()
+
+        let snapshot = try await refreshAssumingMutationTurn(
+            now: nil,
+            maximumAttempts: 1
+        )
+        try Task.checkCancellation()
+        let configuration = MenuBarConcealmentConfiguration(
+            visibleItemIDs: snapshot.items.filter {
+                !$0.isBarlineControlItem && !concealedSections.contains($0.section)
+            }.map(\.id),
+            concealedItemIDs: snapshot.items.filter {
+                !$0.isBarlineControlItem && concealedSections.contains($0.section)
+            }.map(\.id)
+        )
+        // Once the backend acknowledges the complete configuration, do not
+        // reinterpret caller cancellation as failure: the native side effect
+        // has already committed and is now the latest serialized state.
+        try await backend.configureConcealment(configuration)
+    }
+
+    /// Waits out an item activation lease without losing the latest requested
+    /// presentation. The lease intentionally releases the mutation turn between
+    /// reveal/activate/observe steps, so ordinary admission alone is insufficient.
+    private func acquireUnleasedMutationTurn() async throws {
+        while true {
+            await acquireMutationTurn()
+            do {
+                try Task.checkCancellation()
+            } catch {
+                releaseMutationTurn()
+                throw error
+            }
+            guard activeItemInteractionID != nil else { return }
+            releaseMutationTurn()
+            try await waitForItemInteractionToFinish()
+        }
     }
 
     private func refreshAssumingMutationTurn(
@@ -892,6 +972,16 @@ public actor MenuBarStateCoordinator {
             return
         }
         mutationWaiters.removeFirst().resume()
+    }
+
+    /// Internal observability for deterministic concurrency tests. These expose
+    /// counts only, never mutation authority or continuations.
+    var queuedMutationTurnCount: Int {
+        mutationWaiters.count
+    }
+
+    var queuedItemInteractionWaiterCount: Int {
+        itemInteractionWaiters.count
     }
 
     public func recover(now: Date? = nil) async throws -> MenuBarSnapshot {

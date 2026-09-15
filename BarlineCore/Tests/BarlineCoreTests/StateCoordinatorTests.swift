@@ -317,6 +317,206 @@ struct StateCoordinatorTests {
         #expect(await coordinator.canUndo)
     }
 
+    @Test("Delayed presentation synchronization derives state after an authoritative move")
+    func delayedPresentationSynchronizationUsesCommittedLayout() async throws {
+        let itemID = MenuBarItemID(
+            bundleIdentifier: "com.example.item0",
+            accessibilityIdentifier: "item-0"
+        )
+        let before = makeProfileSnapshot(
+            generation: 1,
+            layout: ProfileLayout(visible: [itemID])
+        )
+        let after = makeProfileSnapshot(
+            generation: 2,
+            layout: ProfileLayout(hidden: [itemID])
+        )
+        let synchronized = makeProfileSnapshot(
+            generation: 3,
+            layout: ProfileLayout(hidden: [itemID])
+        )
+        let backend = FakeBackend(snapshots: [before, after, synchronized])
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let gate = SuspensionGate()
+        await coordinator.setBeforeAuthoritativeLayoutMutation {
+            await gate.suspendUntilOpened()
+        }
+
+        let move = Task {
+            try await coordinator.perform(
+                .move(MenuBarMoveOperation(itemID: itemID, section: .hidden, index: 0))
+            )
+        }
+        await gate.waitUntilSuspended()
+        let synchronization = Task {
+            try await coordinator.synchronizeConcealment(concealedSections: [.hidden, .alwaysHidden])
+        }
+        #expect(await waitForQueuedMutation(in: coordinator))
+
+        await gate.open()
+        #expect(try await move.value == after)
+        try await synchronization.value
+
+        #expect(await backend.operationEvents == ["move", "configure"])
+        #expect(await backend.concealmentConfigurations == [
+            MenuBarConcealmentConfiguration(
+                visibleItemIDs: [],
+                concealedItemIDs: [itemID]
+            ),
+        ])
+    }
+
+    @Test("Cancelled delayed presentation synchronization has no backend side effect")
+    func cancelledDelayedPresentationSynchronizationIsDiscarded() async throws {
+        let itemID = MenuBarItemID(
+            bundleIdentifier: "com.example.item0",
+            accessibilityIdentifier: "item-0"
+        )
+        let before = makeProfileSnapshot(
+            generation: 1,
+            layout: ProfileLayout(visible: [itemID])
+        )
+        let after = makeProfileSnapshot(
+            generation: 2,
+            layout: ProfileLayout(hidden: [itemID])
+        )
+        let backend = FakeBackend(snapshots: [before, after])
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let gate = SuspensionGate()
+        await coordinator.setBeforeAuthoritativeLayoutMutation {
+            await gate.suspendUntilOpened()
+        }
+
+        let move = Task {
+            try await coordinator.perform(
+                .move(MenuBarMoveOperation(itemID: itemID, section: .hidden, index: 0))
+            )
+        }
+        await gate.waitUntilSuspended()
+        let synchronization = Task {
+            try await coordinator.synchronizeConcealment(concealedSections: [.hidden, .alwaysHidden])
+        }
+        #expect(await waitForQueuedMutation(in: coordinator))
+        synchronization.cancel()
+
+        await gate.open()
+        #expect(try await move.value == after)
+        await #expect(throws: CancellationError.self) {
+            try await synchronization.value
+        }
+        #expect(await backend.operationEvents == ["move"])
+        #expect(await backend.concealmentConfigurations.isEmpty)
+    }
+
+    @Test("Presentation synchronization waits for profile activation authority")
+    func presentationSynchronizationWaitsForProfileActivation() async throws {
+        let itemID = MenuBarItemID(
+            bundleIdentifier: "com.example.item0",
+            accessibilityIdentifier: "item-0"
+        )
+        let before = makeProfileSnapshot(
+            generation: 1,
+            layout: ProfileLayout(visible: [itemID])
+        )
+        let after = makeProfileSnapshot(
+            generation: 2,
+            layout: ProfileLayout(hidden: [itemID])
+        )
+        let synchronized = makeProfileSnapshot(
+            generation: 3,
+            layout: ProfileLayout(hidden: [itemID])
+        )
+        let backend = FakeBackend(snapshots: [before, after, synchronized])
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let gate = SuspensionGate()
+        await coordinator.setBeforeAuthoritativeLayoutMutation {
+            await gate.suspendUntilOpened()
+        }
+        let profile = BarlineProfile(
+            name: "Hidden",
+            layout: ProfileLayout(hidden: [itemID])
+        )
+
+        let activation = Task {
+            try await coordinator.activate(profile: profile)
+        }
+        await gate.waitUntilSuspended()
+        let synchronization = Task {
+            try await coordinator.synchronizeConcealment(concealedSections: [.hidden, .alwaysHidden])
+        }
+        #expect(await waitForQueuedMutation(in: coordinator))
+
+        await gate.open()
+        #expect(try await activation.value == after)
+        try await synchronization.value
+
+        #expect(await backend.operationEvents == ["move", "configure"])
+        #expect(await backend.concealmentConfigurations == [
+            MenuBarConcealmentConfiguration(
+                visibleItemIDs: [],
+                concealedItemIDs: [itemID]
+            ),
+        ])
+    }
+
+    @Test("Presentation synchronization survives an active item-interaction lease")
+    func presentationSynchronizationSurvivesItemInteractionLease() async throws {
+        let snapshot = makeSnapshot(generation: 1, count: 1)
+        let itemID = snapshot.items[0].id
+        let backend = FakeBackend(snapshots: [snapshot])
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let gate = SuspensionGate()
+        let interaction = Task {
+            try await coordinator.withItemInteraction { _ in
+                await gate.suspendUntilOpened()
+            }
+        }
+        await gate.waitUntilSuspended()
+
+        let synchronization = Task {
+            try await coordinator.synchronizeConcealment(concealedSections: [.hidden, .alwaysHidden])
+        }
+        #expect(await waitForQueuedInteractionSync(in: coordinator))
+        #expect(await backend.concealmentConfigurations.isEmpty)
+
+        await gate.open()
+        try await interaction.value
+        try await synchronization.value
+        #expect(await backend.concealmentConfigurations == [
+            MenuBarConcealmentConfiguration(
+                visibleItemIDs: [itemID],
+                concealedItemIDs: []
+            ),
+        ])
+    }
+
+    @Test("Cancelled presentation synchronization leaves an active interaction untouched")
+    func cancelledPresentationSynchronizationLeavesInteractionUntouched() async throws {
+        let snapshot = makeSnapshot(generation: 1, count: 1)
+        let backend = FakeBackend(snapshots: [snapshot])
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let gate = SuspensionGate()
+        let interaction = Task {
+            try await coordinator.withItemInteraction { _ in
+                await gate.suspendUntilOpened()
+            }
+        }
+        await gate.waitUntilSuspended()
+
+        let synchronization = Task {
+            try await coordinator.synchronizeConcealment(concealedSections: [.hidden, .alwaysHidden])
+        }
+        #expect(await waitForQueuedInteractionSync(in: coordinator))
+        synchronization.cancel()
+        await #expect(throws: CancellationError.self) {
+            try await synchronization.value
+        }
+        #expect(await backend.concealmentConfigurations.isEmpty)
+
+        await gate.open()
+        try await interaction.value
+    }
+
     @Test("Cancelled mutations compensate in a live task before a queued refresh can proceed")
     func cancelledMutationCompensationIsSerialized() async throws {
         let before = makeSnapshot(generation: 1, count: 2)
@@ -3892,6 +4092,8 @@ private actor FakeBackend: MenuBarBackend {
     private(set) var revealedItems = [MenuBarItemID]()
     private(set) var moveOperations = [MenuBarMoveOperation]()
     private(set) var activations = [Activation]()
+    private(set) var concealmentConfigurations = [MenuBarConcealmentConfiguration]()
+    private(set) var operationEvents = [String]()
     private(set) var maximumConcurrentMutations = 0
     private(set) var snapshotCallCount = 0
     private(set) var restartCount = 0
@@ -3970,10 +4172,18 @@ private actor FakeBackend: MenuBarBackend {
             withUnsafeCurrentTask { $0?.cancel() }
         }
         moveOperations.append(operation)
+        operationEvents.append("move")
         if moveOperations.count == failMoveAt {
             throw MenuBarBackendError.operationFailed("injected move failure")
         }
         return MenuBarMutationResult(generation: 0, changedItemIDs: [operation.itemID])
+    }
+
+    func configureConcealment(
+        _ configuration: MenuBarConcealmentConfiguration
+    ) {
+        concealmentConfigurations.append(configuration)
+        operationEvents.append("configure")
     }
 
     func reveal(_ item: MenuBarItemID) async throws -> MenuBarMutationResult {
@@ -4041,6 +4251,62 @@ private actor FakeBackend: MenuBarBackend {
         restartCount += 1
         try? await Task.sleep(for: restartDelay)
     }
+}
+
+private actor SuspensionGate {
+    private var isSuspended = false
+    private var isOpen = false
+    private var suspensionWaiters = [CheckedContinuation<Void, Never>]()
+    private var openWaiters = [CheckedContinuation<Void, Never>]()
+
+    func suspendUntilOpened() async {
+        isSuspended = true
+        let waiters = suspensionWaiters
+        suspensionWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+        guard !isOpen else { return }
+        await withCheckedContinuation { continuation in
+            openWaiters.append(continuation)
+        }
+    }
+
+    func waitUntilSuspended() async {
+        guard !isSuspended else { return }
+        await withCheckedContinuation { continuation in
+            suspensionWaiters.append(continuation)
+        }
+    }
+
+    func open() {
+        isOpen = true
+        let waiters = openWaiters
+        openWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+}
+
+private func waitForQueuedMutation(
+    in coordinator: MenuBarStateCoordinator
+) async -> Bool {
+    for _ in 0 ..< 1000 {
+        if await coordinator.queuedMutationTurnCount > 0 {
+            return true
+        }
+        await Task.yield()
+    }
+    return false
+}
+
+private func waitForQueuedInteractionSync(
+    in coordinator: MenuBarStateCoordinator
+) async -> Bool {
+    for _ in 0 ..< 1000 {
+        if await coordinator.queuedItemInteractionWaiterCount > 0 {
+            return true
+        }
+        await Task.yield()
+    }
+    return false
 }
 
 private func makeSnapshot(
