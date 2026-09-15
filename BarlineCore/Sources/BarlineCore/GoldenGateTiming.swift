@@ -16,11 +16,20 @@ public enum GoldenGateTiming {
 
 @MainActor
 public final class GoldenGateConcealmentSyncDebouncer {
+    typealias WaitOperation = @Sendable (Duration) async throws -> Void
+
     private let delay: Duration
+    private let wait: WaitOperation
     private var task: Task<Void, Never>?
 
     public init(delay: Duration = GoldenGateTiming.concealmentSyncDebounce) {
         self.delay = delay
+        wait = { try await Task.sleep(for: $0) }
+    }
+
+    init(delay: Duration, wait: @escaping WaitOperation) {
+        self.delay = delay
+        self.wait = wait
     }
 
     deinit {
@@ -31,7 +40,7 @@ public final class GoldenGateConcealmentSyncDebouncer {
         task?.cancel()
         task = Task {
             do {
-                try await Task.sleep(for: delay)
+                try await wait(delay)
                 try Task.checkCancellation()
                 await operation()
             } catch {

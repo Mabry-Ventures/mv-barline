@@ -30,7 +30,6 @@ final class MenuBarItemManager: ObservableObject {
     private let goldenGateConcealmentSyncDebouncer = GoldenGateConcealmentSyncDebouncer()
 
     deinit {
-        goldenGateConcealmentSyncDebouncer.cancel()
         for task in visibleInterfaceTasks.values {
             task.cancel()
         }
