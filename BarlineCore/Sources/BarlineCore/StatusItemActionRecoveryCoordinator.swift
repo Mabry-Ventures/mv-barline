@@ -28,6 +28,12 @@ public struct StatusItemActionRecoveryCoordinator: Sendable {
         !eventTargetsShelf && eventLocationIsInsideExactButtonFrame
     }
 
+    /// Rejects scene/container frames masquerading as a status-item button.
+    /// The recovery path is optional, so ambiguous geometry must fail closed.
+    public static func isPlausibleExactButtonFrame(width: Double, height: Double) -> Bool {
+        width.isFinite && height.isFinite && width > 0 && width < 100 && height > 0 && height <= 40
+    }
+
     /// Registers a globally observed mouse-down.
     ///
     /// Returns `true` when the caller should schedule a delayed fallback. If the

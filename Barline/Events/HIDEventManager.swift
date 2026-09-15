@@ -56,7 +56,8 @@ final class HIDEventManager: ObservableObject {
         case .leftMouseDown:
             schedulePrimaryControlActionRecovery(
                 with: event,
-                appState: appState
+                appState: appState,
+                screen: screen
             )
             handleShowOnClick(with: event, appState: appState, screen: screen)
             handleSmartRehide(with: event, appState: appState, screen: screen)
@@ -182,11 +183,17 @@ final class HIDEventManager: ObservableObject {
 extension HIDEventManager {
     private func schedulePrimaryControlActionRecovery(
         with event: NSEvent,
-        appState: AppState
+        appState: AppState,
+        screen: NSScreen
     ) {
         guard
             let click = event.cgEvent,
             let control = appState.menuBarManager.controlItem(withName: .visible),
+            isMouseInsideMenuBar(
+                appState: appState,
+                screen: screen,
+                location: click.unflippedLocation
+            ),
             StatusItemActionRecoveryCoordinator.shouldSchedulePrimaryRecovery(
                 eventTargetsShelf: {
                     let shelf = appState.menuBarManager.barlineShelfPanel

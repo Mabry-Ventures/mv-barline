@@ -1242,3 +1242,10 @@ collision: the target opened and completed successfully, then a shelf click was
 misclassified as a missing control click and reopened the shelf. Build 69 is
 rejected. Build 70 narrows recovery to exact button screen geometry and rejects
 shelf-owned events before scheduling the fallback.
+
+Build 70 passed both clean full OS gates and all four installed macOS 26
+journeys. Its first installed macOS 27 journey completed successfully, but the
+target menu action was then misclassified through the hosted button's broad
+scene geometry and armed the same recovery fallback. Build 70 is rejected.
+Build 71 requires exact status-item-sized accessibility geometry and a true
+menu-bar event before recovery is eligible.

@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.15 (build 71) — September 14, 2026
+
+- Fail the dropped-control-click recovery closed unless AppKit exposes a
+  finite, status-item-sized accessibility frame and the event is inside the
+  menu bar. Target menus and popovers on macOS 27 can no longer be mistaken
+  for the three-dot control even when its hosted scene uses a broad container.
+
 ## 1.0.15 (build 70) — September 14, 2026
 
 - Restrict the scene-backed status-item recovery fallback to the exact Barline

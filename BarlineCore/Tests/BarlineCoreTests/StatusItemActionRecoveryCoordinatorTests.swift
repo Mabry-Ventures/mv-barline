@@ -23,6 +23,22 @@ struct StatusItemActionRecoveryCoordinatorTests {
         ))
     }
 
+    @Test("scene-sized and invalid frames are rejected")
+    func onlyStatusItemSizedFramesArePlausible() {
+        #expect(StatusItemActionRecoveryCoordinator.isPlausibleExactButtonFrame(
+            width: 24,
+            height: 24
+        ))
+        #expect(!StatusItemActionRecoveryCoordinator.isPlausibleExactButtonFrame(
+            width: 1920,
+            height: 24
+        ))
+        #expect(!StatusItemActionRecoveryCoordinator.isPlausibleExactButtonFrame(
+            width: 24,
+            height: .nan
+        ))
+    }
+
     @Test("native action cancels the pending fallback")
     func nativeActionWins() {
         var coordinator = StatusItemActionRecoveryCoordinator()

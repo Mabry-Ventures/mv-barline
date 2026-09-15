@@ -522,12 +522,20 @@ final class ControlItem {
     /// on macOS 27, so the window frame is not proof that the control was hit.
     func containsEventLocation(_ location: CGPoint) -> Bool {
         if let button = statusItem.button, let window = button.window {
-            let buttonFrame = window.convertToScreen(button.convert(button.bounds, to: nil))
-            if !buttonFrame.isEmpty {
-                return buttonFrame.contains(location)
+            let candidateFrames = [
+                button.accessibilityFrame(),
+                window.convertToScreen(button.convert(button.bounds, to: nil)),
+            ]
+            if let exactFrame = candidateFrames.first(where: {
+                StatusItemActionRecoveryCoordinator.isPlausibleExactButtonFrame(
+                    width: $0.width,
+                    height: $0.height
+                )
+            }) {
+                return exactFrame.contains(location)
             }
         }
-        return frame?.contains(location) == true
+        return false
     }
 
     /// Performs the control item's action.
