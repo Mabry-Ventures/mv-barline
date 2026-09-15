@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.16 (build 85) — September 15, 2026
+## 1.0.16 (build 86) — September 15, 2026
 
 - Serialize macOS 27 presentation synchronization with moves, saved-layout
   activation, Focus changes, history, rollback, and helper recovery. A delayed
@@ -15,6 +15,8 @@
 - Track the helper-acknowledged native configuration independently from the
   logical inventory so a failed change restores the presentation users actually
   had, including retained items no longer present in Accessibility.
+- Treat superseded presentation synchronization as normal cancellation and use
+  deadline-bounded handshakes in the coordinator concurrency regression tests.
 
 ## 1.0.16 (build 84) — September 15, 2026
 

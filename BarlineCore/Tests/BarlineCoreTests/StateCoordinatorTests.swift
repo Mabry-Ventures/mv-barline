@@ -4288,24 +4288,26 @@ private actor SuspensionGate {
 private func waitForQueuedMutation(
     in coordinator: MenuBarStateCoordinator
 ) async -> Bool {
-    for _ in 0 ..< 1000 {
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    repeat {
         if await coordinator.queuedMutationTurnCount > 0 {
             return true
         }
-        await Task.yield()
-    }
+        try? await Task.sleep(for: .milliseconds(1))
+    } while ContinuousClock.now < deadline
     return false
 }
 
 private func waitForQueuedInteractionSync(
     in coordinator: MenuBarStateCoordinator
 ) async -> Bool {
-    for _ in 0 ..< 1000 {
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    repeat {
         if await coordinator.queuedItemInteractionWaiterCount > 0 {
             return true
         }
-        await Task.yield()
-    }
+        try? await Task.sleep(for: .milliseconds(1))
+    } while ContinuousClock.now < deadline
     return false
 }
 

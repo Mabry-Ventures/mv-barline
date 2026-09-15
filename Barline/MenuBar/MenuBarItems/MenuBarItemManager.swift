@@ -609,6 +609,8 @@ extension MenuBarItemManager {
                 try await appState.compatibilityCoordinator.synchronizeConcealment(
                     concealedSections: concealedSections
                 )
+            } catch is CancellationError {
+                logger.debug("Golden Gate concealment sync was superseded")
             } catch {
                 logger.error(
                     "Golden Gate concealment sync failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
