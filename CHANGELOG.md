@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.16 (build 77) — September 15, 2026
+## 1.0.16 (build 78) — September 15, 2026
 
 - Let macOS 27 users assign supported menu bar items between Barline's visible
   and hidden sections. Barline commits the complete visibility state through
