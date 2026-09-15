@@ -117,7 +117,11 @@ private struct MenuBarInventoryBar: View {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
                         ForEach(items, id: \.stableID) { item in
-                            MenuBarInventoryItem(item: item, colorScheme: colorScheme)
+                            MenuBarInventoryItem(
+                                item: item,
+                                colorScheme: colorScheme,
+                                onAssign: { assign(item.stableID) }
+                            )
                         }
                     }
                     .padding(.horizontal, 10)
@@ -168,18 +172,30 @@ private struct MenuBarInventoryBar: View {
                 return
             }
             Task { @MainActor in
-                do {
-                    try await itemManager.assign(
-                        itemID: itemID,
-                        to: section,
-                        index: items.count
-                    )
-                } catch {
-                    assignmentFailed = true
-                }
+                await assign(itemID, to: section)
             }
         }
         return true
+    }
+
+    private func assign(_ itemID: MenuBarItemID) {
+        let destination: MenuBarSection.Name = section == .visible ? .hidden : .visible
+        Task { @MainActor in
+            await assign(itemID, to: destination)
+        }
+    }
+
+    @MainActor
+    private func assign(_ itemID: MenuBarItemID, to destination: MenuBarSection.Name) async {
+        do {
+            try await itemManager.assign(
+                itemID: itemID,
+                to: destination,
+                index: itemManager.itemCache.managedItems(for: destination).count
+            )
+        } catch {
+            assignmentFailed = true
+        }
     }
 }
 
@@ -187,6 +203,7 @@ private struct MenuBarInventoryBar: View {
 private struct MenuBarInventoryItem: View {
     let item: MenuBarItem
     let colorScheme: ColorScheme
+    let onAssign: () -> Void
 
     private var foregroundColor: Color {
         colorScheme == .dark ? Color.white.opacity(0.92) : Color.black.opacity(0.84)
@@ -227,32 +244,36 @@ private struct MenuBarInventoryItem: View {
     }
 
     var body: some View {
-        HStack(spacing: 7) {
-            if let applicationIcon {
-                Image(nsImage: applicationIcon)
-                    .resizable()
-                    .scaledToFit()
-                    .frame(width: 20, height: 20)
-            } else {
-                Image(systemName: fallbackSymbolName)
-                    .symbolRenderingMode(.monochrome)
-                    .foregroundStyle(secondaryColor)
-                    .frame(width: 20, height: 20)
-            }
+        Button(action: onAssign) {
+            HStack(spacing: 7) {
+                if let applicationIcon {
+                    Image(nsImage: applicationIcon)
+                        .resizable()
+                        .scaledToFit()
+                        .frame(width: 20, height: 20)
+                } else {
+                    Image(systemName: fallbackSymbolName)
+                        .symbolRenderingMode(.monochrome)
+                        .foregroundStyle(secondaryColor)
+                        .frame(width: 20, height: 20)
+                }
 
-            Text(displayName)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(foregroundColor)
-                .lineLimit(1)
+                Text(displayName)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(foregroundColor)
+                    .lineLimit(1)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(capsuleColor, in: Capsule())
+            .overlay {
+                Capsule().strokeBorder(capsuleBorder)
+            }
         }
-        .padding(.horizontal, 10)
-        .frame(height: 34)
-        .background(capsuleColor, in: Capsule())
-        .overlay {
-            Capsule().strokeBorder(capsuleBorder)
-        }
+        .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
         .accessibilityLabel(displayName)
+        .accessibilityHint("Move to the other visibility section")
         .onDrag {
             let provider = NSItemProvider()
             guard item.isMovable,

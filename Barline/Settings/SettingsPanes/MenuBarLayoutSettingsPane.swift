@@ -58,7 +58,7 @@ struct MenuBarLayoutSettingsPane: View {
 
     private var layoutInstruction: String {
         if #available(macOS 27.0, *) {
-            return "Drag to choose which menu bar items stay visible."
+            return "Click or drag to choose which menu bar items stay visible."
         }
         return "Drag to arrange your menu bar items into different sections."
     }
