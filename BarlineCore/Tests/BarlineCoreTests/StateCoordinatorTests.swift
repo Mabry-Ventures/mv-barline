@@ -408,6 +408,44 @@ struct StateCoordinatorTests {
         #expect(await backend.concealmentConfigurations.isEmpty)
     }
 
+    @Test("Presentation synchronization retries past a cached discovery generation")
+    func presentationSynchronizationRetriesCachedGeneration() async throws {
+        let itemID = MenuBarItemID(
+            bundleIdentifier: "com.example.item0",
+            accessibilityIdentifier: "item-0"
+        )
+        let discovered = makeProfileSnapshot(
+            generation: 1,
+            layout: ProfileLayout(visible: [itemID])
+        )
+        let fresh = makeProfileSnapshot(
+            generation: 2,
+            layout: ProfileLayout(hidden: [itemID])
+        )
+        let backend = FakeBackend(snapshots: [discovered, discovered, fresh])
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(
+                maximumAttempts: 2,
+                baseDelay: .zero,
+                maximumDelay: .zero,
+                maximumJitterPermille: 0
+            )
+        )
+
+        #expect(try await coordinator.refresh() == discovered)
+        try await coordinator.synchronizeConcealment(concealedSections: [.hidden, .alwaysHidden])
+
+        #expect(await backend.snapshotCallCount == 3)
+        #expect(await backend.operationEvents == ["configure"])
+        #expect(await backend.concealmentConfigurations == [
+            MenuBarConcealmentConfiguration(
+                visibleItemIDs: [],
+                concealedItemIDs: [itemID]
+            ),
+        ])
+    }
+
     @Test("Presentation synchronization waits for profile activation authority")
     func presentationSynchronizationWaitsForProfileActivation() async throws {
         let itemID = MenuBarItemID(

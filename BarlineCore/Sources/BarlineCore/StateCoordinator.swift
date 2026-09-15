@@ -367,10 +367,12 @@ public actor MenuBarStateCoordinator {
         defer { releaseMutationTurn() }
         try Task.checkCancellation()
 
-        let snapshot = try await refreshAssumingMutationTurn(
-            now: nil,
-            maximumAttempts: 1
-        )
+        // The macOS 27 provider intentionally caches discovery briefly. A sync
+        // commonly follows the discovery that published the current snapshot,
+        // so its first read can legitimately repeat that generation. Keep the
+        // normal bounded retry policy: the production backoff crosses the cache
+        // lifetime while the shared mutation turn prevents intervening writes.
+        let snapshot = try await refreshAssumingMutationTurn(now: nil)
         try Task.checkCancellation()
         let configuration = MenuBarConcealmentConfiguration(
             visibleItemIDs: snapshot.items.filter {
