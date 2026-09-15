@@ -48,6 +48,10 @@ unless shelf.match?(/override func accessibilityChildren\(\) -> \[Any\]\?.*?desc
   abort('native shelf item controls are not bridged into AppKit Accessibility')
 end
 
+unless shelf.match?(/setAccessibilityElement\(true\).*?setAccessibilityRole\(\.window\).*?setAccessibilitySubrole\(\.floatingWindow\).*?setAccessibilityIdentifier\("Barline\.Bar"\)/m)
+  abort('borderless shelf panel is not explicitly published as an Accessibility window')
+end
+
 if item_projection.include?('.accessibilityElement(children: .ignore)')
   abort('SwiftUI accessibility projection shadows the native shelf item control')
 end

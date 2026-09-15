@@ -112,6 +112,15 @@ final class BarlineShelfPanel: NSPanel {
             defer: false
         )
         title = "Barline Bar"
+        // A borderless nonactivating panel can be composited and hit-testable
+        // without being included in the owning application's AXWindows list,
+        // especially on the first presentation of an accessory process. Make
+        // the shelf an explicit Accessibility window so assistive clients and
+        // installed-app journeys can traverse the same controls users see.
+        setAccessibilityElement(true)
+        setAccessibilityRole(.window)
+        setAccessibilitySubrole(.floatingWindow)
+        setAccessibilityIdentifier("Barline.Bar")
         setAccessibilityTitle("Barline Bar")
         titlebarAppearsTransparent = true
         isMovableByWindowBackground = true
