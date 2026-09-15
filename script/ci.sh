@@ -255,9 +255,13 @@ run_full() {
         run_step "installed-staple" xcrun stapler validate "$BARLINE_CANDIDATE_APP"
         run_step "installed-app-intents-topology" ruby ./script/validate-app-intents-topology.rb --app "$BARLINE_CANDIDATE_APP"
         # The source-bound receipt directory is immutable qualification input at
-        # this point. Exercise recovery again, but do not attempt to overwrite
-        # its already-recorded performance and interruption receipts.
+        # this point. Its dedicated, host-quiescent performance receipt below is
+        # the authoritative 250 ms gate. Exercise recovery again after the heavy
+        # build/UI workload, but classify load-contaminated timing as observed so
+        # Xcode runner teardown cannot turn recovery coverage into a flaky second
+        # performance gate.
         run_step "installed-shelf-recovery" env BARLINE_INSTALLED_EVIDENCE_DIR= \
+            BARLINE_PERFORMANCE_ENFORCE_BUDGET=0 \
             ./script/test-reopen-burst.sh --reuse-running
         local installed_executable_sha
         installed_executable_sha="$(shasum -a 256 "$BARLINE_CANDIDATE_APP/Contents/MacOS/Barline" | awk '{print $1}')"

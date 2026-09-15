@@ -1,10 +1,13 @@
 # Changelog
 
-## 1.0.16 (build 81) — September 15, 2026
+## 1.0.16 (build 82) — September 15, 2026
 
 - Publish the borderless, nonactivating Barline Bar as an explicit
   Accessibility window. Its native item controls are now traversable from the
   owning application's AX window tree on the first presentation after launch.
+- Keep the source-bound 250 ms performance receipt authoritative while the
+  post-Xcode installed gate independently exercises shelf and helper recovery.
+  Test-runner teardown load is recorded without becoming a duplicate timing gate.
 
 - Let macOS 27 users assign supported menu bar items between Barline's visible
   and hidden sections. Barline commits the complete visibility state through
