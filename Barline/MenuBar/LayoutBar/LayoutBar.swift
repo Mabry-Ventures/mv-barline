@@ -5,6 +5,7 @@
 
 import BarlineCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct LayoutBar: View {
     private struct Representable: NSViewRepresentable {
@@ -94,6 +95,9 @@ private struct MenuBarInventoryBar: View {
     let section: MenuBarSection.Name
     let colorScheme: ColorScheme
 
+    @State private var isDropTargeted = false
+    @State private var assignmentFailed = false
+
     private var emptyForeground: Color {
         colorScheme == .dark ? Color.white.opacity(0.65) : Color.black.opacity(0.58)
     }
@@ -103,22 +107,41 @@ private struct MenuBarInventoryBar: View {
     }
 
     var body: some View {
-        if items.isEmpty {
-            Text(emptyMessage)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(emptyForeground)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else {
-            ScrollView(.horizontal) {
-                HStack(spacing: 8) {
-                    ForEach(items, id: \.stableID) { item in
-                        MenuBarInventoryItem(item: item, colorScheme: colorScheme)
+        Group {
+            if items.isEmpty {
+                Text(emptyMessage)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(emptyForeground)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView(.horizontal) {
+                    HStack(spacing: 8) {
+                        ForEach(items, id: \.stableID) { item in
+                            MenuBarInventoryItem(item: item, colorScheme: colorScheme)
+                        }
                     }
+                    .padding(.horizontal, 10)
+                    .frame(minHeight: 48)
                 }
-                .padding(.horizontal, 10)
-                .frame(minHeight: 48)
+                .scrollIndicators(.hidden)
             }
-            .scrollIndicators(.hidden)
+        }
+        .contentShape(Rectangle())
+        .overlay {
+            if isDropTargeted {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(Color.accentColor, lineWidth: 2)
+            }
+        }
+        .onDrop(
+            of: [.barlineLayoutItem],
+            isTargeted: $isDropTargeted,
+            perform: acceptDrop
+        )
+        .alert("Layout could not be changed", isPresented: $assignmentFailed) {
+            Button("OK", role: .cancel) {}
+        } message: {
+            Text("Your existing menu bar layout is unchanged. Please try again.")
         }
     }
 
@@ -131,6 +154,32 @@ private struct MenuBarInventoryBar: View {
         case .alwaysHidden:
             "No always-hidden items"
         }
+    }
+
+    private func acceptDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first(where: {
+            $0.hasItemConformingToTypeIdentifier(UTType.barlineLayoutItem.identifier)
+        }) else { return false }
+        provider.loadDataRepresentation(forTypeIdentifier: UTType.barlineLayoutItem.identifier) { data, _ in
+            guard let data,
+                  let itemID = try? JSONDecoder().decode(MenuBarItemID.self, from: data)
+            else {
+                Task { @MainActor in assignmentFailed = true }
+                return
+            }
+            Task { @MainActor in
+                do {
+                    try await itemManager.assign(
+                        itemID: itemID,
+                        to: section,
+                        index: items.count
+                    )
+                } catch {
+                    assignmentFailed = true
+                }
+            }
+        }
+        return true
     }
 }
 
@@ -204,5 +253,26 @@ private struct MenuBarInventoryItem: View {
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel(displayName)
+        .onDrag {
+            let provider = NSItemProvider()
+            guard item.isMovable,
+                  let data = try? JSONEncoder().encode(item.stableID)
+            else { return provider }
+            provider.registerDataRepresentation(
+                forTypeIdentifier: UTType.barlineLayoutItem.identifier,
+                visibility: .ownProcess
+            ) { completion in
+                completion(data, nil)
+                return nil
+            }
+            return provider
+        }
+        .disabled(!item.isMovable)
     }
+}
+
+private extension UTType {
+    static let barlineLayoutItem = UTType(
+        exportedAs: "com.mabryventures.Barline.layout-bar-item"
+    )
 }

@@ -1074,6 +1074,58 @@ extension MenuBarItemManager {
         }
     }
 
+    /// Assigns a macOS 27 inventory item to a logical visibility section.
+    /// The backend commits the complete native concealment state before the
+    /// coordinator publishes or persists the resulting layout.
+    @available(macOS 27.0, *)
+    func assign(
+        itemID: MenuBarItemID,
+        to section: MenuBarSection.Name,
+        index: Int
+    ) async throws {
+        appState?.contextualRules.pauseForManualChange()
+        try await waitForUserToPauseInput()
+        guard let appState,
+              appState.permissions.accessibility.hasPermission
+        else { throw EventError.cannotComplete }
+
+        do {
+            let snapshot = try await appState.compatibilityCoordinator.refresh()
+            guard let resolvedID = GoldenGateMenuBarIdentityResolver.resolve(
+                itemID,
+                among: snapshot.items.map(\.id)
+            ),
+                let descriptor = snapshot.items.first(where: { $0.id == resolvedID }),
+                descriptor.isMovable
+            else { throw MenuBarBackendError.staleItem(itemID) }
+
+            let destinationSection: BarlineCore.MenuBarSection = switch section {
+            case .visible: .visible
+            case .hidden: .hidden
+            case .alwaysHidden: .alwaysHidden
+            }
+            let priorProfileID = await appState.compatibilityCoordinator.activeProfileID
+            _ = try await appState.compatibilityCoordinator.perform(
+                .move(MenuBarMoveOperation(
+                    itemID: resolvedID,
+                    section: destinationSection,
+                    index: max(index, 0),
+                    destinationDisplayID: descriptor.displayID
+                )),
+                expectedGeneration: snapshot.generation
+            )
+            await appState.profileManager.clearActiveProfileAuthority(
+                ifMatches: priorProfileID
+            )
+            await cacheItemsRegardless()
+        } catch {
+            logger.error(
+                "Golden Gate layout assignment failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+            )
+            throw EventError.cannotComplete
+        }
+    }
+
     func click(
         item: MenuBarItem,
         with mouseButton: CGMouseButton,
