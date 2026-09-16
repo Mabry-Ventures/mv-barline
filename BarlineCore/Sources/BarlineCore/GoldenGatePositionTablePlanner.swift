@@ -46,6 +46,7 @@ public enum GoldenGatePositionTablePlanner {
     public static func resolvedKey(
         for itemID: MenuBarItemID,
         localizedApplicationName: String? = nil,
+        signingTeamIdentifier: String? = nil,
         existingKeys: some Collection<String>
     ) -> String? {
         let keys = Array(existingKeys)
@@ -68,27 +69,62 @@ public enum GoldenGatePositionTablePlanner {
             }
         }
 
-        let ownerNames = Set(
-            [localizedApplicationName, itemID.bundleIdentifier]
+        let localizedOwnerNames = Set(
+            [localizedApplicationName]
                 .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
                 .filter { !$0.isEmpty }
                 .map { $0.lowercased() }
         )
+        let bundleIdentifier = itemID.bundleIdentifier
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let teamIdentifier = signingTeamIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
         for identifier in identifiers {
             let suffix = "\(keySeparator)\(identifier)"
             let candidates = keys.filter {
                 $0.lowercased().hasPrefix(statusPrefix) &&
                     $0.lowercased().hasSuffix(suffix.lowercased())
             }
-            let ownerMatches = candidates.filter { key in
+            let matchingOwners = candidates.filter { key in
                 guard let owner = statusOwner(in: key) else { return false }
-                return ownerNames.contains(owner.lowercased())
+                return ownerMatches(
+                    owner,
+                    localizedOwnerNames: localizedOwnerNames,
+                    bundleIdentifier: bundleIdentifier,
+                    signingTeamIdentifier: teamIdentifier
+                )
             }
-            if ownerMatches.count == 1 {
-                return ownerMatches[0]
+            if matchingOwners.count == 1 {
+                return matchingOwners[0]
             }
         }
+
         return nil
+    }
+
+    private static func ownerMatches(
+        _ owner: String,
+        localizedOwnerNames: Set<String>,
+        bundleIdentifier: String,
+        signingTeamIdentifier: String?
+    ) -> Bool {
+        let normalized = owner
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        guard !normalized.isEmpty else { return false }
+        if localizedOwnerNames.contains(normalized) || normalized == bundleIdentifier {
+            return true
+        }
+        // macOS 27 can namespace a third-party owner with the app's signing
+        // team. Only an observed exact team-plus-bundle identity is accepted;
+        // a prefix inferred from a similar bundle name is never sufficient.
+        guard let signingTeamIdentifier,
+              !signingTeamIdentifier.isEmpty,
+              !bundleIdentifier.isEmpty
+        else { return false }
+        return normalized == "\(signingTeamIdentifier).\(bundleIdentifier)"
     }
 
     /// Returns the exact physical candidate represented by a drag operation.

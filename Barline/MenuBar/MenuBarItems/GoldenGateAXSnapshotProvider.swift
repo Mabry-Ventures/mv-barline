@@ -10,6 +10,7 @@ import CoreGraphics
 import CryptoKit
 import Foundation
 import os
+import Security
 
 /// macOS grants Accessibility to the signed application identity, not to its
 /// embedded XPC service. Keep public AX inventory here in the trusted app and
@@ -235,10 +236,12 @@ actor GoldenGateAXSnapshotProvider {
                 requestAccessIfNeeded: false
             )
             let entries = collectEntries()
+            let teamIdentifiersByPID = signingTeamIdentifiers(for: entries)
             let before = try applyingPositionTableCapabilities(
                 to: initial,
                 observations: entries.map(\.observation),
-                positions: positions
+                positions: positions,
+                teamIdentifiersByPID: teamIdentifiersByPID
             )
             guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
                 throw MenuBarBackendError.staleItem(operation.itemID)
@@ -258,7 +261,8 @@ actor GoldenGateAXSnapshotProvider {
             let keysByItemID = positionKeys(
                 observations: entries.map(\.observation),
                 positions: positions,
-                snapshot: before
+                snapshot: before,
+                teamIdentifiersByPID: teamIdentifiersByPID
             )
             guard keysByItemID[source.id] != nil else {
                 throw MenuBarBackendError.positionTableIdentityUnresolved
@@ -401,16 +405,19 @@ actor GoldenGateAXSnapshotProvider {
             try await reconcileInterruptedPositionTransaction()
             let positions = try await positionTableStore.readPositions(requestAccessIfNeeded: false)
             let entries = collectEntries()
+            let teamIdentifiersByPID = signingTeamIdentifiers(for: entries)
             let current = try applyingPositionTableCapabilities(
                 to: initial,
                 observations: entries.map(\.observation),
-                positions: positions
+                positions: positions,
+                teamIdentifiersByPID: teamIdentifiersByPID
             )
             let currentIDs = Set(current.items.map(\.id))
             let keysByItemID = positionKeys(
                 observations: entries.map(\.observation),
                 positions: positions,
-                snapshot: current
+                snapshot: current,
+                teamIdentifiersByPID: teamIdentifiersByPID
             )
             let mutation = try GoldenGatePositionTablePlanner.planRestore(
                 target: target,
@@ -880,13 +887,15 @@ actor GoldenGateAXSnapshotProvider {
     private func positionKeys(
         observations: [GoldenGateMenuBarObservation],
         positions: [String: Int],
-        snapshot: MenuBarSnapshot? = nil
+        snapshot: MenuBarSnapshot? = nil,
+        teamIdentifiersByPID: [Int32: String] = [:]
     ) -> [MenuBarItemID: String] {
         let identifiers = GoldenGateMenuBarSnapshotBuilder.identifiers(for: observations)
         let liveCandidates = zip(observations, identifiers).compactMap { observation, itemID in
             GoldenGatePositionTablePlanner.resolvedKey(
                 for: itemID,
                 localizedApplicationName: observation.localizedApplicationName,
+                signingTeamIdentifier: teamIdentifiersByPID[observation.ownerProcessIdentifier],
                 existingKeys: positions.keys
             ).map { (itemID, $0) }
         }
@@ -899,6 +908,9 @@ actor GoldenGateAXSnapshotProvider {
                     .runningApplications(withBundleIdentifier: item.id.bundleIdentifier)
                     .first?
                     .localizedName,
+                signingTeamIdentifier: item.ownerProcessIdentifier.flatMap {
+                    teamIdentifiersByPID[$0]
+                },
                 existingKeys: positions.keys
             ).map { (item.id, $0) }
         } ?? []
@@ -912,13 +924,15 @@ actor GoldenGateAXSnapshotProvider {
     private func applyingPositionTableCapabilities(
         to snapshot: MenuBarSnapshot,
         observations: [GoldenGateMenuBarObservation],
-        positions: [String: Int]?
+        positions: [String: Int]?,
+        teamIdentifiersByPID: [Int32: String] = [:]
     ) throws -> MenuBarSnapshot {
         let resolvedKeys: [MenuBarItemID: String]? = positions.map {
             positionKeys(
                 observations: observations,
                 positions: $0,
-                snapshot: snapshot
+                snapshot: snapshot,
+                teamIdentifiersByPID: teamIdentifiersByPID
             )
         }
         let positioned: MenuBarSnapshot
@@ -1213,6 +1227,48 @@ actor GoldenGateAXSnapshotProvider {
             }
             return $0.observation.bounds.x < $1.observation.bounds.x
         }
+    }
+
+    /// Resolve process signing teams only while an explicit native mutation is
+    /// in flight. Passive inventory stays lightweight, and a failed lookup is
+    /// intentionally treated as unresolved rather than guessing an owner.
+    private func signingTeamIdentifiers(for entries: [Entry]) -> [Int32: String] {
+        let resolved = Set(entries.map(\.observation.ownerProcessIdentifier)).compactMap { pid in
+            Self.signingTeamIdentifier(for: pid).map { (pid, $0) }
+        }
+        return Dictionary(uniqueKeysWithValues: resolved)
+    }
+
+    private static func signingTeamIdentifier(for processIdentifier: Int32) -> String? {
+        guard processIdentifier > 0 else { return nil }
+        let attributes: CFDictionary = [
+            kSecGuestAttributePid: NSNumber(value: processIdentifier),
+        ] as CFDictionary
+        var code: SecCode?
+        guard SecCodeCopyGuestWithAttributes(nil, attributes, [], &code) == errSecSuccess,
+              let code
+        else {
+            return nil
+        }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess,
+              let staticCode
+        else {
+            return nil
+        }
+        var information: CFDictionary?
+        guard SecCodeCopySigningInformation(
+            staticCode,
+            SecCSFlags(rawValue: kSecCSSigningInformation),
+            &information
+        ) == errSecSuccess,
+            let dictionary = information as? [CFString: Any],
+            let teamIdentifier = dictionary[kSecCodeInfoTeamIdentifier] as? String
+        else {
+            return nil
+        }
+        let trimmed = teamIdentifier.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 
     private func activeDisplayIDs() -> [CGDirectDisplayID] {

@@ -26,6 +26,63 @@ struct GoldenGatePositionTablePlannerTests {
         ) == "status:Example::StableItem")
     }
 
+    @Test("A team-prefixed macOS 27 owner resolves the exact sibling status item")
+    func teamPrefixedOwnerResolvesExactSiblingStatusItem() {
+        let itemID = id(bundle: "com.example.first", title: "native-item")
+        #expect(GoldenGatePositionTablePlanner.resolvedKey(
+            for: itemID,
+            localizedApplicationName: "Example",
+            signingTeamIdentifier: "ABCD1234",
+            existingKeys: [
+                "status:ABCD1234.com.example.first::other-native-item",
+                "status:ABCD1234.com.example.first::native-item",
+            ]
+        ) == "status:ABCD1234.com.example.first::native-item")
+    }
+
+    @Test("A team-prefixed owner without an exact item identity fails closed")
+    func teamPrefixedOwnerWithoutExactItemIdentityFailsClosed() {
+        let itemID = id(bundle: "com.example.first", title: "AXGeneratedTitle")
+        #expect(GoldenGatePositionTablePlanner.resolvedKey(
+            for: itemID,
+            localizedApplicationName: "Example",
+            signingTeamIdentifier: "ABCD1234",
+            existingKeys: ["status:ABCD1234.com.example.first::native-item"]
+        ) == nil)
+    }
+
+    @Test("An unverified team prefix cannot claim an otherwise matching item")
+    func unverifiedTeamPrefixFailsClosed() {
+        let itemID = id(bundle: "com.example.first", title: "native-item")
+        #expect(GoldenGatePositionTablePlanner.resolvedKey(
+            for: itemID,
+            localizedApplicationName: "Example",
+            signingTeamIdentifier: "ABCD1234",
+            existingKeys: ["status:OTHER999.com.example.first::native-item"]
+        ) == nil)
+    }
+
+    @Test("A team-prefixed key remains unresolved without a verified team")
+    func missingTeamPrefixFailsClosed() {
+        let itemID = id(bundle: "com.example.first", title: "native-item")
+        #expect(GoldenGatePositionTablePlanner.resolvedKey(
+            for: itemID,
+            localizedApplicationName: "Example",
+            existingKeys: ["status:ABCD1234.com.example.first::native-item"]
+        ) == nil)
+    }
+
+    @Test("A verified team preserves legacy unprefixed owner compatibility")
+    func verifiedTeamPreservesLegacyOwnerCompatibility() {
+        let itemID = id(bundle: "com.example.first", title: "native-item")
+        #expect(GoldenGatePositionTablePlanner.resolvedKey(
+            for: itemID,
+            localizedApplicationName: "Example",
+            signingTeamIdentifier: "ABCD1234",
+            existingKeys: ["status:com.example.first::native-item"]
+        ) == "status:com.example.first::native-item")
+    }
+
     @Test("Ambiguous suffixes fail closed")
     func ambiguousSuffixFailsClosed() {
         let itemID = id(bundle: "com.example.missing", title: "Item-0")
