@@ -22,4 +22,15 @@ struct MenuBarAssignmentFailurePresentationTests {
 
         #expect(message.contains("unchanged"))
     }
+
+    @Test("Denied macOS 27 menu-bar access explains the targeted recovery")
+    func positionTableAccessExplainsHowToRetry() {
+        let message = MenuBarAssignmentFailurePresentation.message(
+            for: MenuBarBackendError.positionTableAccessNotGranted
+        )
+
+        #expect(message.contains("menu bar preferences"))
+        #expect(message.contains("Preferences folder"))
+        #expect(!message.contains("unchanged"))
+    }
 }

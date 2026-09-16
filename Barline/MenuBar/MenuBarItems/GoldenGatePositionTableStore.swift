@@ -94,12 +94,14 @@ actor GoldenGatePositionTableStore {
     }
 
     func readPositions(requestAccessIfNeeded: Bool) async throws -> [String: Int] {
-        try await authorizeAccess(requestAccessIfNeeded: requestAccessIfNeeded)
+        let scopedURL = try await authorizeAccess(requestAccessIfNeeded: requestAccessIfNeeded)
+        defer { scopedURL?.stopAccessingSecurityScopedResource() }
         return try readPreferences()
     }
 
     func apply(_ mutation: GoldenGatePositionMutation) async throws {
-        try await authorizeAccess(requestAccessIfNeeded: true)
+        let scopedURL = try await authorizeAccess(requestAccessIfNeeded: true)
+        defer { scopedURL?.stopAccessingSecurityScopedResource() }
 
         // The provider must reconcile any prior journal before planning a new
         // mutation so a verified companion state can be restored as well.
@@ -213,7 +215,8 @@ actor GoldenGatePositionTableStore {
     func recoverInterruptedTransaction() async throws -> GoldenGatePositionRecoveryResult {
         do {
             guard try loadJournal() != nil else { return .none }
-            try await authorizeAccess(requestAccessIfNeeded: false)
+            let scopedURL = try await authorizeAccess(requestAccessIfNeeded: false)
+            defer { scopedURL?.stopAccessingSecurityScopedResource() }
             return try recoverInterruptedTransactionWithCurrentAccess()
         } catch StoreError.invalidJournal {
             try quarantineInvalidJournal()
@@ -224,7 +227,8 @@ actor GoldenGatePositionTableStore {
 
     @discardableResult
     func rollback(_ mutation: GoldenGatePositionMutation) async throws -> Bool {
-        try await authorizeAccess(requestAccessIfNeeded: false)
+        let scopedURL = try await authorizeAccess(requestAccessIfNeeded: false)
+        defer { scopedURL?.stopAccessingSecurityScopedResource() }
         return try rollbackWithCurrentAccess(mutation)
     }
 
@@ -286,10 +290,24 @@ actor GoldenGatePositionTableStore {
 
     private func authorizeAccess(
         requestAccessIfNeeded: Bool
-    ) async throws {
+    ) async throws -> URL? {
+        if FileManager.default.isReadableFile(atPath: Self.expectedURL.path),
+           FileManager.default.isWritableFile(atPath: Self.expectedURL.path)
+        {
+            return nil
+        }
         do {
-            if try resolvedBookmark() {
-                return
+            if let scopedURL = try resolvedBookmarkURL() {
+                do {
+                    return try beginAccessing(scopedURL)
+                } catch StoreError.accessNotGranted {
+                    // Releases before the scoped-bookmark migration saved a
+                    // plain bookmark. It resolves to the right directory but
+                    // cannot grant the Group Container access macOS 27 now
+                    // requires. Retire it so this explicit move can present
+                    // the picker and replace it with a security-scoped one.
+                    UserDefaults.standard.removeObject(forKey: Self.bookmarkKey)
+                }
             }
         } catch {
             // A bookmark is only a convenience for reacquiring this exact
@@ -298,31 +316,38 @@ actor GoldenGatePositionTableStore {
             // inventory remains noninteractive below.
             UserDefaults.standard.removeObject(forKey: Self.bookmarkKey)
         }
-
-        let expected = Self.expectedURL
-        if FileManager.default.isReadableFile(atPath: expected.path),
-           FileManager.default.isWritableFile(atPath: expected.path)
-        {
-            return
-        }
         guard requestAccessIfNeeded else { throw StoreError.accessNotGranted }
         guard let bookmark = try await Self.requestBookmark() else {
             throw StoreError.accessNotGranted
         }
         UserDefaults.standard.set(bookmark, forKey: Self.bookmarkKey)
-        guard try resolvedBookmark() else {
+        guard let scopedURL = try resolvedBookmarkURL() else {
             throw StoreError.accessNotGranted
         }
+        return try beginAccessing(scopedURL)
     }
 
-    private func resolvedBookmark() throws -> Bool {
+    private func beginAccessing(_ scopedURL: URL) throws -> URL {
+        guard scopedURL.startAccessingSecurityScopedResource() else {
+            throw StoreError.accessNotGranted
+        }
+        guard FileManager.default.isReadableFile(atPath: Self.expectedURL.path),
+              FileManager.default.isWritableFile(atPath: Self.expectedURL.path)
+        else {
+            scopedURL.stopAccessingSecurityScopedResource()
+            throw StoreError.accessNotGranted
+        }
+        return scopedURL
+    }
+
+    private func resolvedBookmarkURL() throws -> URL? {
         guard let data = UserDefaults.standard.data(forKey: Self.bookmarkKey) else {
-            return false
+            return nil
         }
         var stale = false
         let url = try URL(
             resolvingBookmarkData: data,
-            options: [.withoutUI],
+            options: [.withSecurityScope, .withoutUI],
             relativeTo: nil,
             bookmarkDataIsStale: &stale
         )
@@ -330,18 +355,15 @@ actor GoldenGatePositionTableStore {
             UserDefaults.standard.removeObject(forKey: Self.bookmarkKey)
             throw StoreError.unexpectedFile
         }
-        guard FileManager.default.isReadableFile(atPath: Self.expectedURL.path) else {
-            throw StoreError.accessNotGranted
-        }
         if stale {
             let refreshed = try url.bookmarkData(
-                options: [],
+                options: [.withSecurityScope],
                 includingResourceValuesForKeys: nil,
                 relativeTo: nil
             )
             UserDefaults.standard.set(refreshed, forKey: Self.bookmarkKey)
         }
-        return true
+        return url
     }
 
     @MainActor
@@ -361,7 +383,7 @@ actor GoldenGatePositionTableStore {
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
         guard isExpectedDirectory(url) else { throw StoreError.unexpectedFile }
         return try url.bookmarkData(
-            options: [],
+            options: [.withSecurityScope],
             includingResourceValuesForKeys: nil,
             relativeTo: nil
         )

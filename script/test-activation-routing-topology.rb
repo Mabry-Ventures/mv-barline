@@ -159,10 +159,20 @@ unless golden_gate_provider.include?('GoldenGatePositionTablePlanner.planMove(')
        golden_gate_positions.include?('S_IFLNK') &&
        golden_gate_positions.match?(/func authorizeAccess\(.*?catch \{.*?removeObject\(forKey: Self\.bookmarkKey\).*?guard requestAccessIfNeeded/m) &&
        !golden_gate_positions.include?('struct ScopedAccess') &&
-       !golden_gate_positions.include?('.withSecurityScope') &&
        !golden_gate_positions.include?('NSFileCoordinator().coordinate(') &&
        golden_gate_provider.match?(/func configureConcealment\(.*?async throws \{\}/m)
   abort('Golden Gate position-table moves are not domain-correct, verified, rolled back, and isolated from synthetic input')
+end
+
+unless golden_gate_positions.match?(/func readPositions\(.*?authorizeAccess.*?defer \{ scopedURL\?\.stopAccessingSecurityScopedResource\(\) \}.*?readPreferences/m) &&
+       golden_gate_positions.match?(/func apply\(.*?authorizeAccess.*?defer \{ scopedURL\?\.stopAccessingSecurityScopedResource\(\) \}/m) &&
+       golden_gate_positions.match?(/func recoverInterruptedTransaction\(.*?authorizeAccess.*?defer \{ scopedURL\?\.stopAccessingSecurityScopedResource\(\) \}/m) &&
+       golden_gate_positions.match?(/func rollback\(.*?authorizeAccess.*?defer \{ scopedURL\?\.stopAccessingSecurityScopedResource\(\) \}/m) &&
+       golden_gate_positions.match?(/private func beginAccessing\(.*?startAccessingSecurityScopedResource\(\).*?isReadableFile.*?isWritableFile/m) &&
+       golden_gate_positions.match?(/private func resolvedBookmarkURL\(.*?options: \[\.withSecurityScope, \.withoutUI\]/m) &&
+       golden_gate_positions.match?(/private static func requestBookmark\(.*?options: \[\.withSecurityScope\]/m) &&
+       golden_gate_positions.match?(/Retire it so this explicit move can present.*?removeObject\(forKey: Self\.bookmarkKey\)/m)
+  abort('macOS 27 position-table access does not activate, balance, and migrate its security-scoped bookmark')
 end
 
 unless layout_bar.include?('.draggable(MenuBarLayoutTransfer(') &&
