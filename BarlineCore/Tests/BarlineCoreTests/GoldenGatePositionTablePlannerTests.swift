@@ -3,6 +3,64 @@ import Testing
 
 @Suite("Golden Gate position table planner")
 struct GoldenGatePositionTablePlannerTests {
+    @Test("Read-only evidence distinguishes title and description candidates")
+    func keyEvidenceRetainsCandidateProvenance() {
+        let evidence = GoldenGatePositionTablePlanner.resolutionEvidence(
+            bundleIdentifier: "com.example.first",
+            localizedApplicationName: "Example",
+            candidates: [
+                GoldenGatePositionKeyCandidate(
+                    kind: .accessibilityIdentifier,
+                    value: nil
+                ),
+                GoldenGatePositionKeyCandidate(
+                    kind: .accessibilityDescription,
+                    value: "Description"
+                ),
+                GoldenGatePositionKeyCandidate(
+                    kind: .accessibilityTitle,
+                    value: "NativeTitle"
+                ),
+            ],
+            existingKeys: ["status:Example::NativeTitle"]
+        )
+
+        #expect(evidence.statusRecordCount == 1)
+        #expect(evidence.bundleRecordCount == 0)
+        #expect(evidence.recognizedOwnerRecordCount == 1)
+        #expect(evidence.evidence(for: .accessibilityIdentifier).isPresent == false)
+        #expect(evidence.evidence(for: .accessibilityDescription).suffixMatchCount == 0)
+        #expect(evidence.evidence(for: .accessibilityTitle).suffixMatchCount == 1)
+        #expect(evidence.evidence(for: .accessibilityTitle).acceptedOwnerMatchCount == 1)
+        #expect(evidence.distinctAcceptedKeyCount == 1)
+    }
+
+    @Test("Read-only evidence preserves ambiguity across distinct candidates")
+    func keyEvidenceDoesNotCollapseDistinctAllowedKeys() {
+        let evidence = GoldenGatePositionTablePlanner.resolutionEvidence(
+            bundleIdentifier: "com.example.first",
+            localizedApplicationName: "Example",
+            candidates: [
+                GoldenGatePositionKeyCandidate(
+                    kind: .accessibilityDescription,
+                    value: "Description"
+                ),
+                GoldenGatePositionKeyCandidate(
+                    kind: .accessibilityTitle,
+                    value: "NativeTitle"
+                ),
+            ],
+            existingKeys: [
+                "status:Example::Description",
+                "status:Example::NativeTitle",
+            ]
+        )
+
+        #expect(evidence.evidence(for: .accessibilityDescription).hasExactlyOneAcceptedKey)
+        #expect(evidence.evidence(for: .accessibilityTitle).hasExactlyOneAcceptedKey)
+        #expect(evidence.distinctAcceptedKeyCount == 2)
+    }
+
     @Test("Exact bundle and item identity wins over ambiguous generic suffixes")
     func exactIdentityWins() {
         let itemID = id(bundle: "com.example.first", title: "Item-0")

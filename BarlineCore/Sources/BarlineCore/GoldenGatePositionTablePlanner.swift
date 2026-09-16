@@ -34,6 +34,82 @@ public enum GoldenGatePositionTableError: Error, Equatable, Sendable {
     case inconsistentPositionOrder
 }
 
+/// The provenance of one ephemeral AX value checked against a macOS 27
+/// position-table key. Values are never included in diagnostics or persisted.
+public enum GoldenGatePositionKeyCandidateKind: String, Codable, Equatable, Sendable {
+    case accessibilityIdentifier
+    case accessibilityDescription
+    case accessibilityTitle
+}
+
+public struct GoldenGatePositionKeyCandidate: Equatable, Sendable {
+    public let kind: GoldenGatePositionKeyCandidateKind
+    public let value: String?
+
+    public init(kind: GoldenGatePositionKeyCandidateKind, value: String?) {
+        self.kind = kind
+        self.value = value
+    }
+}
+
+/// Privacy-safe evidence from one read-only key-resolution inspection.
+/// It deliberately retains only categories, booleans, and counts.
+public struct GoldenGatePositionKeyCandidateEvidence: Equatable, Sendable {
+    public let kind: GoldenGatePositionKeyCandidateKind
+    public let isPresent: Bool
+    public let suffixMatchCount: Int
+    public let acceptedOwnerMatchCount: Int
+    public let hasExactlyOneAcceptedKey: Bool
+
+    public init(
+        kind: GoldenGatePositionKeyCandidateKind,
+        isPresent: Bool,
+        suffixMatchCount: Int,
+        acceptedOwnerMatchCount: Int,
+        hasExactlyOneAcceptedKey: Bool
+    ) {
+        self.kind = kind
+        self.isPresent = isPresent
+        self.suffixMatchCount = suffixMatchCount
+        self.acceptedOwnerMatchCount = acceptedOwnerMatchCount
+        self.hasExactlyOneAcceptedKey = hasExactlyOneAcceptedKey
+    }
+}
+
+public struct GoldenGatePositionKeyResolutionEvidence: Equatable, Sendable {
+    public let statusRecordCount: Int
+    public let bundleRecordCount: Int
+    public let recognizedOwnerRecordCount: Int
+    public let candidates: [GoldenGatePositionKeyCandidateEvidence]
+    public let distinctAcceptedKeyCount: Int
+
+    public init(
+        statusRecordCount: Int,
+        bundleRecordCount: Int,
+        recognizedOwnerRecordCount: Int,
+        candidates: [GoldenGatePositionKeyCandidateEvidence],
+        distinctAcceptedKeyCount: Int
+    ) {
+        self.statusRecordCount = statusRecordCount
+        self.bundleRecordCount = bundleRecordCount
+        self.recognizedOwnerRecordCount = recognizedOwnerRecordCount
+        self.candidates = candidates
+        self.distinctAcceptedKeyCount = distinctAcceptedKeyCount
+    }
+
+    public func evidence(for kind: GoldenGatePositionKeyCandidateKind)
+        -> GoldenGatePositionKeyCandidateEvidence
+    {
+        candidates.first(where: { $0.kind == kind }) ?? GoldenGatePositionKeyCandidateEvidence(
+            kind: kind,
+            isPresent: false,
+            suffixMatchCount: 0,
+            acceptedOwnerMatchCount: 0,
+            hasExactlyOneAcceptedKey: false
+        )
+    }
+}
+
 /// Pure planning for the macOS 27 `TrailingItemPreferredPositions` table.
 ///
 /// This is intentionally conservative. Only an exact bundle/item key or a
@@ -69,18 +145,11 @@ public enum GoldenGatePositionTablePlanner {
             }
         }
 
-        let localizedOwnerNames = Set(
-            [localizedApplicationName]
-                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
-                .filter { !$0.isEmpty }
-                .map { $0.lowercased() }
+        let ownerContext = normalizedOwnerContext(
+            localizedApplicationName: localizedApplicationName,
+            bundleIdentifier: itemID.bundleIdentifier,
+            signingTeamIdentifier: signingTeamIdentifier
         )
-        let bundleIdentifier = itemID.bundleIdentifier
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
-        let teamIdentifier = signingTeamIdentifier?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .lowercased()
         for identifier in identifiers {
             let suffix = "\(keySeparator)\(identifier)"
             let candidates = keys.filter {
@@ -91,9 +160,9 @@ public enum GoldenGatePositionTablePlanner {
                 guard let owner = statusOwner(in: key) else { return false }
                 return ownerMatches(
                     owner,
-                    localizedOwnerNames: localizedOwnerNames,
-                    bundleIdentifier: bundleIdentifier,
-                    signingTeamIdentifier: teamIdentifier
+                    localizedOwnerNames: ownerContext.localizedOwnerNames,
+                    bundleIdentifier: ownerContext.bundleIdentifier,
+                    signingTeamIdentifier: ownerContext.teamIdentifier
                 )
             }
             if matchingOwners.count == 1 {
@@ -102,6 +171,102 @@ public enum GoldenGatePositionTablePlanner {
         }
 
         return nil
+    }
+
+    /// Inspects position-key candidates without selecting or writing a key.
+    /// Callers must keep candidate values transaction-local; this result is
+    /// intentionally limited to non-sensitive aggregate evidence.
+    public static func resolutionEvidence(
+        bundleIdentifier: String,
+        localizedApplicationName: String? = nil,
+        signingTeamIdentifier: String? = nil,
+        candidates: [GoldenGatePositionKeyCandidate],
+        existingKeys: some Collection<String>
+    ) -> GoldenGatePositionKeyResolutionEvidence {
+        let keys = Array(existingKeys)
+        let ownerContext = normalizedOwnerContext(
+            localizedApplicationName: localizedApplicationName,
+            bundleIdentifier: bundleIdentifier,
+            signingTeamIdentifier: signingTeamIdentifier
+        )
+        let statusKeys = keys.filter { $0.lowercased().hasPrefix(statusPrefix) }
+        let bundlePrefix = "\(statusPrefix)\(ownerContext.bundleIdentifier)\(keySeparator)"
+        let recognizedOwnerKeys = statusKeys.filter { key in
+            guard let owner = statusOwner(in: key) else { return false }
+            return ownerMatches(
+                owner,
+                localizedOwnerNames: ownerContext.localizedOwnerNames,
+                bundleIdentifier: ownerContext.bundleIdentifier,
+                signingTeamIdentifier: ownerContext.teamIdentifier
+            )
+        }
+        var acceptedKeys = Set<String>()
+        let evidence = candidates.map { candidate in
+            let value = candidate.value?.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard let value, !value.isEmpty else {
+                return GoldenGatePositionKeyCandidateEvidence(
+                    kind: candidate.kind,
+                    isPresent: false,
+                    suffixMatchCount: 0,
+                    acceptedOwnerMatchCount: 0,
+                    hasExactlyOneAcceptedKey: false
+                )
+            }
+            let suffix = "\(keySeparator)\(value)"
+            let suffixMatches = statusKeys.filter {
+                $0.lowercased().hasSuffix(suffix.lowercased())
+            }
+            let accepted = suffixMatches.filter { key in
+                guard let owner = statusOwner(in: key) else { return false }
+                return ownerMatches(
+                    owner,
+                    localizedOwnerNames: ownerContext.localizedOwnerNames,
+                    bundleIdentifier: ownerContext.bundleIdentifier,
+                    signingTeamIdentifier: ownerContext.teamIdentifier
+                )
+            }
+            acceptedKeys.formUnion(accepted)
+            return GoldenGatePositionKeyCandidateEvidence(
+                kind: candidate.kind,
+                isPresent: true,
+                suffixMatchCount: suffixMatches.count,
+                acceptedOwnerMatchCount: accepted.count,
+                hasExactlyOneAcceptedKey: accepted.count == 1
+            )
+        }
+        return GoldenGatePositionKeyResolutionEvidence(
+            statusRecordCount: statusKeys.count,
+            bundleRecordCount: statusKeys.count(where: {
+                $0.lowercased().hasPrefix(bundlePrefix)
+            }),
+            recognizedOwnerRecordCount: recognizedOwnerKeys.count,
+            candidates: evidence,
+            distinctAcceptedKeyCount: acceptedKeys.count
+        )
+    }
+
+    private static func normalizedOwnerContext(
+        localizedApplicationName: String?,
+        bundleIdentifier: String,
+        signingTeamIdentifier: String?
+    ) -> (
+        localizedOwnerNames: Set<String>,
+        bundleIdentifier: String,
+        teamIdentifier: String?
+    ) {
+        let localizedOwnerNames = Set(
+            [localizedApplicationName]
+                .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .map { $0.lowercased() }
+        )
+        let normalizedBundleIdentifier = bundleIdentifier
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        let teamIdentifier = signingTeamIdentifier?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        return (localizedOwnerNames, normalizedBundleIdentifier, teamIdentifier)
     }
 
     private static func ownerMatches(

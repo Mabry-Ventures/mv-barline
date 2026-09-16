@@ -58,6 +58,10 @@ actor GoldenGateAXSnapshotProvider {
     private struct Entry {
         let observation: GoldenGateMenuBarObservation
         let element: AXUIElement
+        /// AX candidates are transaction-local and are used only by the
+        /// read-only macOS 27 key-schema diagnostic. They are never persisted
+        /// or written to logs.
+        let positionKeyCandidates: PositionKeyCandidates
         /// The application that published this menu-bar item. Its bundle ID and
         /// signing identity must be derived from the same process.
         let publisherProcessIdentifier: Int32
@@ -65,6 +69,13 @@ actor GoldenGateAXSnapshotProvider {
         /// MenuBarAgent re-vend, so it is not suitable for publisher signing
         /// identity resolution.
         let axElementProcessIdentifier: Int32?
+    }
+
+    private struct PositionKeyCandidates {
+        let identifier: String?
+        let accessibilityDescription: String?
+        let title: String?
+        let titleIsRootValue: Bool
     }
 
     private static let maximumItemHeight: CGFloat = 40
@@ -1230,6 +1241,12 @@ actor GoldenGateAXSnapshotProvider {
                                 ?? runningApplication.processIdentifier
                         ),
                         element: child.element,
+                        positionKeyCandidates: PositionKeyCandidates(
+                            identifier: identifier,
+                            accessibilityDescription: accessibilityDescription,
+                            title: title,
+                            titleIsRootValue: metadata.first?.title == title && title != nil
+                        ),
                         publisherProcessIdentifier: runningApplication.processIdentifier,
                         axElementProcessIdentifier: axElementProcessIdentifier
                     )
@@ -1273,6 +1290,33 @@ actor GoldenGateAXSnapshotProvider {
         let entry = entries[index]
         let publisherTeam = teamIdentifiersByItemID[source.id]
         let axTeam = entry.axElementProcessIdentifier.flatMap(Self.signingTeamIdentifier(for:))
+        let candidates = entry.positionKeyCandidates
+        let evidence = GoldenGatePositionTablePlanner.resolutionEvidence(
+            bundleIdentifier: source.id.bundleIdentifier,
+            localizedApplicationName: entry.observation.localizedApplicationName,
+            signingTeamIdentifier: publisherTeam,
+            candidates: [
+                GoldenGatePositionKeyCandidate(
+                    kind: .accessibilityIdentifier,
+                    value: candidates.identifier
+                ),
+                GoldenGatePositionKeyCandidate(
+                    kind: .accessibilityDescription,
+                    value: candidates.accessibilityDescription
+                ),
+                GoldenGatePositionKeyCandidate(
+                    kind: .accessibilityTitle,
+                    value: candidates.title
+                ),
+            ],
+            existingKeys: positions.keys
+        )
+        let identifierEvidence = evidence.evidence(for: .accessibilityIdentifier)
+        let descriptionEvidence = evidence.evidence(for: .accessibilityDescription)
+        let titleEvidence = evidence.evidence(for: .accessibilityTitle)
+        let titleEqualsCurrentIdentity = candidates.title.map {
+            $0.caseInsensitiveCompare(source.id.title ?? "") == .orderedSame
+        } ?? false
         let publisherKeyResolved = GoldenGatePositionTablePlanner.resolvedKey(
             for: source.id,
             localizedApplicationName: entry.observation.localizedApplicationName,
@@ -1286,7 +1330,7 @@ actor GoldenGateAXSnapshotProvider {
             existingKeys: positions.keys
         ) != nil
         logger.notice(
-            "Golden Gate identity audit: source_entry_found=true, ax_pid_matches_publisher=\(entry.axElementProcessIdentifier == entry.publisherProcessIdentifier, privacy: .public), publisher_team_resolved=\(publisherTeam != nil, privacy: .public), ax_team_resolved=\(axTeam != nil, privacy: .public), publisher_key_resolved=\(publisherKeyResolved, privacy: .public), ax_key_resolved=\(axKeyResolved, privacy: .public), globally_unique_source_key=\(resolvedKeys[source.id] != nil, privacy: .public)"
+            "Golden Gate identity audit: table_read_status=readable, source_entry_found=true, ax_pid_matches_publisher=\(entry.axElementProcessIdentifier == entry.publisherProcessIdentifier, privacy: .public), publisher_team_resolved=\(publisherTeam != nil, privacy: .public), ax_team_resolved=\(axTeam != nil, privacy: .public), publisher_key_resolved=\(publisherKeyResolved, privacy: .public), ax_key_resolved=\(axKeyResolved, privacy: .public), globally_unique_source_key=\(resolvedKeys[source.id] != nil, privacy: .public), status_record_count=\(evidence.statusRecordCount, privacy: .public), bundle_record_count=\(evidence.bundleRecordCount, privacy: .public), recognized_owner_record_count=\(evidence.recognizedOwnerRecordCount, privacy: .public), identifier_present=\(identifierEvidence.isPresent, privacy: .public), identifier_suffix_match_count=\(identifierEvidence.suffixMatchCount, privacy: .public), identifier_owner_match_count=\(identifierEvidence.acceptedOwnerMatchCount, privacy: .public), description_present=\(descriptionEvidence.isPresent, privacy: .public), description_suffix_match_count=\(descriptionEvidence.suffixMatchCount, privacy: .public), description_owner_match_count=\(descriptionEvidence.acceptedOwnerMatchCount, privacy: .public), title_present=\(titleEvidence.isPresent, privacy: .public), title_from_root=\(candidates.titleIsRootValue, privacy: .public), title_equals_current_identity=\(titleEqualsCurrentIdentity, privacy: .public), title_suffix_match_count=\(titleEvidence.suffixMatchCount, privacy: .public), title_owner_match_count=\(titleEvidence.acceptedOwnerMatchCount, privacy: .public), distinct_accepted_key_count=\(evidence.distinctAcceptedKeyCount, privacy: .public)"
         )
     }
 
