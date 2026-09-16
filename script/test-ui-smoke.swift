@@ -11,6 +11,7 @@ enum SmokeFailure: Error, CustomStringConvertible {
     case menuBarAutoHideEnabled
     case noShelfWindow
     case noShelfAccessibilityWindow
+    case unavailableShelfAccessibilityWindows
     case shelfDidNotClose
     case shelfActivatedApplication
     case shelfClaimedKeyboardFocus
@@ -33,6 +34,8 @@ enum SmokeFailure: Error, CustomStringConvertible {
             "Barline did not order its cold-launch shelf surface"
         case .noShelfAccessibilityWindow:
             "Barline ordered its shelf without publishing it in the app Accessibility window list"
+        case .unavailableShelfAccessibilityWindows:
+            "Barline's Accessibility window list could not be observed"
         case .shelfDidNotClose:
             "Barline retained its shelf surface or Accessibility window after closing"
         case .shelfActivatedApplication:
@@ -88,7 +91,9 @@ func describeAccessibilityWindows(_ applicationElement: AXUIElement) {
 
 struct ShelfObservation {
     let surfacePresent: Bool
-    let accessibilityWindowPresent: Bool
+    /// `nil` is intentionally distinct from an empty list. An unavailable
+    /// Accessibility observation must never be mistaken for a closed shelf.
+    let accessibilityWindowCount: Int?
 }
 
 /// Golden Gate can omit a nonactivating panel's owner/title from WindowServer
@@ -147,11 +152,13 @@ func observeShelf(
     let accessibilityWindows = attribute(
         applicationElement,
         kAXWindowsAttribute
-    ) as? [AXUIElement] ?? []
-    let shelfAccessibilityWindows = accessibilityWindows.filter(identifiesShelf)
+    ) as? [AXUIElement]
+    let shelfAccessibilityWindowCount = accessibilityWindows?
+        .filter(identifiesShelf)
+        .count
     return ShelfObservation(
         surfacePresent: surfacePresent,
-        accessibilityWindowPresent: shelfAccessibilityWindows.count == 1
+        accessibilityWindowCount: shelfAccessibilityWindowCount
     )
 }
 
@@ -170,8 +177,8 @@ func waitForShelf(
             applicationElement: applicationElement
         )
         let reachedState = presented
-            ? observation.surfacePresent && observation.accessibilityWindowPresent
-            : !observation.surfacePresent && !observation.accessibilityWindowPresent
+            ? observation.surfacePresent && observation.accessibilityWindowCount == 1
+            : !observation.surfacePresent && observation.accessibilityWindowCount == 0
         if reachedState {
             return observation
         }
@@ -313,7 +320,10 @@ do {
         guard presented.surfacePresent else {
             throw SmokeFailure.noShelfWindow
         }
-        guard presented.accessibilityWindowPresent else {
+        guard let accessibilityWindowCount = presented.accessibilityWindowCount else {
+            throw SmokeFailure.unavailableShelfAccessibilityWindows
+        }
+        guard accessibilityWindowCount == 1 else {
             describeAccessibilityWindows(applicationElement)
             throw SmokeFailure.noShelfAccessibilityWindow
         }
@@ -341,7 +351,10 @@ do {
             applicationElement: applicationElement,
             presented: false
         )
-        guard !closed.surfacePresent, !closed.accessibilityWindowPresent else {
+        guard let closedAccessibilityWindowCount = closed.accessibilityWindowCount else {
+            throw SmokeFailure.unavailableShelfAccessibilityWindows
+        }
+        guard !closed.surfacePresent, closedAccessibilityWindowCount == 0 else {
             throw SmokeFailure.shelfDidNotClose
         }
     }
