@@ -51,6 +51,7 @@ public enum PrivacySafeDiagnostics {
         case .mutationSuperseded: return "mutation_superseded"
         case .mutationRecoveryRequired: return "mutation_recovery_required"
         case .positionTableAccessNotGranted: return "position_table_access_not_granted"
+        case .positionTableIdentityUnresolved: return "position_table_identity_unresolved"
         case .mutationNotStarted: return "mutation_not_started"
         case .mutationRecoveryFailed: return "mutation_recovery_failed"
         case let .operationFailed(reason): return operationCode(reason)

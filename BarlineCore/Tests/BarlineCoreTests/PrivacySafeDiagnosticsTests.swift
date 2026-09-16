@@ -124,6 +124,9 @@ struct PrivacySafeDiagnosticsTests {
         #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.unsafeMenuTracking) == "menu_tracking_active")
         #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.interrupted) == "helper_interrupted")
         #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.timedOut) == "helper_timed_out")
+        #expect(PrivacySafeDiagnostics.errorCode(
+            MenuBarBackendError.positionTableIdentityUnresolved
+        ) == "position_table_identity_unresolved")
         #expect(PrivacySafeDiagnostics.errorCode(DecodingError.dataCorrupted(
             .init(codingPath: [], debugDescription: "private file path")
         )) == "decode_failed")

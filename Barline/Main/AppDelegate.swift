@@ -486,6 +486,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "mutation-recovery-required"
         case .positionTableAccessNotGranted:
             "position-table-access-not-granted"
+        case .positionTableIdentityUnresolved:
+            "position-table-identity-unresolved"
         case .mutationNotStarted:
             "mutation-not-started"
         case .mutationRecoveryFailed:

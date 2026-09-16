@@ -29,8 +29,18 @@ struct MenuBarAssignmentFailurePresentationTests {
             for: MenuBarBackendError.positionTableAccessNotGranted
         )
 
-        #expect(message.contains("menu bar preferences"))
-        #expect(message.contains("Preferences folder"))
+        #expect(message.contains("menu bar preference file"))
+        #expect(message.contains("com.apple.MenuBar.plist"))
         #expect(!message.contains("unchanged"))
+    }
+
+    @Test("Unresolved macOS 27 identity reports a safe no-write outcome")
+    func positionTableIdentityExplainsNoWriteOutcome() {
+        let message = MenuBarAssignmentFailurePresentation.message(
+            for: MenuBarBackendError.positionTableIdentityUnresolved
+        )
+
+        #expect(message.contains("could not safely match"))
+        #expect(message.contains("No layout was changed"))
     }
 }

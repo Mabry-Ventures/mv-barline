@@ -1738,7 +1738,7 @@ public actor MenuBarStateCoordinator {
     private static func mutationDidNotStart(_ error: any Error) -> Bool {
         guard let backendError = error as? MenuBarBackendError else { return false }
         return switch backendError {
-        case .positionTableAccessNotGranted, .mutationNotStarted:
+        case .positionTableAccessNotGranted, .positionTableIdentityUnresolved, .mutationNotStarted:
             true
         default:
             false

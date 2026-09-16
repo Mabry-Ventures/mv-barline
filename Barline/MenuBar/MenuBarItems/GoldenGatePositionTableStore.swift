@@ -302,8 +302,8 @@ actor GoldenGatePositionTableStore {
                     return try beginAccessing(scopedURL)
                 } catch StoreError.accessNotGranted {
                     // Releases before the scoped-bookmark migration saved a
-                    // plain bookmark. It resolves to the right directory but
-                    // cannot grant the Group Container access macOS 27 now
+                    // plain bookmark. It resolves to the right preference resource
+                    // but cannot grant the Group Container access macOS 27 now
                     // requires. Retire it so this explicit move can present
                     // the picker and replace it with a security-scoped one.
                     UserDefaults.standard.removeObject(forKey: Self.bookmarkKey)
@@ -311,7 +311,7 @@ actor GoldenGatePositionTableStore {
             }
         } catch {
             // A bookmark is only a convenience for reacquiring this exact
-            // system directory. Retire corrupt, revoked, or wrong-target data
+            // system preference file. Retire corrupt, revoked, or wrong-target data
             // so an explicit user action can authorize it again. Passive
             // inventory remains noninteractive below.
             UserDefaults.standard.removeObject(forKey: Self.bookmarkKey)
@@ -351,7 +351,7 @@ actor GoldenGatePositionTableStore {
             relativeTo: nil,
             bookmarkDataIsStale: &stale
         )
-        guard Self.isExpectedDirectory(url) else {
+        guard Self.isExpectedURL(url) else {
             UserDefaults.standard.removeObject(forKey: Self.bookmarkKey)
             throw StoreError.unexpectedFile
         }
@@ -368,20 +368,20 @@ actor GoldenGatePositionTableStore {
 
     @MainActor
     private static func requestBookmark() throws -> Data? {
-        let expected = expectedDirectoryURL
+        let expected = expectedURL
         let panel = NSOpenPanel()
         panel.title = "Allow Barline to arrange menu bar items"
-        panel.message = "Select the highlighted Preferences folder. Barline changes only the macOS menu bar position preference inside it and verifies every change."
+        panel.message = "Select the highlighted com.apple.MenuBar.plist file. Barline changes only this macOS menu bar position preference and verifies every change."
         panel.prompt = "Allow"
         panel.directoryURL = expected.deletingLastPathComponent()
         panel.nameFieldStringValue = expected.lastPathComponent
         panel.allowsMultipleSelection = false
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
         panel.canCreateDirectories = false
         panel.showsHiddenFiles = true
         guard panel.runModal() == .OK, let url = panel.url else { return nil }
-        guard isExpectedDirectory(url) else { throw StoreError.unexpectedFile }
+        guard isExpectedURL(url) else { throw StoreError.unexpectedFile }
         return try url.bookmarkData(
             options: [.withSecurityScope],
             includingResourceValuesForKeys: nil,
@@ -389,9 +389,9 @@ actor GoldenGatePositionTableStore {
         )
     }
 
-    private static func isExpectedDirectory(_ url: URL) -> Bool {
+    private static func isExpectedURL(_ url: URL) -> Bool {
         url.resolvingSymlinksInPath().standardizedFileURL ==
-            expectedDirectoryURL.resolvingSymlinksInPath().standardizedFileURL
+            expectedURL.resolvingSymlinksInPath().standardizedFileURL
     }
 
     private func readPreferences() throws -> [String: Int] {

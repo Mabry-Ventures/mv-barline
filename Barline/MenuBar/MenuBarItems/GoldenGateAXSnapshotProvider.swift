@@ -243,10 +243,8 @@ actor GoldenGateAXSnapshotProvider {
             guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
                 throw MenuBarBackendError.staleItem(operation.itemID)
             }
-            guard source.isMovable else {
-                throw MenuBarBackendError.operationFailed(
-                    "menu bar item cannot be assigned independently"
-                )
+            guard Self.isPositionTableEligible(source) else {
+                throw MenuBarBackendError.operationFailed("menu bar item cannot be assigned independently")
             }
             if operation.section != .visible, !source.canBeHidden {
                 throw MenuBarBackendError.operationFailed("menu bar item cannot be hidden")
@@ -262,6 +260,9 @@ actor GoldenGateAXSnapshotProvider {
                 positions: positions,
                 snapshot: before
             )
+            guard keysByItemID[source.id] != nil else {
+                throw MenuBarBackendError.positionTableIdentityUnresolved
+            }
             let mutation = try GoldenGatePositionTablePlanner.planMove(
                 operation,
                 in: before,
@@ -938,21 +939,16 @@ actor GoldenGateAXSnapshotProvider {
             positioned = snapshot
         }
         let items = positioned.items.map { item in
-            let isThirdParty = item.sourceOwnership == .application &&
-                !item.id.bundleIdentifier.hasPrefix("com.apple.")
+            let isThirdParty = Self.isPositionTableEligible(item)
             // A passive snapshot never opens a permission panel. Before scoped
             // access exists, eligible third-party items remain actionable only
             // so an explicit user drag can request that access. `move` and
             // `restore` immediately re-read the authorized table and require an
             // exact position key before planning or writing anything.
-            let hasResolvedPositionOrCanRequestAccess = resolvedKeys.map {
-                $0[item.id] != nil
-            } ?? isThirdParty
             return item.replacing(
                 isMovable: isThirdParty &&
                     !item.isBarlineControlItem &&
-                    item.canBeHidden &&
-                    hasResolvedPositionOrCanRequestAccess
+                    item.canBeHidden
             )
         }
         return MenuBarSnapshot(
@@ -966,6 +962,18 @@ actor GoldenGateAXSnapshotProvider {
         )
     }
 
+    /// Eligibility is deliberately separate from key resolution. A live,
+    /// third-party status item may request a position-table move even before
+    /// its private table record has been matched. The move path then either
+    /// resolves an exact record after authorization or fails without writing;
+    /// disabling the control here would make that recovery impossible.
+    private static func isPositionTableEligible(_ item: MenuBarItemDescriptor) -> Bool {
+        item.sourceOwnership == .application &&
+            !item.id.bundleIdentifier.hasPrefix("com.apple.") &&
+            !item.isBarlineControlItem &&
+            item.canBeHidden
+    }
+
     /// Planning is observational: no native proposal has been staged. Keep
     /// access denial actionable, but tell the coordinator that every other
     /// preflight rejection is safe to surface without a stale restore.
@@ -974,6 +982,11 @@ actor GoldenGateAXSnapshotProvider {
             if case .accessNotGranted = storeError {
                 return MenuBarBackendError.positionTableAccessNotGranted
             }
+        }
+        if let positionError = error as? GoldenGatePositionTableError,
+           positionError == .unresolvedItem
+        {
+            return MenuBarBackendError.positionTableIdentityUnresolved
         }
         return MenuBarBackendError.mutationNotStarted
     }

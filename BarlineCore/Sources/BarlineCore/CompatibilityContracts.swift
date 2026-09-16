@@ -262,6 +262,9 @@ public enum MenuBarBackendError: Error, Codable, Equatable, Sendable {
     /// grant access to the macOS menu-bar position store. No layout side
     /// effect occurred, so callers must not issue a compensating restore.
     case positionTableAccessNotGranted
+    /// The macOS 27 position table was readable, but Barline could not prove
+    /// which record belongs to the requested item. No native write occurred.
+    case positionTableIdentityUnresolved
     /// A native mutation was rejected during preflight before any layout side
     /// effect occurred. Callers must preserve their pre-operation snapshot
     /// rather than performing a compensating restore.

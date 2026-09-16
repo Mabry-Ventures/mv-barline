@@ -175,6 +175,13 @@ unless golden_gate_positions.match?(/func readPositions\(.*?authorizeAccess.*?de
   abort('macOS 27 position-table access does not activate, balance, and migrate its security-scoped bookmark')
 end
 
+unless golden_gate_positions.match?(/let expected = expectedURL/) &&
+       golden_gate_positions.match?(/panel\.canChooseFiles = true/) &&
+       golden_gate_positions.match?(/panel\.canChooseDirectories = false/) &&
+       golden_gate_positions.match?(/guard isExpectedURL\(url\)/)
+  abort('macOS 27 position-table access is not scoped to the exact preference file')
+end
+
 unless layout_bar.include?('.draggable(MenuBarLayoutTransfer(') &&
        layout_bar.include?('.dropDestination(for: MenuBarLayoutTransfer.self)')
   abort('macOS 27 layout assignment does not use typed drag and drop')
