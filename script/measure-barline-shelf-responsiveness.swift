@@ -374,14 +374,44 @@ private func isBarlineShelfVisible(snapshots: [WindowSnapshot]? = nil) -> Bool {
     barlineShelfSnapshot(snapshots: snapshots) != nil
 }
 
+/// macOS 27 can omit the owner and title of a nonactivating panel from its
+/// WindowServer rows. The DEBUG-only runtime probe publishes the AppKit window
+/// number only after the panel is visible and on the active Space; match that
+/// number against an external WindowServer row rather than guessing by title.
+private func runtimeSmokePanelWindowNumber(expectedProcessIdentifier: pid_t?) -> CGWindowID? {
+    guard Configuration.probe == "runtime-smoke", let expectedProcessIdentifier else { return nil }
+    let applicationID = Configuration.appBundleIdentifier as CFString
+    CFPreferencesAppSynchronize(applicationID)
+    let received = (CFPreferencesCopyAppValue(
+        "RuntimeSmokeToggleReceived" as CFString,
+        applicationID
+    ) as? NSNumber)?.boolValue == true
+    let processIdentifier = (CFPreferencesCopyAppValue(
+        "RuntimeSmokeToggleProcessIdentifier" as CFString,
+        applicationID
+    ) as? NSNumber)?.int32Value
+    guard received, processIdentifier == expectedProcessIdentifier else { return nil }
+    let windowNumber = (CFPreferencesCopyAppValue(
+        "RuntimeSmokePanelWindowNumber" as CFString,
+        applicationID
+    ) as? NSNumber)?.intValue ?? 0
+    guard windowNumber > 0 else { return nil }
+    return CGWindowID(windowNumber)
+}
+
 private func barlineShelfSnapshot(snapshots: [WindowSnapshot]? = nil) -> WindowSnapshot? {
     let expectedProcessIdentifier = ProcessInfo.processInfo.environment["BARLINE_EXPECTED_PID"]
         .flatMap(pid_t.init)
     let windows = snapshots ?? windowSnapshots()
+    let runtimeWindowNumber = runtimeSmokePanelWindowNumber(
+        expectedProcessIdentifier: expectedProcessIdentifier
+    )
     return windows.first {
-        $0.ownerName == "Barline" &&
-            $0.windowName == "Barline Bar" &&
-            (expectedProcessIdentifier == nil || $0.ownerProcessIdentifier == expectedProcessIdentifier)
+        let ownerMatches = expectedProcessIdentifier == nil ||
+            $0.ownerProcessIdentifier == expectedProcessIdentifier
+        let namedShelf = $0.ownerName == "Barline" && $0.windowName == "Barline Bar"
+        let runtimeShelf = runtimeWindowNumber != nil && $0.windowNumber == runtimeWindowNumber
+        return ownerMatches && (namedShelf || runtimeShelf)
     }
 }
 
@@ -600,10 +630,15 @@ private func runtimeSmokeDiagnostics() -> String? {
         "RuntimeSmokePresentationState" as CFString,
         applicationID
     ) as? String
+    let windowNumber = (CFPreferencesCopyAppValue(
+        "RuntimeSmokePanelWindowNumber" as CFString,
+        applicationID
+    ) as? NSNumber)?.intValue
     let receivedDescription = received?.description ?? "missing"
     let processIdentifierDescription = processIdentifier.map { String($0) } ?? "missing"
     let stateDescription = state ?? "missing"
-    return "toggleReceived=\(receivedDescription) togglePID=\(processIdentifierDescription) state=\(stateDescription)"
+    let windowNumberDescription = windowNumber.map { String($0) } ?? "missing"
+    return "toggleReceived=\(receivedDescription) togglePID=\(processIdentifierDescription) panelWindowNumber=\(windowNumberDescription) state=\(stateDescription)"
 }
 
 private func percentile(_ values: [Double], _ percentile: Double) -> Double {

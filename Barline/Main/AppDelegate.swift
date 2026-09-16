@@ -80,6 +80,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         private static let runtimeSmokeToggleReceivedKey = "RuntimeSmokeToggleReceived"
         private static let runtimeSmokeToggleProcessIdentifierKey = "RuntimeSmokeToggleProcessIdentifier"
         private static let runtimeSmokePresentationStateKey = "RuntimeSmokePresentationState"
+        private static let runtimeSmokePanelWindowNumberKey = "RuntimeSmokePanelWindowNumber"
     #endif
 
     // MARK: NSApplicationDelegate Methods
@@ -134,6 +135,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 UserDefaults.standard.removeObject(forKey: Self.runtimeSmokeToggleReceivedKey)
                 UserDefaults.standard.removeObject(forKey: Self.runtimeSmokeToggleProcessIdentifierKey)
                 UserDefaults.standard.removeObject(forKey: Self.runtimeSmokePresentationStateKey)
+                UserDefaults.standard.removeObject(forKey: Self.runtimeSmokePanelWindowNumberKey)
                 UserDefaults.standard.synchronize()
                 DistributedNotificationCenter.default().addObserver(
                     self,
@@ -576,6 +578,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     "panelFrame=\(Int(panel.frame.origin.x)),\(Int(panel.frame.origin.y)),\(Int(panel.frame.width)),\(Int(panel.frame.height))",
                 ].joined(separator: ";")
                 UserDefaults.standard.set(state, forKey: Self.runtimeSmokePresentationStateKey)
+                UserDefaults.standard.set(panel.windowNumber, forKey: Self.runtimeSmokePanelWindowNumberKey)
                 UserDefaults.standard.synchronize()
             }
         }
