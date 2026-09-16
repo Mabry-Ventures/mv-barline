@@ -263,6 +263,11 @@ for entitlements in "$APP_ENTITLEMENTS" "$INTENTS_ENTITLEMENTS"; do
         exit 1
     fi
 done
+if ! plutil -extract 'com\.apple\.security\.files\.user-selected\.read-write' raw -o - "$APP_ENTITLEMENTS" 2>/dev/null | grep -q true ||
+   plutil -extract 'com\.apple\.security\.files\.user-selected\.read-only' raw -o - "$APP_ENTITLEMENTS" 2>/dev/null | grep -q true; then
+    printf 'error: release app must have only the user-selected read-write entitlement for the macOS 27 position table\n' >&2
+    exit 1
+fi
 SIGNING_CERT_PREFIX="$SIGNING_SCRATCH/barline-signing-cert"
 codesign -d "--extract-certificates=$SIGNING_CERT_PREFIX" "$APP"
 SIGNING_CERT_FINGERPRINT="$(openssl x509 -inform DER -in "${SIGNING_CERT_PREFIX}0" -noout -fingerprint -sha1 | cut -d= -f2 | tr -d ':')"

@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.22 (build 96) — September 16, 2026
+
+- macOS 27: request read-write access to the one user-selected menu-bar position file. The signed release gate now rejects a build carrying the insufficient read-only entitlement.
+
 ## 1.0.21 (build 95) — September 16, 2026
 
 - macOS 27: add privacy-safe transaction-stage diagnostics so an unrecognized system preference change fails closed with an actionable support code rather than an opaque error.
