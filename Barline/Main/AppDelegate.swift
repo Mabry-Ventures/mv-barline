@@ -564,6 +564,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
                 section.toggle()
 
+                await publishRuntimeSmokePanelWindowNumberWhenCommitted(appState)
+
                 // Record the post-toggle presentation state for the shell
                 // probe. This DEBUG-only receipt distinguishes a rejected show
                 // request from a WindowServer commit that the external probe
@@ -578,8 +580,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     "panelFrame=\(Int(panel.frame.origin.x)),\(Int(panel.frame.origin.y)),\(Int(panel.frame.width)),\(Int(panel.frame.height))",
                 ].joined(separator: ";")
                 UserDefaults.standard.set(state, forKey: Self.runtimeSmokePresentationStateKey)
-                UserDefaults.standard.set(panel.windowNumber, forKey: Self.runtimeSmokePanelWindowNumberKey)
                 UserDefaults.standard.synchronize()
+            }
+        }
+
+        /// Publishes the window identity at the first valid AppKit presentation.
+        /// The external smoke observer must still find this same PID/window
+        /// pair in the WindowServer list. Keep the last positive identity
+        /// through dismissal so the observer can detect a lingering surface.
+        @MainActor
+        private func publishRuntimeSmokePanelWindowNumberWhenCommitted(_ appState: AppState) async {
+            for _ in 0 ..< 100 {
+                let panel = appState.menuBarManager.barlineShelfPanel
+                if panel.isVisible, panel.isOnActiveSpace, panel.windowNumber > 0 {
+                    UserDefaults.standard.set(panel.windowNumber, forKey: Self.runtimeSmokePanelWindowNumberKey)
+                    UserDefaults.standard.synchronize()
+                    return
+                }
+                try? await Task.sleep(for: .milliseconds(10))
             }
         }
     #endif
