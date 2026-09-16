@@ -21,7 +21,7 @@ enum AXHelpers {
     }
 
     /// A privacy-safe result category for the bounded direct-children read.
-    enum ChildrenReadDisposition: String {
+    enum ChildrenReadDisposition: String, CaseIterable {
         case success
         case unsupported
         case transientError = "transient_error"
