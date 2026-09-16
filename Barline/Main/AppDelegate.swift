@@ -118,8 +118,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             if CommandLine.arguments.contains("--barline-runtime-smoke") {
                 // `build_and_run --verify` proves only that the process is
                 // alive. Publish a separate, test-only readiness receipt once
-                // the asynchronous setup has completed so a cold smoke probe
-                // cannot mistake startup work for a failed shelf action.
+                // the menu-bar agent is ready so a cold smoke probe cannot
+                // mistake startup work for a failed shelf action.
                 UserDefaults.standard.set(false, forKey: Self.runtimeSmokeSetupReadyKey)
                 UserDefaults.standard.synchronize()
                 DistributedNotificationCenter.default().addObserver(
@@ -130,7 +130,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 )
                 appState.performSetup()
                 Task { [appState] in
-                    await appState.waitForSetup()
+                    await appState.waitForMenuBarAgentSetup()
                     UserDefaults.standard.set(true, forKey: Self.runtimeSmokeSetupReadyKey)
                     UserDefaults.standard.synchronize()
                     Logger.default.notice("Runtime smoke setup reached readiness boundary")
@@ -493,12 +493,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         /// adding any behavior to Release builds.
         @objc private func toggleShelfForRuntimeSmoke() {
             // `applicationDidFinishLaunching` registers this observer before the
-            // asynchronous app-state setup finishes. A real status-item click
-            // cannot occur until that setup has created the item, but the local
-            // smoke notification can. Wait for the same readiness boundary before
-            // exercising the production toggle path.
+            // menu-bar controls exist. A real status-item click cannot occur
+            // until those controls are created, but the local smoke notification
+            // can. Do not wait for the rest of best-effort setup, because a real
+            // user is also allowed to click while inventory recovers.
             Task { [appState] in
-                await appState.waitForSetup()
+                await appState.waitForMenuBarAgentSetup()
 
                 // Exercise the production menu-bar-agent state: the status item
                 // does not activate Barline, and hiding the Dock icon keeps the

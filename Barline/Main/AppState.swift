@@ -77,10 +77,17 @@ final class AppState: ObservableObject {
     /// Logger for the app state.
     private let logger = Logger(category: "AppState")
 
+    /// The menu-bar controls are installed before compatibility inventory,
+    /// profiles, and image caching finish. Input must be able to use those
+    /// controls without waiting for the slower best-effort work.
+    private var menuBarAgentSetupReady = false
+    private var menuBarAgentSetupWaiters = [CheckedContinuation<Void, Never>]()
+
     /// Async setup actions, run once on first access.
     private lazy var setupTask = Task { @MainActor in
         settings.performSetup(with: self)
         menuBarManager.performSetup(with: self)
+        markMenuBarAgentSetupReady()
 
         if #available(macOS 26.0, *) {
             await BarlineMenuService.Connection.shared.start()
@@ -128,6 +135,24 @@ final class AppState: ObservableObject {
     /// request competes for the compatibility connection.
     func waitForSetup() async {
         await setupTask.value
+    }
+
+    /// Waits only for the synchronous menu-bar-agent setup boundary. This is
+    /// deliberately earlier than `waitForSetup()`: a user can press a status
+    /// item while bounded compatibility discovery is still recovering.
+    func waitForMenuBarAgentSetup() async {
+        guard !menuBarAgentSetupReady else { return }
+        await withCheckedContinuation { continuation in
+            menuBarAgentSetupWaiters.append(continuation)
+        }
+    }
+
+    private func markMenuBarAgentSetupReady() {
+        guard !menuBarAgentSetupReady else { return }
+        menuBarAgentSetupReady = true
+        let waiters = menuBarAgentSetupWaiters
+        menuBarAgentSetupWaiters.removeAll()
+        waiters.forEach { $0.resume() }
     }
 
     /// Configures the internal observers for the app state.
