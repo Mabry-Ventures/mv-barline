@@ -479,12 +479,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         /// Gives a separate local probe a deterministic activation path without
         /// adding any behavior to Release builds.
         @objc private func toggleShelfForRuntimeSmoke() {
-            // Exercise the production menu-bar-agent state: the status item
-            // does not activate Barline, and hiding the Dock icon keeps the
-            // application accessory-only while the shelf is presented.
-            NSApp.setActivationPolicy(.accessory)
-            NSApp.deactivate()
-            appState.menuBarManager.section(withName: .visible)?.toggle()
+            // `applicationDidFinishLaunching` registers this observer before the
+            // asynchronous app-state setup finishes. A real status-item click
+            // cannot occur until that setup has created the item, but the local
+            // smoke notification can. Wait for the same readiness boundary before
+            // exercising the production toggle path.
+            Task { [appState] in
+                await appState.waitForSetup()
+
+                // Exercise the production menu-bar-agent state: the status item
+                // does not activate Barline, and hiding the Dock icon keeps the
+                // application accessory-only while the shelf is presented.
+                NSApp.setActivationPolicy(.accessory)
+                NSApp.deactivate()
+                appState.menuBarManager.section(withName: .visible)?.toggle()
+            }
         }
     #endif
 }
