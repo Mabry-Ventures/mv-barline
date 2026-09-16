@@ -351,10 +351,14 @@ do {
             applicationElement: applicationElement,
             presented: false
         )
+        guard !closed.surfacePresent else {
+            throw SmokeFailure.shelfDidNotClose
+        }
         guard let closedAccessibilityWindowCount = closed.accessibilityWindowCount else {
             throw SmokeFailure.unavailableShelfAccessibilityWindows
         }
-        guard !closed.surfacePresent, closedAccessibilityWindowCount == 0 else {
+        guard closedAccessibilityWindowCount == 0 else {
+            describeAccessibilityWindows(applicationElement)
             throw SmokeFailure.shelfDidNotClose
         }
     }
