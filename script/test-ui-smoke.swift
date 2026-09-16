@@ -91,14 +91,58 @@ struct ShelfObservation {
     let accessibilityWindowPresent: Bool
 }
 
-func observeShelf(processIdentifier: pid_t, applicationElement: AXUIElement) -> ShelfObservation {
+/// Golden Gate can omit a nonactivating panel's owner/title from WindowServer
+/// rows. Runtime smoke receives the AppKit window number only after a visible,
+/// active-space presentation and then verifies it against an external row.
+func runtimeSmokePanelWindowNumber(
+    bundleIdentifier: String,
+    processIdentifier: pid_t
+) -> CGWindowID? {
+    let applicationID = bundleIdentifier as CFString
+    CFPreferencesAppSynchronize(applicationID)
+    let received = (CFPreferencesCopyAppValue(
+        "RuntimeSmokeToggleReceived" as CFString,
+        applicationID
+    ) as? NSNumber)?.boolValue == true
+    let recordedProcessIdentifier = (CFPreferencesCopyAppValue(
+        "RuntimeSmokeToggleProcessIdentifier" as CFString,
+        applicationID
+    ) as? NSNumber)?.int32Value
+    guard received, recordedProcessIdentifier == processIdentifier else { return nil }
+    let windowNumber = (CFPreferencesCopyAppValue(
+        "RuntimeSmokePanelWindowNumber" as CFString,
+        applicationID
+    ) as? NSNumber)?.intValue ?? 0
+    return windowNumber > 0 ? CGWindowID(windowNumber) : nil
+}
+
+func observeShelf(
+    processIdentifier: pid_t,
+    bundleIdentifier: String,
+    applicationElement: AXUIElement
+) -> ShelfObservation {
     let shelfRecords = CGWindowListCopyWindowInfo(
         [.optionOnScreenOnly, .excludeDesktopElements],
         kCGNullWindowID
     ) as? [[CFString: Any]] ?? []
+    let runtimeWindowNumber = runtimeSmokePanelWindowNumber(
+        bundleIdentifier: bundleIdentifier,
+        processIdentifier: processIdentifier
+    )
     let surfacePresent = shelfRecords.contains {
-        ($0[kCGWindowOwnerPID] as? NSNumber)?.int32Value == processIdentifier &&
-            ($0[kCGWindowName] as? String) == "Barline Bar"
+        guard ($0[kCGWindowOwnerPID] as? NSNumber)?.int32Value == processIdentifier else {
+            return false
+        }
+        let namedShelf = ($0[kCGWindowName] as? String) == "Barline Bar"
+        let runtimeShelf: Bool
+        if let runtimeWindowNumber,
+           let recordWindowNumber = $0[kCGWindowNumber] as? NSNumber
+        {
+            runtimeShelf = CGWindowID(recordWindowNumber.uint32Value) == runtimeWindowNumber
+        } else {
+            runtimeShelf = false
+        }
+        return namedShelf || runtimeShelf
     }
     let accessibilityWindows = attribute(
         applicationElement,
@@ -113,6 +157,7 @@ func observeShelf(processIdentifier: pid_t, applicationElement: AXUIElement) -> 
 
 func waitForShelf(
     processIdentifier: pid_t,
+    bundleIdentifier: String,
     applicationElement: AXUIElement,
     presented: Bool
 ) -> ShelfObservation {
@@ -121,6 +166,7 @@ func waitForShelf(
     repeat {
         observation = observeShelf(
             processIdentifier: processIdentifier,
+            bundleIdentifier: bundleIdentifier,
             applicationElement: applicationElement
         )
         let reachedState = presented
@@ -260,6 +306,7 @@ do {
         )
         let presented = waitForShelf(
             processIdentifier: app.processIdentifier,
+            bundleIdentifier: bundleIdentifier,
             applicationElement: applicationElement,
             presented: true
         )
@@ -290,6 +337,7 @@ do {
         )
         let closed = waitForShelf(
             processIdentifier: app.processIdentifier,
+            bundleIdentifier: bundleIdentifier,
             applicationElement: applicationElement,
             presented: false
         )
