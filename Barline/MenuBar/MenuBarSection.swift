@@ -159,22 +159,33 @@ final class MenuBarSection {
 
     /// Shows the section.
     func show(useShelf: Bool? = nil, keyboardFocus: Bool = false) {
-        guard appState?.itemManager.allowsPickerPresentation == true else { return }
+        guard appState?.itemManager.allowsPickerPresentation == true else {
+            Logger.default.notice("Shelf show rejected: item interaction is busy")
+            return
+        }
         menuBarManager?.refreshSystemMenuBarConfiguration()
         guard let menuBarManager, isHidden else {
+            Logger.default.notice("Shelf show rejected: section is already visible or unavailable")
             return
         }
 
         guard isEnabled else {
             // The section is disabled.
+            Logger.default.notice("Shelf show rejected: section is disabled")
             return
         }
 
-        if MenuBarPresentationPolicy.usesShelf(
+        let willUseShelf = MenuBarPresentationPolicy.usesShelf(
             requestedShelf: useShelf ?? useBarlineShelf,
             systemAutoHideEnabled: menuBarManager.isMenuBarHiddenBySystemUserDefaults
-        ) {
+        )
+        Logger.default.notice(
+            "Shelf show decision useShelf=\(willUseShelf, privacy: .public) systemAutoHide=\(menuBarManager.isMenuBarHiddenBySystemUserDefaults, privacy: .public)"
+        )
+
+        if willUseShelf {
             guard let screen = screenForBarlineShelf else {
+                Logger.default.error("Shelf show rejected: no active screen")
                 return
             }
 
@@ -199,6 +210,7 @@ final class MenuBarSection {
             }
 
             guard let presentation = panel.beginPresentation(for: section) else {
+                Logger.default.error("Shelf show rejected: panel could not begin presentation")
                 return
             }
 
@@ -210,6 +222,8 @@ final class MenuBarSection {
                         panel.focusItemsForKeyboard()
                     }
                     startRehideChecks()
+                } else {
+                    Logger.default.error("Shelf show rejected: panel did not commit presentation")
                 }
             }
 

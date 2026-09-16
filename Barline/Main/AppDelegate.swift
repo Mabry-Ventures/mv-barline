@@ -74,6 +74,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         private static let runtimeSmokeToggleNotification = Notification.Name(
             "\(notificationPrefix).runtime-smoke.toggle-shelf"
         )
+        private static let runtimeSmokeSetupReadyKey = "RuntimeSmokeSetupReady"
     #endif
 
     // MARK: NSApplicationDelegate Methods
@@ -115,6 +116,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // Runtime smoke tests exercise Barline's own UI without depending on
             // host-specific TCC grants. Release builds never include this path.
             if CommandLine.arguments.contains("--barline-runtime-smoke") {
+                // `build_and_run --verify` proves only that the process is
+                // alive. Publish a separate, test-only readiness receipt once
+                // the asynchronous setup has completed so a cold smoke probe
+                // cannot mistake startup work for a failed shelf action.
+                UserDefaults.standard.set(false, forKey: Self.runtimeSmokeSetupReadyKey)
+                UserDefaults.standard.synchronize()
                 DistributedNotificationCenter.default().addObserver(
                     self,
                     selector: #selector(toggleShelfForRuntimeSmoke),
@@ -122,6 +129,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     object: nil
                 )
                 appState.performSetup()
+                Task { [appState] in
+                    await appState.waitForSetup()
+                    UserDefaults.standard.set(true, forKey: Self.runtimeSmokeSetupReadyKey)
+                    UserDefaults.standard.synchronize()
+                    Logger.default.notice("Runtime smoke setup reached readiness boundary")
+                }
                 // Keep the probe in the same accessory-only, inactive state as
                 // a production status-item click. It must not rely on opening
                 // Settings to make the shelf visible.

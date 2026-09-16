@@ -7,6 +7,8 @@ enum SmokeFailure: Error, CustomStringConvertible {
     case appNotRunning
     case wrongBundleURL(URL?)
     case noVisibleSurface
+    case setupDidNotBecomeReady
+    case menuBarAutoHideEnabled
     case noShelfWindow
     case noShelfAccessibilityWindow
     case shelfDidNotClose
@@ -23,6 +25,10 @@ enum SmokeFailure: Error, CustomStringConvertible {
             "running process did not originate from the expected local build"
         case .noVisibleSurface:
             "Barline exposed neither a visible standard window nor its status item"
+        case .setupDidNotBecomeReady:
+            "Barline did not complete its runtime-smoke setup boundary"
+        case .menuBarAutoHideEnabled:
+            "system menu bar auto-hide is enabled, so shelf presentation is intentionally unavailable"
         case .noShelfWindow:
             "Barline did not order its cold-launch shelf surface"
         case .noShelfAccessibilityWindow:
@@ -141,6 +147,25 @@ do {
     let applicationElement = AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetMessagingTimeout(applicationElement, 0.2)
 
+    // A running process is not a ready menu-bar agent. The debug-only app
+    // receipt prevents cold-start timing from being misclassified as a shelf
+    // presentation failure.
+    let setupDeadline = Date().addingTimeInterval(15)
+    while Date() < setupDeadline {
+        CFPreferencesAppSynchronize(bundleIdentifier as CFString)
+        if (CFPreferencesCopyAppValue("RuntimeSmokeSetupReady" as CFString, bundleIdentifier as CFString) as? NSNumber)?.boolValue == true {
+            break
+        }
+        usleep(100_000)
+    }
+    guard (CFPreferencesCopyAppValue("RuntimeSmokeSetupReady" as CFString, bundleIdentifier as CFString) as? NSNumber)?.boolValue == true else {
+        throw SmokeFailure.setupDidNotBecomeReady
+    }
+    let globalDomain = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)
+    guard (globalDomain?["_HIHideMenuBar"] as? Bool) != true else {
+        throw SmokeFailure.menuBarAutoHideEnabled
+    }
+
     let deadline = Date().addingTimeInterval(3)
     var windows = [CGRect]()
     var records = [[CFString: Any]]()
@@ -236,7 +261,7 @@ do {
         }
         if let focusedValue = attribute(applicationElement, kAXFocusedWindowAttribute),
            CFGetTypeID(focusedValue) == AXUIElementGetTypeID(),
-           identifiesShelf(unsafeBitCast(focusedValue, to: AXUIElement.self))
+           identifiesShelf(unsafeDowncast(focusedValue, to: AXUIElement.self))
         {
             throw SmokeFailure.shelfClaimedKeyboardFocus
         }
