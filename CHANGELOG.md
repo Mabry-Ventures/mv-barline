@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.18 (build 92) — September 16, 2026
+
+- Make the macOS 27 layout path actionable: eligible third-party items now
+  reach the native transaction preflight instead of being silently disabled
+  when their position-table identity has not been proven.
+- Scope authorization to the single macOS menu-bar preference file rather than
+  its containing directory, and retire earlier directory-scoped bookmarks so
+  users receive one precise, user-initiated repair prompt.
+- Report an unresolved native record as a no-write failure with a support
+  diagnostic code. Barline never guesses a position-table key or changes the
+  layout in that state.
+
 ## 1.0.17 (build 91) — September 15, 2026
 
 - Replace macOS 27's synthetic menu-bar movement path with bounded,
