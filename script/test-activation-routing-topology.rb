@@ -168,7 +168,8 @@ unless golden_gate_positions.match?(/func readPositions\(.*?authorizeAccess.*?de
        golden_gate_positions.match?(/func apply\(.*?authorizeAccess.*?defer \{ scopedURL\?\.stopAccessingSecurityScopedResource\(\) \}/m) &&
        golden_gate_positions.match?(/func recoverInterruptedTransaction\(.*?authorizeAccess.*?defer \{ scopedURL\?\.stopAccessingSecurityScopedResource\(\) \}/m) &&
        golden_gate_positions.match?(/func rollback\(.*?authorizeAccess.*?defer \{ scopedURL\?\.stopAccessingSecurityScopedResource\(\) \}/m) &&
-       golden_gate_positions.match?(/private func beginAccessing\(.*?startAccessingSecurityScopedResource\(\).*?isReadableFile.*?isWritableFile/m) &&
+       golden_gate_positions.match?(/private func beginAccessing\(.*?startAccessingSecurityScopedResource\(\).*?return scopedURL/m) &&
+       !golden_gate_positions.match?(/private func authorizeAccess\(.*?isReadableFile.*?isWritableFile/m) &&
        golden_gate_positions.match?(/private func resolvedBookmarkURL\(.*?options: \[\.withSecurityScope, \.withoutUI\]/m) &&
        golden_gate_positions.match?(/private static func requestBookmark\(.*?options: \[\.withSecurityScope\]/m) &&
        golden_gate_positions.match?(/Retire it so this explicit move can present.*?removeObject\(forKey: Self\.bookmarkKey\)/m)

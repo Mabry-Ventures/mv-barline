@@ -291,11 +291,12 @@ actor GoldenGatePositionTableStore {
     private func authorizeAccess(
         requestAccessIfNeeded: Bool
     ) async throws -> URL? {
-        if FileManager.default.isReadableFile(atPath: Self.expectedURL.path),
-           FileManager.default.isWritableFile(atPath: Self.expectedURL.path)
-        {
-            return nil
-        }
+        // Do not use FileManager's POSIX readability flags as a TCC decision.
+        // On macOS 27 they can be true for this Group Container plist even
+        // though CFPreferences will later be denied. That false positive used
+        // to bypass the scoped-file picker and turn an explicit move into an
+        // opaque preflight failure. A security-scoped bookmark is the only
+        // durable authorization path Barline relies on for this protected file.
         do {
             if let scopedURL = try resolvedBookmarkURL() {
                 do {
@@ -329,12 +330,6 @@ actor GoldenGatePositionTableStore {
 
     private func beginAccessing(_ scopedURL: URL) throws -> URL {
         guard scopedURL.startAccessingSecurityScopedResource() else {
-            throw StoreError.accessNotGranted
-        }
-        guard FileManager.default.isReadableFile(atPath: Self.expectedURL.path),
-              FileManager.default.isWritableFile(atPath: Self.expectedURL.path)
-        else {
-            scopedURL.stopAccessingSecurityScopedResource()
             throw StoreError.accessNotGranted
         }
         return scopedURL

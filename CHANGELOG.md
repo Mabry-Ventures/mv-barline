@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.20 (build 94) — September 16, 2026
+
+- macOS 27: reliably request scoped access to the exact system menu-bar position file before attempting a layout change. This avoids POSIX permission false positives that could prevent the access picker from appearing.
+
 ## 1.0.19 (build 93) — September 16, 2026
 
 - Restore macOS 27 hidden third-party items even when macOS does not permit a
