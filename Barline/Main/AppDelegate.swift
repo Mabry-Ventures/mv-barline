@@ -75,6 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "\(notificationPrefix).runtime-smoke.toggle-shelf"
         )
         private static let runtimeSmokeSetupReadyKey = "RuntimeSmokeSetupReady"
+        private static let runtimeSmokeSetupReadyProcessIdentifierKey = "RuntimeSmokeSetupReadyProcessIdentifier"
     #endif
 
     // MARK: NSApplicationDelegate Methods
@@ -121,6 +122,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // the menu-bar agent is ready so a cold smoke probe cannot
                 // mistake startup work for a failed shelf action.
                 UserDefaults.standard.set(false, forKey: Self.runtimeSmokeSetupReadyKey)
+                UserDefaults.standard.set(
+                    ProcessInfo.processInfo.processIdentifier,
+                    forKey: Self.runtimeSmokeSetupReadyProcessIdentifierKey
+                )
                 UserDefaults.standard.synchronize()
                 DistributedNotificationCenter.default().addObserver(
                     self,
@@ -132,6 +137,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 Task { [appState] in
                     await appState.waitForMenuBarAgentSetup()
                     UserDefaults.standard.set(true, forKey: Self.runtimeSmokeSetupReadyKey)
+                    UserDefaults.standard.set(
+                        ProcessInfo.processInfo.processIdentifier,
+                        forKey: Self.runtimeSmokeSetupReadyProcessIdentifierKey
+                    )
                     UserDefaults.standard.synchronize()
                     Logger.default.notice("Runtime smoke setup reached readiness boundary")
                 }

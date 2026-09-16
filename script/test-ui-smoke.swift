@@ -147,18 +147,34 @@ do {
     let applicationElement = AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetMessagingTimeout(applicationElement, 0.2)
 
-    // A running process is not a ready menu-bar agent. The debug-only app
-    // receipt prevents cold-start timing from being misclassified as a shelf
-    // presentation failure.
+    // A running process is not a ready menu-bar agent. Pair the debug-only
+    // receipt with the current PID so a stale preference from a prior launch
+    // cannot be mistaken for readiness of this cold process.
     let setupDeadline = Date().addingTimeInterval(15)
     while Date() < setupDeadline {
         CFPreferencesAppSynchronize(bundleIdentifier as CFString)
-        if (CFPreferencesCopyAppValue("RuntimeSmokeSetupReady" as CFString, bundleIdentifier as CFString) as? NSNumber)?.boolValue == true {
+        let isReady = (CFPreferencesCopyAppValue(
+            "RuntimeSmokeSetupReady" as CFString,
+            bundleIdentifier as CFString
+        ) as? NSNumber)?.boolValue == true
+        let readyProcessIdentifier = (CFPreferencesCopyAppValue(
+            "RuntimeSmokeSetupReadyProcessIdentifier" as CFString,
+            bundleIdentifier as CFString
+        ) as? NSNumber)?.int32Value
+        if isReady, readyProcessIdentifier == app.processIdentifier {
             break
         }
         usleep(100_000)
     }
-    guard (CFPreferencesCopyAppValue("RuntimeSmokeSetupReady" as CFString, bundleIdentifier as CFString) as? NSNumber)?.boolValue == true else {
+    let isReady = (CFPreferencesCopyAppValue(
+        "RuntimeSmokeSetupReady" as CFString,
+        bundleIdentifier as CFString
+    ) as? NSNumber)?.boolValue == true
+    let readyProcessIdentifier = (CFPreferencesCopyAppValue(
+        "RuntimeSmokeSetupReadyProcessIdentifier" as CFString,
+        bundleIdentifier as CFString
+    ) as? NSNumber)?.int32Value
+    guard isReady, readyProcessIdentifier == app.processIdentifier else {
         throw SmokeFailure.setupDidNotBecomeReady
     }
     let globalDomain = UserDefaults.standard.persistentDomain(forName: UserDefaults.globalDomain)

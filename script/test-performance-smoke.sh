@@ -129,6 +129,29 @@ fi
     printf 'error: Barline process is unavailable for the responsiveness probe\n' >&2
     exit 1
 }
+
+# Runtime-smoke uses a DEBUG-only distributed notification. Unlike a status
+# item click, that notification is lossy when delivered before the app has
+# installed its observer. Bind the probe to the specific freshly launched
+# process's ready receipt so PID liveness alone cannot manufacture a false
+# cold-launch failure.
+if [[ "$PROBE" == "runtime-smoke" ]]; then
+    setup_deadline=$((SECONDS + 15))
+    setup_ready=false
+    while ((SECONDS < setup_deadline)); do
+        ready_value="$(/usr/bin/defaults read "$PREFERENCE_DOMAIN" RuntimeSmokeSetupReady 2>/dev/null || true)"
+        ready_process_identifier="$(/usr/bin/defaults read "$PREFERENCE_DOMAIN" RuntimeSmokeSetupReadyProcessIdentifier 2>/dev/null || true)"
+        if [[ "$ready_value" == "1" && "$ready_process_identifier" == "$APP_PID" ]]; then
+            setup_ready=true
+            break
+        fi
+        /bin/sleep 0.1
+    done
+    if ! "$setup_ready"; then
+        printf 'error: Barline did not complete the runtime-smoke setup boundary for process %s\n' "$APP_PID" >&2
+        exit 1
+    fi
+fi
 mkdir -p "$MODULE_CACHE"
 # Swift permits top-level probe statements in main.swift when compiling the
 # shared, independently tested geometry policy alongside the probe.
