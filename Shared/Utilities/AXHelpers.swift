@@ -7,6 +7,28 @@
 import Cocoa
 
 enum AXHelpers {
+    /// A privacy-safe result category for a single AX string attribute read.
+    /// Callers must never log the underlying value.
+    enum StringAttributeReadDisposition: String, CaseIterable {
+        case nonemptyString = "nonempty_string"
+        case emptyString = "empty_string"
+        case noValue = "no_value"
+        case unsupported
+        case cannotComplete = "cannot_complete"
+        case invalidElement = "invalid_element"
+        case wrongType = "wrong_type"
+        case otherError = "other_error"
+    }
+
+    /// A privacy-safe result category for the bounded direct-children read.
+    enum ChildrenReadDisposition: String {
+        case success
+        case unsupported
+        case transientError = "transient_error"
+        case invalidElement = "invalid_element"
+        case otherError = "other_error"
+    }
+
     private static let queue = DispatchQueue.targetingGlobal(
         label: "AXHelpers.queue",
         qos: .userInteractive,
@@ -63,6 +85,77 @@ enum AXHelpers {
 
     static func accessibilityDescription(for element: UIElement) -> String? {
         queue.sync { try? element.attribute(.description) }
+    }
+
+    /// Reads only an AX result category, never returning the value. This
+    /// distinguishes a genuinely missing identity attribute from an IPC or
+    /// stale-element failure that the convenience accessors intentionally
+    /// collapse to `nil`.
+    static func stringAttributeReadDisposition(
+        for element: UIElement,
+        attribute: Attribute
+    ) -> StringAttributeReadDisposition {
+        queue.sync {
+            var value: AnyObject?
+            let error = AXUIElementCopyAttributeValue(
+                element.element,
+                attribute.rawValue as CFString,
+                &value
+            )
+            switch error {
+            case .success:
+                guard let string = value as? String else {
+                    return .wrongType
+                }
+                return string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ? .emptyString
+                    : .nonemptyString
+            case .noValue:
+                return .noValue
+            case .attributeUnsupported:
+                return .unsupported
+            case .cannotComplete:
+                return .cannotComplete
+            case .invalidUIElement:
+                return .invalidElement
+            default:
+                return .otherError
+            }
+        }
+    }
+
+    /// Checks whether asking the already-collected element for its direct
+    /// children is currently viable, without returning any child metadata.
+    static func childrenReadDisposition(for element: UIElement) -> ChildrenReadDisposition {
+        queue.sync {
+            var value: AnyObject?
+            let error = AXUIElementCopyAttributeValue(
+                element.element,
+                Attribute.children.rawValue as CFString,
+                &value
+            )
+            switch error {
+            case .success, .noValue:
+                return .success
+            case .attributeUnsupported:
+                return .unsupported
+            case .cannotComplete:
+                return .transientError
+            case .invalidUIElement:
+                return .invalidElement
+            default:
+                return .otherError
+            }
+        }
+    }
+
+    /// AXUIElementGetPid is a bounded, value-free validity probe for an
+    /// already-collected element. It never reveals the PID.
+    static func isElementValid(_ element: UIElement) -> Bool {
+        queue.sync {
+            var processIdentifier: pid_t = 0
+            return AXUIElementGetPid(element.element, &processIdentifier) == .success
+        }
     }
 
     static func pid(for element: UIElement) -> pid_t? {

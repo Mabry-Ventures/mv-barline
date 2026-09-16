@@ -58,6 +58,9 @@ actor GoldenGateAXSnapshotProvider {
     private struct Entry {
         let observation: GoldenGateMenuBarObservation
         let element: AXUIElement
+        /// The root plus the direct children already inspected during this
+        /// inventory pass. Used only by an explicit, bounded diagnostic.
+        let identityElements: [AXUIElement]
         /// AX candidates are transaction-local and are used only by the
         /// read-only macOS 27 key-schema diagnostic. They are never persisted
         /// or written to logs.
@@ -76,6 +79,75 @@ actor GoldenGateAXSnapshotProvider {
         let accessibilityDescription: String?
         let title: String?
         let titleIsRootValue: Bool
+        let currentIdentityOrigin: IdentityOrigin
+    }
+
+    private enum IdentityOrigin: String {
+        case identifier
+        case accessibilityDescription = "accessibility_description"
+        case title
+        case generatedFallback = "generated_fallback"
+    }
+
+    private enum IdentityAttribute: CaseIterable {
+        case identifier
+        case accessibilityDescription
+        case title
+
+        var axAttribute: Attribute {
+            switch self {
+            case .identifier: .identifier
+            case .accessibilityDescription: .description
+            case .title: .title
+            }
+        }
+
+        var diagnosticName: String {
+            switch self {
+            case .identifier: "identifier"
+            case .accessibilityDescription: "description"
+            case .title: "title"
+            }
+        }
+    }
+
+    private struct IdentityReadAudit {
+        private let rootResults: [IdentityAttribute: AXHelpers.StringAttributeReadDisposition]
+        private let childResults: [IdentityAttribute: [AXHelpers.StringAttributeReadDisposition]]
+
+        init(root: AXUIElement, children: [AXUIElement]) {
+            rootResults = Dictionary(uniqueKeysWithValues: IdentityAttribute.allCases.map { attribute in
+                (
+                    attribute,
+                    AXHelpers.stringAttributeReadDisposition(
+                        for: UIElement(root),
+                        attribute: attribute.axAttribute
+                    )
+                )
+            })
+            childResults = Dictionary(uniqueKeysWithValues: IdentityAttribute.allCases.map { attribute in
+                (
+                    attribute,
+                    children.map {
+                        AXHelpers.stringAttributeReadDisposition(
+                            for: UIElement($0),
+                            attribute: attribute.axAttribute
+                        )
+                    }
+                )
+            })
+        }
+
+        func rootStatus(for attribute: IdentityAttribute) -> String {
+            rootResults[attribute]?.rawValue ?? "other_error"
+        }
+
+        func childCounts(for attribute: IdentityAttribute) -> String {
+            let values = childResults[attribute] ?? []
+            return AXHelpers.StringAttributeReadDisposition.allCases.map { disposition in
+                "\(disposition.rawValue):\(values.count(where: { $0 == disposition }))"
+            }.joined(separator: "|")
+        }
     }
 
     private static let maximumItemHeight: CGFloat = 40
@@ -1199,6 +1271,15 @@ actor GoldenGateAXSnapshotProvider {
                     \.accessibilityDescription
                 ).first
                 let title = metadata.compactMap(\.title).first
+                let currentIdentityOrigin: IdentityOrigin = if identifier != nil {
+                    .identifier
+                } else if accessibilityDescription != nil {
+                    .accessibilityDescription
+                } else if title != nil {
+                    .title
+                } else {
+                    .generatedFallback
+                }
                 let fallbackTitle = "Item-\(unnamedIndex)"
                 let displayTitle = title ?? accessibilityDescription ?? identifier ?? fallbackTitle
                 if title == nil, accessibilityDescription == nil, identifier == nil {
@@ -1241,11 +1322,13 @@ actor GoldenGateAXSnapshotProvider {
                                 ?? runningApplication.processIdentifier
                         ),
                         element: child.element,
+                        identityElements: candidates.map(\.element),
                         positionKeyCandidates: PositionKeyCandidates(
                             identifier: identifier,
                             accessibilityDescription: accessibilityDescription,
                             title: title,
-                            titleIsRootValue: metadata.first?.title == title && title != nil
+                            titleIsRootValue: metadata.first?.title == title && title != nil,
+                            currentIdentityOrigin: currentIdentityOrigin
                         ),
                         publisherProcessIdentifier: runningApplication.processIdentifier,
                         axElementProcessIdentifier: axElementProcessIdentifier
@@ -1291,6 +1374,17 @@ actor GoldenGateAXSnapshotProvider {
         let publisherTeam = teamIdentifiersByItemID[source.id]
         let axTeam = entry.axElementProcessIdentifier.flatMap(Self.signingTeamIdentifier(for:))
         let candidates = entry.positionKeyCandidates
+        let identityReadAudit = IdentityReadAudit(
+            root: entry.element,
+            children: Array(entry.identityElements.dropFirst())
+        )
+        let childrenReadStatus = AXHelpers.childrenReadDisposition(
+            for: UIElement(entry.element)
+        )
+        let sourceElementStillValid = AXHelpers.isElementValid(UIElement(entry.element))
+        let publisherStillRunning = NSRunningApplication(
+            processIdentifier: entry.publisherProcessIdentifier
+        )?.isTerminated == false
         let evidence = GoldenGatePositionTablePlanner.resolutionEvidence(
             bundleIdentifier: source.id.bundleIdentifier,
             localizedApplicationName: entry.observation.localizedApplicationName,
@@ -1330,7 +1424,7 @@ actor GoldenGateAXSnapshotProvider {
             existingKeys: positions.keys
         ) != nil
         logger.notice(
-            "Golden Gate identity audit: table_read_status=readable, source_entry_found=true, ax_pid_matches_publisher=\(entry.axElementProcessIdentifier == entry.publisherProcessIdentifier, privacy: .public), publisher_team_resolved=\(publisherTeam != nil, privacy: .public), ax_team_resolved=\(axTeam != nil, privacy: .public), publisher_key_resolved=\(publisherKeyResolved, privacy: .public), ax_key_resolved=\(axKeyResolved, privacy: .public), globally_unique_source_key=\(resolvedKeys[source.id] != nil, privacy: .public), status_record_count=\(evidence.statusRecordCount, privacy: .public), bundle_record_count=\(evidence.bundleRecordCount, privacy: .public), recognized_owner_record_count=\(evidence.recognizedOwnerRecordCount, privacy: .public), identifier_present=\(identifierEvidence.isPresent, privacy: .public), identifier_suffix_match_count=\(identifierEvidence.suffixMatchCount, privacy: .public), identifier_owner_match_count=\(identifierEvidence.acceptedOwnerMatchCount, privacy: .public), description_present=\(descriptionEvidence.isPresent, privacy: .public), description_suffix_match_count=\(descriptionEvidence.suffixMatchCount, privacy: .public), description_owner_match_count=\(descriptionEvidence.acceptedOwnerMatchCount, privacy: .public), title_present=\(titleEvidence.isPresent, privacy: .public), title_from_root=\(candidates.titleIsRootValue, privacy: .public), title_equals_current_identity=\(titleEqualsCurrentIdentity, privacy: .public), title_suffix_match_count=\(titleEvidence.suffixMatchCount, privacy: .public), title_owner_match_count=\(titleEvidence.acceptedOwnerMatchCount, privacy: .public), distinct_accepted_key_count=\(evidence.distinctAcceptedKeyCount, privacy: .public)"
+            "Golden Gate identity audit: table_read_status=readable, source_entry_found=true, ax_pid_matches_publisher=\(entry.axElementProcessIdentifier == entry.publisherProcessIdentifier, privacy: .public), publisher_team_resolved=\(publisherTeam != nil, privacy: .public), ax_team_resolved=\(axTeam != nil, privacy: .public), publisher_still_running=\(publisherStillRunning, privacy: .public), source_element_still_valid=\(sourceElementStillValid, privacy: .public), children_read_status=\(childrenReadStatus.rawValue, privacy: .public), publisher_key_resolved=\(publisherKeyResolved, privacy: .public), ax_key_resolved=\(axKeyResolved, privacy: .public), globally_unique_source_key=\(resolvedKeys[source.id] != nil, privacy: .public), status_record_count=\(evidence.statusRecordCount, privacy: .public), bundle_record_count=\(evidence.bundleRecordCount, privacy: .public), bundle_record_suffix_parse_status=\(evidence.directBundleSuffixParseStatus.rawValue, privacy: .public), recognized_owner_record_count=\(evidence.recognizedOwnerRecordCount, privacy: .public), current_identity_origin=\(candidates.currentIdentityOrigin.rawValue, privacy: .public), root_identifier_read_status=\(identityReadAudit.rootStatus(for: .identifier), privacy: .public), root_description_read_status=\(identityReadAudit.rootStatus(for: .accessibilityDescription), privacy: .public), root_title_read_status=\(identityReadAudit.rootStatus(for: .title), privacy: .public), child_identifier_read_counts=\(identityReadAudit.childCounts(for: .identifier), privacy: .public), child_description_read_counts=\(identityReadAudit.childCounts(for: .accessibilityDescription), privacy: .public), child_title_read_counts=\(identityReadAudit.childCounts(for: .title), privacy: .public), identifier_present=\(identifierEvidence.isPresent, privacy: .public), identifier_suffix_match_count=\(identifierEvidence.suffixMatchCount, privacy: .public), identifier_owner_match_count=\(identifierEvidence.acceptedOwnerMatchCount, privacy: .public), description_present=\(descriptionEvidence.isPresent, privacy: .public), description_suffix_match_count=\(descriptionEvidence.suffixMatchCount, privacy: .public), description_owner_match_count=\(descriptionEvidence.acceptedOwnerMatchCount, privacy: .public), title_present=\(titleEvidence.isPresent, privacy: .public), title_from_root=\(candidates.titleIsRootValue, privacy: .public), title_equals_current_identity=\(titleEqualsCurrentIdentity, privacy: .public), title_suffix_match_count=\(titleEvidence.suffixMatchCount, privacy: .public), title_owner_match_count=\(titleEvidence.acceptedOwnerMatchCount, privacy: .public), distinct_accepted_key_count=\(evidence.distinctAcceptedKeyCount, privacy: .public)"
         )
     }
 

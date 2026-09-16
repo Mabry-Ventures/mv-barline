@@ -76,9 +76,20 @@ public struct GoldenGatePositionKeyCandidateEvidence: Equatable, Sendable {
     }
 }
 
+/// The shape of the suffix on the direct bundle-owned position record. This
+/// reveals only schema validity, never the record's value.
+public enum GoldenGateDirectBundleSuffixParseStatus: String, Equatable, Sendable {
+    case notPresent = "not_present"
+    case nonempty
+    case empty
+    case malformed
+    case multiple
+}
+
 public struct GoldenGatePositionKeyResolutionEvidence: Equatable, Sendable {
     public let statusRecordCount: Int
     public let bundleRecordCount: Int
+    public let directBundleSuffixParseStatus: GoldenGateDirectBundleSuffixParseStatus
     public let recognizedOwnerRecordCount: Int
     public let candidates: [GoldenGatePositionKeyCandidateEvidence]
     public let distinctAcceptedKeyCount: Int
@@ -86,12 +97,14 @@ public struct GoldenGatePositionKeyResolutionEvidence: Equatable, Sendable {
     public init(
         statusRecordCount: Int,
         bundleRecordCount: Int,
+        directBundleSuffixParseStatus: GoldenGateDirectBundleSuffixParseStatus,
         recognizedOwnerRecordCount: Int,
         candidates: [GoldenGatePositionKeyCandidateEvidence],
         distinctAcceptedKeyCount: Int
     ) {
         self.statusRecordCount = statusRecordCount
         self.bundleRecordCount = bundleRecordCount
+        self.directBundleSuffixParseStatus = directBundleSuffixParseStatus
         self.recognizedOwnerRecordCount = recognizedOwnerRecordCount
         self.candidates = candidates
         self.distinctAcceptedKeyCount = distinctAcceptedKeyCount
@@ -191,6 +204,11 @@ public enum GoldenGatePositionTablePlanner {
         )
         let statusKeys = keys.filter { $0.lowercased().hasPrefix(statusPrefix) }
         let bundlePrefix = "\(statusPrefix)\(ownerContext.bundleIdentifier)\(keySeparator)"
+        let bareBundleKey = "\(statusPrefix)\(ownerContext.bundleIdentifier)"
+        let directBundleKeys = statusKeys.filter {
+            let normalized = $0.lowercased()
+            return normalized.hasPrefix(bundlePrefix) || normalized == bareBundleKey
+        }
         let recognizedOwnerKeys = statusKeys.filter { key in
             guard let owner = statusOwner(in: key) else { return false }
             return ownerMatches(
@@ -236,13 +254,33 @@ public enum GoldenGatePositionTablePlanner {
         }
         return GoldenGatePositionKeyResolutionEvidence(
             statusRecordCount: statusKeys.count,
-            bundleRecordCount: statusKeys.count(where: {
-                $0.lowercased().hasPrefix(bundlePrefix)
-            }),
+            bundleRecordCount: directBundleKeys.count,
+            directBundleSuffixParseStatus: directBundleSuffixParseStatus(
+                directBundleKeys,
+                prefix: bundlePrefix,
+                bareKey: bareBundleKey
+            ),
             recognizedOwnerRecordCount: recognizedOwnerKeys.count,
             candidates: evidence,
             distinctAcceptedKeyCount: acceptedKeys.count
         )
+    }
+
+    private static func directBundleSuffixParseStatus(
+        _ keys: [String],
+        prefix: String,
+        bareKey: String
+    ) -> GoldenGateDirectBundleSuffixParseStatus {
+        guard keys.count == 1, let key = keys.first else {
+            return keys.isEmpty ? .notPresent : .multiple
+        }
+        guard key.caseInsensitiveCompare(bareKey) != .orderedSame else {
+            return .malformed
+        }
+        guard key.count >= prefix.count else { return .malformed }
+        let suffix = String(key.dropFirst(prefix.count))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return suffix.isEmpty ? .empty : .nonempty
     }
 
     private static func normalizedOwnerContext(

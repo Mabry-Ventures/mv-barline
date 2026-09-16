@@ -27,12 +27,32 @@ struct GoldenGatePositionTablePlannerTests {
 
         #expect(evidence.statusRecordCount == 1)
         #expect(evidence.bundleRecordCount == 0)
+        #expect(evidence.directBundleSuffixParseStatus == .notPresent)
         #expect(evidence.recognizedOwnerRecordCount == 1)
         #expect(evidence.evidence(for: .accessibilityIdentifier).isPresent == false)
         #expect(evidence.evidence(for: .accessibilityDescription).suffixMatchCount == 0)
         #expect(evidence.evidence(for: .accessibilityTitle).suffixMatchCount == 1)
         #expect(evidence.evidence(for: .accessibilityTitle).acceptedOwnerMatchCount == 1)
         #expect(evidence.distinctAcceptedKeyCount == 1)
+    }
+
+    @Test("Read-only evidence classifies direct bundle suffix shape")
+    func keyEvidenceClassifiesDirectBundleSuffix() {
+        let nonempty = GoldenGatePositionTablePlanner.resolutionEvidence(
+            bundleIdentifier: "com.example.first",
+            candidates: [],
+            existingKeys: ["status:com.example.first::Item"]
+        )
+        #expect(nonempty.bundleRecordCount == 1)
+        #expect(nonempty.directBundleSuffixParseStatus == .nonempty)
+
+        let malformed = GoldenGatePositionTablePlanner.resolutionEvidence(
+            bundleIdentifier: "com.example.first",
+            candidates: [],
+            existingKeys: ["status:com.example.first"]
+        )
+        #expect(malformed.bundleRecordCount == 1)
+        #expect(malformed.directBundleSuffixParseStatus == .malformed)
     }
 
     @Test("Read-only evidence preserves ambiguity across distinct candidates")
