@@ -23,10 +23,7 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
             .alwaysHidden, .alwaysHidden, .hidden, .hidden, .visible, .visible,
         ])
         #expect(snapshot.items.filter(\.isBarlineControlItem).count == 3)
-        #expect(snapshot.items.first { $0.id.bundleIdentifier == "com.example.always" }?.isMovable == true)
-        #expect(snapshot.items.first { $0.id.bundleIdentifier == "com.example.hidden" }?.isMovable == true)
-        #expect(snapshot.items.first { $0.id.bundleIdentifier == "com.example.visible" }?.isMovable == true)
-        #expect(snapshot.items.filter(\.isBarlineControlItem).allSatisfy { !$0.isMovable })
+        #expect(snapshot.items.allSatisfy { !$0.isMovable })
     }
 
     @Test("Fails closed without the hidden section control")
@@ -96,14 +93,14 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
         #expect(snapshot.items.first { !$0.isBarlineControlItem }?.section == .hidden)
     }
 
-    @Test("Mixed assignments for one application fail visible")
-    func mixedAssignmentsFailVisible() throws {
+    @Test("Divider geometry remains authoritative for multiple application items")
+    func mixedAssignmentsRetainGeometry() throws {
         let snapshot = try build([
             observation(bundle: "com.example.multiple", title: "Hidden", x: 1500),
             observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 1550),
             observation(bundle: "com.example.multiple", title: "Visible", x: 1600),
         ])
-        #expect(snapshot.items.filter { !$0.isBarlineControlItem }.allSatisfy { $0.section == .visible })
+        #expect(snapshot.items.filter { !$0.isBarlineControlItem }.map(\.section) == [.hidden, .visible])
     }
 
     @Test("Explicit assignments override live divider geometry")
@@ -122,7 +119,7 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
         ], assignedSections: [identifier: .hidden])
 
         #expect(snapshot.items.first { $0.id == identifier }?.section == .hidden)
-        #expect(snapshot.items.first { $0.id == identifier }?.isMovable == true)
+        #expect(snapshot.items.first { $0.id == identifier }?.isMovable == false)
     }
 
     @Test("Multiple items from one application cannot be assigned independently")

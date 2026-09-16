@@ -1,8 +1,8 @@
 # Known limitations and release status
 
-This page describes the boundaries of Barline 1.0.15. Release evidence is bound
-to its exact source and signed binary; it is not blanket approval for later
-changes.
+This page distinguishes the published Barline 1.0.15 boundary from the
+unpublished 1.0.17 candidate. Release evidence is bound to its exact source and
+signed binary; it is not blanket approval for later changes.
 
 ## Compatibility
 
@@ -10,15 +10,15 @@ changes.
   unsupported.
 - macOS 27 discovery and layout presentation were exercised on an Apple
   Silicon macOS 27.0 host. Barline 1.0.15's graphical layout was read-only on
-  that system. The 1.0.16 candidate adds native visible/hidden assignment for
-  items macOS can conceal independently; ambiguous multi-item applications and
-  unmapped Apple items remain visible and disabled. Command-drag remains the
-  physical ordering path.
+  that system. The unpublished 1.0.17 candidate adds transactional assignment
+  and reordering through the system position table, with exact identity,
+  convergence verification, and interruption recovery. Runtime qualification
+  of that exact candidate remains open.
 - The secondary shelf and graphical layout editor require an always-visible
   menu bar. Auto-hide uses native reveal instead; see
   [supported configurations](SUPPORTED_CONFIGURATIONS.md).
-- Cross-application arrangement relies on unsupported WindowServer behavior.
-  macOS updates and third-party item behavior can affect it. Missing or ambiguous
+- Cross-application arrangement relies on unsupported system behavior. macOS
+  updates and third-party item behavior can affect it. Missing or ambiguous
   identities cannot safely authorize a layout mutation.
 - Multiple displays, notch/overflow, physical reconnect, sleep/wake, full-screen
   Spaces, and actual permission changes require their own runtime evidence.
@@ -65,6 +65,10 @@ third-party status items or future macOS updates can never fail.
 
 The public support site and hosted Stripe checkout do not qualify the app and do
 not unlock features.
+
+Barline 1.0.17 is not published. Its source gates and independent code reviews
+authorize only controlled installed qualification; they are not a release
+verdict.
 
 See [release requirements](RELEASING.md), [the test matrix](TEST_MATRIX.md),
 and the [reliability-first acceptance contract](RELIABILITY_FIRST.md).

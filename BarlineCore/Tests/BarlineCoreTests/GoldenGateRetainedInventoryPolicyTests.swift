@@ -140,7 +140,7 @@ struct GoldenGateRetainedInventoryPolicyTests {
         #expect(result.items.map(\.id) == [liveB, retained, liveA])
     }
 
-    @Test("Merged bundle multiplicity fails visible and disables independent assignment")
+    @Test("Merge preserves physical sections and defers movability to the provider")
     func recomputesBundleEligibilityAfterMerge() {
         let retained = MenuBarItemID(bundleIdentifier: "com.example.multi", title: "First")
         let live = MenuBarItemID(bundleIdentifier: "com.example.multi", title: "Second")
@@ -157,12 +157,12 @@ struct GoldenGateRetainedInventoryPolicyTests {
             barlineBundleIdentifier: "com.mabryventures.Barline"
         )
 
-        #expect(result.items.map(\.section) == [.visible, .visible])
+        #expect(result.items.map(\.section) == [.hidden, .visible])
         #expect(result.items.allSatisfy { !$0.isMovable })
     }
 
-    @Test("Disappearance refresh and undo preserve the original native order")
-    func disappearanceRefreshUndoRoundTrip() throws {
+    @Test("An AX-absent retained item cannot be restored until its position key is rediscovered")
+    func disappearanceFailsClosedUntilRediscovered() throws {
         let hidden = id("hidden")
         let visible = id("visible")
         let prior = [
@@ -185,9 +185,9 @@ struct GoldenGateRetainedInventoryPolicyTests {
             descriptor(id: visible, section: .visible, order: 1),
         ])
 
-        let restored = try GoldenGateLogicalLayoutPlanner().restoring(target, to: refreshed)
-        #expect(restored.items.map(\.id) == [hidden, visible])
-        #expect(restored.items.allSatisfy { $0.section == .visible })
+        #expect(throws: MenuBarBackendError.self) {
+            try GoldenGateLogicalLayoutPlanner().restoring(target, to: refreshed)
+        }
     }
 
     @Test("Retained items preserve slots around live Barline control anchors")

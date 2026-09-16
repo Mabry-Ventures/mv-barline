@@ -439,6 +439,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             "interrupted"
         case .timedOut:
             "timed-out"
+        case .mutationSuperseded:
+            "mutation-superseded"
+        case .mutationRecoveryRequired:
+            "mutation-recovery-required"
+        case .positionTableAccessNotGranted:
+            "position-table-access-not-granted"
+        case .mutationNotStarted:
+            "mutation-not-started"
         case .mutationRecoveryFailed:
             "mutation-recovery-failed"
         case .operationFailed:

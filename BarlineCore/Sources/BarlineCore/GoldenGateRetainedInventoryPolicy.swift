@@ -9,7 +9,7 @@ public enum GoldenGateRetainedInventoryPolicy {
         retainedDescriptors: [MenuBarItemID: MenuBarItemDescriptor],
         assignments: [MenuBarItemID: GoldenGateLogicalAssignment],
         runningBundleIdentifiers: Set<String>,
-        barlineBundleIdentifier: String
+        barlineBundleIdentifier _: String
     ) -> MenuBarSnapshot {
         let normalizedRunningBundles = Set(runningBundleIdentifiers.map {
             $0.lowercased()
@@ -99,29 +99,8 @@ public enum GoldenGateRetainedInventoryPolicy {
         }
 
         let ordered = orderedIDs.compactMap { liveByID[$0] ?? retainedByID[$0] }
-        let configuration = MenuBarConcealmentConfiguration(
-            visibleItemIDs: ordered.filter { !$0.isBarlineControlItem && $0.section == .visible }.map(\.id),
-            concealedItemIDs: ordered.filter { !$0.isBarlineControlItem && $0.section != .visible }.map(\.id)
-        )
-        let resolved = GoldenGateConcealmentPolicy.resolve(
-            configuration,
-            barlineBundleIdentifier: barlineBundleIdentifier
-        )
-        let allItemIDs = ordered.map(\.id)
         let items = ordered.enumerated().map { index, item in
-            let section = !item.isBarlineControlItem &&
-                item.section != .visible &&
-                !GoldenGateConcealmentPolicy.supportsConcealing(item.id, in: resolved)
-                ? MenuBarSection.visible
-                : item.section
-            let isMovable = item.canBeHidden &&
-                !item.isBarlineControlItem &&
-                GoldenGateConcealmentPolicy.supportsIndependentAssignment(
-                    item.id,
-                    among: allItemIDs,
-                    barlineBundleIdentifier: barlineBundleIdentifier
-                )
-            return item.replacing(section: section, order: index, isMovable: isMovable)
+            item.replacing(section: item.section, order: index, isMovable: false)
         }
         return MenuBarSnapshot(
             generation: snapshot.generation,

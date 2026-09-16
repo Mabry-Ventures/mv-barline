@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.0.17 (build 91) — September 15, 2026
+
+- Replace macOS 27's synthetic menu-bar movement path with bounded,
+  identity-resolved transactions against the system's authoritative menu-bar
+  position table. macOS 26 remains isolated on its established XPC backend.
+- Verify every proposed position change against fresh Accessibility inventory;
+  fail closed and conditionally roll back when native state does not converge.
+- Preserve protected system anchors and unrelated position keys, support first
+  hide, reveal, restore, and same-section reorder, and report every item changed
+  by collision-free re-spacing.
+- Add a durable, fully synchronized transaction journal with launch recovery,
+  verified companion-state replay, corrupt-journal quarantine, and external
+  writer precedence.
+- Separate no-side-effect preflight failures, concurrent native winners, and
+  recovery-owned transactions so the coordinator never issues a stale second
+  restore.
+- Repair revoked or corrupt menu-bar preference bookmarks through an explicit,
+  user-initiated authorization flow while keeping passive discovery
+  noninteractive.
+- Bound retained inventory and saved-layout restoration, preserve exact native
+  order through transient Accessibility absence, and add macOS 26/27 routing,
+  recovery, re-spacing, and compensation regressions.
+
 ## 1.0.16 (build 90) — September 15, 2026
 
 - Serialize macOS 27 presentation synchronization with moves, saved-layout

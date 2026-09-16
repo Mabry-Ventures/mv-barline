@@ -1124,6 +1124,76 @@ struct StateCoordinatorTests {
         #expect(await coordinator.lastKnownGoodSnapshot == verifiedRollback)
     }
 
+    @Test("A superseded mutation observes native state without restoring stale layout")
+    func supersededMutationDoesNotCompensate() async throws {
+        let before = makeSnapshot(generation: 1, count: 2)
+        let external = makeSnapshot(generation: 2, count: 3)
+        let backend = FakeBackend(
+            snapshots: [before, external],
+            revealFailure: .mutationSuperseded
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+        _ = try await coordinator.refresh(now: before.capturedAt)
+
+        await #expect(throws: MenuBarBackendError.mutationSuperseded) {
+            try await coordinator.perform(.reveal(before.items[0].id), now: external.capturedAt)
+        }
+
+        #expect(await backend.restoredSnapshots.isEmpty)
+        #expect(await coordinator.currentSnapshot == external)
+        #expect(await coordinator.lastKnownGoodSnapshot == external)
+        #expect(await coordinator.activeProfileID == nil)
+    }
+
+    @Test("A pending recovery journal observes native state without stale compensation")
+    func pendingRecoveryDoesNotCompensate() async throws {
+        let before = makeSnapshot(generation: 1, count: 2)
+        let recovered = makeSnapshot(generation: 2, count: 3)
+        let backend = FakeBackend(
+            snapshots: [before, recovered],
+            revealFailure: .mutationRecoveryRequired
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+        _ = try await coordinator.refresh(now: before.capturedAt)
+
+        await #expect(throws: MenuBarBackendError.mutationRecoveryRequired) {
+            try await coordinator.perform(.reveal(before.items[0].id), now: recovered.capturedAt)
+        }
+
+        #expect(await backend.restoredSnapshots.isEmpty)
+        #expect(await coordinator.currentSnapshot == recovered)
+        #expect(await coordinator.lastKnownGoodSnapshot == recovered)
+        #expect(await coordinator.activeProfileID == nil)
+    }
+
+    @Test("A preflight access refusal preserves native state without compensation")
+    func accessRefusalDoesNotCompensate() async throws {
+        let before = makeSnapshot(generation: 1, count: 2)
+        let backend = FakeBackend(
+            snapshots: [before],
+            revealFailure: .positionTableAccessNotGranted
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+        _ = try await coordinator.refresh(now: before.capturedAt)
+
+        await #expect(throws: MenuBarBackendError.positionTableAccessNotGranted) {
+            try await coordinator.perform(.reveal(before.items[0].id), now: before.capturedAt)
+        }
+
+        #expect(await backend.restoredSnapshots.isEmpty)
+        #expect(await coordinator.currentSnapshot == before)
+        #expect(await coordinator.lastKnownGoodSnapshot == before)
+    }
+
     @Test("Recovery restarts, restores last-known-good, and commits a fresh snapshot")
     func recoveryRestoresAndRefreshes() async throws {
         let before = makeSnapshot(generation: 1, count: 2)
@@ -3136,6 +3206,96 @@ struct StateCoordinatorTests {
         #expect(await coordinator.currentSnapshot == verifiedRollback)
     }
 
+    @Test("A superseded profile move observes native state without restoring stale layout")
+    func supersededProfileMoveDoesNotCompensateLayout() async throws {
+        let before = makeSnapshot(generation: 1, count: 2)
+        let external = makeSnapshot(generation: 2, count: 3)
+        let profile = BarlineProfile(
+            id: UUID(120),
+            name: "Superseded",
+            layout: ProfileLayout(hidden: [before.items[0].id])
+        )
+        let backend = FakeBackend(
+            snapshots: [before, external],
+            failMoveAt: 1,
+            moveFailureError: .mutationSuperseded
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+        _ = try await coordinator.refresh(now: before.capturedAt)
+
+        await #expect(throws: MenuBarBackendError.mutationSuperseded) {
+            try await coordinator.activate(profile: profile, now: external.capturedAt)
+        }
+
+        #expect(await backend.restoredSnapshots.isEmpty)
+        #expect(await coordinator.currentSnapshot == external)
+        #expect(await coordinator.lastKnownGoodSnapshot == external)
+        #expect(await coordinator.activeProfileID == nil)
+    }
+
+    @Test("A profile preflight rejection preserves its validated starting layout")
+    func profilePreflightRejectionDoesNotCompensateLayout() async throws {
+        let before = makeSnapshot(generation: 1, count: 2)
+        let profile = BarlineProfile(
+            id: UUID(121),
+            name: "Preflight rejected",
+            layout: ProfileLayout(hidden: [before.items[0].id])
+        )
+        let backend = FakeBackend(
+            snapshots: [before],
+            failMoveAt: 1,
+            moveFailureError: .mutationNotStarted
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+        _ = try await coordinator.refresh(now: before.capturedAt)
+
+        await #expect(throws: MenuBarBackendError.mutationNotStarted) {
+            try await coordinator.activate(profile: profile, now: before.capturedAt)
+        }
+
+        #expect(await backend.restoredSnapshots.isEmpty)
+        #expect(await coordinator.currentSnapshot == before)
+        #expect(await coordinator.lastKnownGoodSnapshot == before)
+        #expect(await coordinator.activeProfileID == nil)
+    }
+
+    @Test("A later profile preflight rejection compensates an earlier completed move")
+    func laterProfilePreflightRejectionCompensatesCompletedMove() async throws {
+        let before = makeSnapshot(generation: 1, count: 3)
+        let verifiedRollback = makeSnapshot(generation: 2, count: 3)
+        let profile = BarlineProfile(
+            id: UUID(122),
+            name: "Second move rejected",
+            layout: ProfileLayout(visible: before.items.reversed().map(\.id))
+        )
+        let backend = FakeBackend(
+            snapshots: [before, verifiedRollback],
+            failMoveAt: 2,
+            moveFailureError: .mutationNotStarted
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+        _ = try await coordinator.refresh(now: before.capturedAt)
+
+        await #expect(throws: MenuBarBackendError.mutationNotStarted) {
+            try await coordinator.activate(profile: profile, now: before.capturedAt)
+        }
+
+        #expect(await backend.moveOperations.count == 2)
+        #expect(await backend.restoredSnapshots == [before])
+        #expect(await coordinator.currentSnapshot == verifiedRollback)
+        #expect(await coordinator.lastKnownGoodSnapshot == verifiedRollback)
+        #expect(await coordinator.activeProfileID == nil)
+    }
+
     @Test("Profiles with stale items fail before applying any move")
     func rejectsStaleProfileReference() async throws {
         let before = makeSnapshot(generation: 1, count: 2)
@@ -3329,6 +3489,62 @@ struct StateCoordinatorTests {
         #expect(await coordinator.currentSnapshot == restoredAfter)
         #expect(await coordinator.canUndo)
         #expect(await coordinator.canRedo == false)
+    }
+
+    @Test("A superseded history restore observes native state without stale compensation")
+    func supersededHistoryRestoreDoesNotCompensate() async throws {
+        let before = makeSnapshot(generation: 1, count: 2)
+        let after = makeSnapshot(generation: 2, count: 2)
+        let liveAfter = makeSnapshot(generation: 3, count: 2)
+        let external = makeSnapshot(generation: 4, count: 3)
+        let backend = FakeBackend(
+            snapshots: [before, after, liveAfter, external],
+            restoreFailures: 1,
+            restoreFailureError: .mutationSuperseded
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+        _ = try await coordinator.refresh(now: before.capturedAt)
+        _ = try await coordinator.perform(.reveal(before.items[0].id), now: after.capturedAt)
+
+        await #expect(throws: MenuBarBackendError.mutationSuperseded) {
+            try await coordinator.undo(now: external.capturedAt)
+        }
+
+        #expect(await backend.restoreCallCount == 1)
+        #expect(await coordinator.currentSnapshot == external)
+        #expect(await coordinator.lastKnownGoodSnapshot == external)
+        #expect(await coordinator.activeProfileID == nil)
+        #expect(await coordinator.canUndo)
+    }
+
+    @Test("A history restore preflight rejection does not issue a second restore")
+    func historyPreflightRejectionDoesNotCompensate() async throws {
+        let before = makeSnapshot(generation: 1, count: 2)
+        let after = makeSnapshot(generation: 2, count: 2)
+        let liveAfter = makeSnapshot(generation: 3, count: 2)
+        let backend = FakeBackend(
+            snapshots: [before, after, liveAfter],
+            restoreFailures: 1,
+            restoreFailureError: .mutationNotStarted
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+        _ = try await coordinator.refresh(now: before.capturedAt)
+        _ = try await coordinator.perform(.reveal(before.items[0].id), now: after.capturedAt)
+
+        await #expect(throws: MenuBarBackendError.mutationNotStarted) {
+            try await coordinator.undo(now: liveAfter.capturedAt)
+        }
+
+        #expect(await backend.restoreCallCount == 1)
+        #expect(await coordinator.currentSnapshot == liveAfter)
+        #expect(await coordinator.lastKnownGoodSnapshot == liveAfter)
+        #expect(await coordinator.canUndo)
     }
 
     @Test("Click delivery does not validate a post-activation snapshot or create undo history")
@@ -4142,11 +4358,13 @@ private actor FakeBackend: MenuBarBackend {
     private let restartDelay: Duration
     private let revealFailure: MenuBarBackendError?
     private let failMoveAt: Int?
+    private let moveFailureError: MenuBarBackendError
     private let environmentSnapshot: MenuBarEnvironmentSnapshot?
     private var snapshotFailuresRemaining: Int
     private var restoreFailuresRemaining: Int
     private let restoreFailureCallNumbers: Set<Int>
-    private var restoreCallCount = 0
+    private(set) var restoreCallCount = 0
+    private let restoreFailureError: MenuBarBackendError
     private let checksCancellationDuringCompensation: Bool
     private let cancelOnMove: Bool
     private let restoreDelay: Duration
@@ -4167,9 +4385,11 @@ private actor FakeBackend: MenuBarBackend {
         restartDelay: Duration = .zero,
         revealFailure: MenuBarBackendError? = nil,
         failMoveAt: Int? = nil,
+        moveFailureError: MenuBarBackendError = .operationFailed("injected move failure"),
         environment: MenuBarEnvironmentSnapshot? = nil,
         snapshotFailures: Int = 0,
         restoreFailures: Int = 0,
+        restoreFailureError: MenuBarBackendError = .interrupted,
         restoreFailureCallNumbers: Set<Int> = [],
         checksCancellationDuringCompensation: Bool = false,
         cancelOnMove: Bool = false,
@@ -4181,9 +4401,11 @@ private actor FakeBackend: MenuBarBackend {
         self.restartDelay = restartDelay
         self.revealFailure = revealFailure
         self.failMoveAt = failMoveAt
+        self.moveFailureError = moveFailureError
         environmentSnapshot = environment
         snapshotFailuresRemaining = max(0, snapshotFailures)
         restoreFailuresRemaining = max(0, restoreFailures)
+        self.restoreFailureError = restoreFailureError
         self.restoreFailureCallNumbers = restoreFailureCallNumbers
         self.checksCancellationDuringCompensation = checksCancellationDuringCompensation
         self.cancelOnMove = cancelOnMove
@@ -4212,7 +4434,7 @@ private actor FakeBackend: MenuBarBackend {
         moveOperations.append(operation)
         operationEvents.append("move")
         if moveOperations.count == failMoveAt {
-            throw MenuBarBackendError.operationFailed("injected move failure")
+            throw moveFailureError
         }
         return MenuBarMutationResult(generation: 0, changedItemIDs: [operation.itemID])
     }
@@ -4273,7 +4495,7 @@ private actor FakeBackend: MenuBarBackend {
         }
         if restoreFailureCallNumbers.contains(restoreCallCount) || restoreFailuresRemaining > 0 {
             restoreFailuresRemaining -= 1
-            throw MenuBarBackendError.interrupted
+            throw restoreFailureError
         }
         return MenuBarMutationResult(
             generation: snapshot.generation,

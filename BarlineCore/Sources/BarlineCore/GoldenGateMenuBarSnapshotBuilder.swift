@@ -151,40 +151,13 @@ public enum GoldenGateMenuBarSnapshotBuilder {
             return descriptor.replacingSection(section)
         }
 
-        let configuration = MenuBarConcealmentConfiguration(
-            visibleItemIDs: descriptors.filter { $0.section == .visible }.map(\.id),
-            concealedItemIDs: descriptors.filter { $0.section != .visible }.map(\.id)
-        )
-        let supported = GoldenGateConcealmentPolicy.resolve(
-            configuration,
-            barlineBundleIdentifier: appSigningIdentifier
-        )
-        let normalizedDescriptors = descriptors.map { descriptor in
-            guard !descriptor.isBarlineControlItem,
-                  descriptor.section != .visible,
-                  !GoldenGateConcealmentPolicy.supportsConcealing(descriptor.id, in: supported)
-            else {
-                return descriptor
-            }
-            return descriptor.replacingSection(.visible)
-        }
-
-        let allItemIDs = normalizedDescriptors.map(\.id)
-        let movableDescriptors = normalizedDescriptors.map { descriptor in
-            let isMovable = descriptor.canBeHidden &&
-                !descriptor.isBarlineControlItem &&
-                GoldenGateConcealmentPolicy.supportsIndependentAssignment(
-                    descriptor.id,
-                    among: allItemIDs,
-                    barlineBundleIdentifier: appSigningIdentifier
-                )
-            return descriptor.replacing(isMovable: isMovable)
-        }
-
         return MenuBarSnapshot(
             generation: generation,
             capturedAt: capturedAt,
-            items: movableDescriptors,
+            // The builder owns identity and divider geometry only. Runtime
+            // movability depends on an exact macOS 27 position-table key and
+            // is applied by the platform provider after the table is read.
+            items: descriptors.map { $0.replacing(isMovable: false) },
             displayIDs: displayIDs,
             displayIdentities: displayIdentities,
             activeSpaceIsValid: !displayIDs.isEmpty,

@@ -604,6 +604,36 @@ public actor MenuBarStateCoordinator {
             }
         } catch {
             let mutationError = error
+            if Self.mutationDidNotStart(mutationError) {
+                // Preflight failed before the backend wrote native state.
+                // Keep the validated starting snapshot and do not manufacture
+                // a second mutation through compensation.
+                currentSnapshot = before
+                lastKnownGoodSnapshot = before
+                throw mutationError
+            }
+            if Self.mutationRequiresNativeObservation(mutationError) {
+                // The backend established either that another native value won
+                // or that durable recovery authority appeared before this
+                // proposal was staged. A compensating restore would overwrite
+                // state that this caller does not own with its stale `before`
+                // snapshot, defeating the backend's compare/rebase guard.
+                if let observed = try? await normalizedBackendSnapshot(),
+                   case let .success(snapshot) = validator.validate(
+                       observed,
+                       previous: nil,
+                       now: now ?? Date()
+                   )
+                {
+                    currentSnapshot = snapshot
+                    lastKnownGoodSnapshot = snapshot
+                } else {
+                    currentSnapshot = nil
+                }
+                activeProfileID = nil
+                lastKnownGoodProfileID = nil
+                throw mutationError
+            }
             guard await backend.capabilities.canRestore else {
                 currentSnapshot = nil
                 activeProfileID = nil
@@ -782,6 +812,7 @@ public actor MenuBarStateCoordinator {
         mutationGeneration &+= 1
         let generation = mutationGeneration
         var didBeginLayoutMutation = false
+        var completedLayoutMutationCount = 0
         var didBeginWorkspaceMutation = false
         var appliedWorkspaceRevision: UInt64?
 
@@ -813,6 +844,7 @@ public actor MenuBarStateCoordinator {
                 try await admission?()
                 didBeginLayoutMutation = true
                 _ = try await backend.move(operation)
+                completedLayoutMutationCount += 1
             }
 
             try Task.checkCancellation()
@@ -876,6 +908,12 @@ public actor MenuBarStateCoordinator {
             }
         } catch {
             let activationError = error
+            // A preflight rejection describes only the move that threw. A
+            // prior move in this same profile may already have succeeded and
+            // still requires verified compensation.
+            let layoutDidNotStart = completedLayoutMutationCount == 0 &&
+                Self.mutationDidNotStart(activationError)
+            let layoutWasSuperseded = Self.mutationRequiresNativeObservation(activationError)
             if activationError is MenuBarWorkspaceTransactionError,
                !didBeginWorkspaceMutation,
                !didBeginLayoutMutation
@@ -912,7 +950,21 @@ public actor MenuBarStateCoordinator {
                     workspaceRollbackError = error
                 }
             }
-            if didBeginLayoutMutation || didBeginWorkspaceMutation {
+            if layoutDidNotStart {
+                verifiedRollbackSnapshot = before
+            } else if layoutWasSuperseded {
+                do {
+                    let observed = try await normalizedBackendSnapshot()
+                    switch validator.validate(observed, previous: nil, now: now ?? Date()) {
+                    case let .success(snapshot):
+                        verifiedRollbackSnapshot = snapshot
+                    case let .failure(reason):
+                        throw MenuBarBackendError.invalidSnapshot(reason)
+                    }
+                } catch {
+                    layoutRollbackError = error
+                }
+            } else if didBeginLayoutMutation || didBeginWorkspaceMutation {
                 if await backend.capabilities.canRestore {
                     do {
                         let candidate = try await compensationSnapshot(restoring: before)
@@ -943,8 +995,8 @@ public actor MenuBarStateCoordinator {
                 }
                 currentSnapshot = verifiedRollbackSnapshot
                 lastKnownGoodSnapshot = verifiedRollbackSnapshot
-                activeProfileID = workspaceWasSuperseded ? nil : priorProfileID
-                lastKnownGoodProfileID = workspaceWasSuperseded ? nil : priorProfileID
+                activeProfileID = workspaceWasSuperseded || layoutWasSuperseded ? nil : priorProfileID
+                lastKnownGoodProfileID = workspaceWasSuperseded || layoutWasSuperseded ? nil : priorProfileID
                 throw activationError
             }
             currentSnapshot = nil
@@ -1589,6 +1641,8 @@ public actor MenuBarStateCoordinator {
             }
         } catch {
             let historyRestoreError = error
+            let layoutDidNotStart = Self.mutationDidNotStart(historyRestoreError)
+            let layoutWasSuperseded = Self.mutationRequiresNativeObservation(historyRestoreError)
             if historyRestoreError is MenuBarWorkspaceTransactionError,
                !didBeginWorkspaceMutation,
                !didBeginLayoutMutation
@@ -1630,7 +1684,17 @@ public actor MenuBarStateCoordinator {
             var layoutRollbackError: (any Error)?
             var rollbackSnapshot: MenuBarSnapshot?
             do {
-                if didBeginLayoutMutation {
+                if layoutDidNotStart {
+                    rollbackSnapshot = previous.snapshot
+                } else if layoutWasSuperseded {
+                    let observed = try await normalizedBackendSnapshot()
+                    switch validator.validate(observed, previous: nil, now: now ?? Date()) {
+                    case let .success(snapshot):
+                        rollbackSnapshot = snapshot
+                    case let .failure(reason):
+                        throw MenuBarBackendError.invalidSnapshot(reason)
+                    }
+                } else if didBeginLayoutMutation {
                     let rollbackCandidate = try await compensationSnapshot(restoring: previous.snapshot)
                     switch validator.validate(rollbackCandidate, previous: nil, now: now ?? Date()) {
                     case let .success(snapshot):
@@ -1656,8 +1720,8 @@ public actor MenuBarStateCoordinator {
                 }
                 currentSnapshot = rollbackSnapshot
                 lastKnownGoodSnapshot = rollbackSnapshot
-                activeProfileID = workspaceWasSuperseded ? nil : previous.activeProfileID
-                lastKnownGoodProfileID = workspaceWasSuperseded ? nil : previous.activeProfileID
+                activeProfileID = workspaceWasSuperseded || layoutWasSuperseded ? nil : previous.activeProfileID
+                lastKnownGoodProfileID = workspaceWasSuperseded || layoutWasSuperseded ? nil : previous.activeProfileID
                 throw historyRestoreError
             }
             currentSnapshot = nil
@@ -1668,6 +1732,26 @@ public actor MenuBarStateCoordinator {
             throw MenuBarBackendError.operationFailed(
                 "history restore failed: \(historyRestoreError); rollback failed: workspace \(workspaceDescription); layout \(layoutDescription)"
             )
+        }
+    }
+
+    private static func mutationDidNotStart(_ error: any Error) -> Bool {
+        guard let backendError = error as? MenuBarBackendError else { return false }
+        return switch backendError {
+        case .positionTableAccessNotGranted, .mutationNotStarted:
+            true
+        default:
+            false
+        }
+    }
+
+    private static func mutationRequiresNativeObservation(_ error: any Error) -> Bool {
+        guard let backendError = error as? MenuBarBackendError else { return false }
+        return switch backendError {
+        case .mutationSuperseded, .mutationRecoveryRequired:
+            true
+        default:
+            false
         }
     }
 

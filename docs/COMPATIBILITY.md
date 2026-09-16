@@ -1,15 +1,15 @@
 # Compatibility strategy
 
-Barline supports macOS 26 and macOS 27 on Apple Silicon. Compatibility is
-selected by live capability probes; the operating-system version only
-determines which backend gets the first opportunity to probe.
+Barline supports macOS 26 and macOS 27 on Apple Silicon. The OS boundary selects
+the backend, and each backend then fails closed when its required capability or
+behavioral proof is unavailable.
 
 - `TahoeMenuBarBackend` is the macOS 26 implementation.
-- `GoldenGateMenuBarBackend` is the macOS 27 implementation. It uses public
-  Accessibility inventory and commits supported visible/hidden assignments
-  through macOS's native concealment controller. Unknown Apple items and
-  applications with multiple independently ambiguous status items fail visible.
-  Native Command-drag remains the physical ordering path.
+- The main-process Golden Gate provider is the macOS 27 implementation. It uses
+  public Accessibility inventory and targeted transactions against the system's
+  authoritative menu-bar position table. It journals, verifies, and
+  conditionally rolls back its own proposals. Unknown or ambiguous identities
+  remain unchanged.
 - `FallbackMenuBarBackend` exposes no unsupported mutation capability. The app
   must keep settings, profiles, search metadata, diagnostics, import/export,
   System Settings handoff, and reset/recovery accessible in this state.

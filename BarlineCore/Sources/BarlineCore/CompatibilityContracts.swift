@@ -248,6 +248,24 @@ public enum MenuBarBackendError: Error, Codable, Equatable, Sendable {
     case invalidSnapshot(SnapshotRejectionReason)
     case interrupted
     case timedOut
+    /// The requested mutation did not become authoritative because the native
+    /// layout changed concurrently or the backend safely rolled its proposal
+    /// back. Callers must observe the winning native state, not compensate by
+    /// restoring a stale pre-operation snapshot.
+    case mutationSuperseded
+    /// A durable transaction appeared after planning but before this caller
+    /// could stage its proposal. The caller did not write, but the journal may
+    /// represent native state from another process or interrupted operation.
+    /// Observe and recover that state instead of compensating from stale input.
+    case mutationRecoveryRequired
+    /// Barline could not begin the native mutation because the user did not
+    /// grant access to the macOS menu-bar position store. No layout side
+    /// effect occurred, so callers must not issue a compensating restore.
+    case positionTableAccessNotGranted
+    /// A native mutation was rejected during preflight before any layout side
+    /// effect occurred. Callers must preserve their pre-operation snapshot
+    /// rather than performing a compensating restore.
+    case mutationNotStarted
     case mutationRecoveryFailed
     case operationFailed(String)
 }

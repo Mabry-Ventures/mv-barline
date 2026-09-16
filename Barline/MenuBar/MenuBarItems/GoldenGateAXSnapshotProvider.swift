@@ -42,6 +42,11 @@ actor GoldenGateAXSnapshotProvider {
         let descriptorData: Data
     }
 
+    private enum RecoveryPersistenceError: Error {
+        case invalidCompanion
+        case synchronizeFailed
+    }
+
     private struct ElementMetadata {
         let identifier: String?
         let accessibilityDescription: String?
@@ -70,12 +75,19 @@ actor GoldenGateAXSnapshotProvider {
     private var rememberedSections = GoldenGateAXSnapshotProvider.loadRememberedSections()
     private var explicitAssignments = GoldenGateAXSnapshotProvider.loadExplicitAssignments()
     private var retainedDescriptors = GoldenGateAXSnapshotProvider.loadRetainedInventory()
-    private var appliedConcealmentConfiguration: MenuBarConcealmentConfiguration?
+    /// Proposed assignments are visible only to the bounded post-write
+    /// verifier. They are never written to UserDefaults or retained inventory
+    /// until the native position transaction is durably verified.
+    private var verificationAssignments: [MenuBarItemID: GoldenGateLogicalAssignment]?
+    private var verificationAffectedItemIDs: Set<MenuBarItemID> = []
+    private var verificationAxisDirection: GoldenGatePositionTablePlanner.AxisDirection?
     private let logicalLayoutPlanner = GoldenGateLogicalLayoutPlanner()
+    private let positionTableStore = GoldenGatePositionTableStore()
+    private var didAttemptInterruptedTransactionRecovery = false
 
     var capabilities: MenuBarCapabilities {
         get async {
-            let canSnapshot = (try? snapshot()) != nil
+            let canSnapshot = await (try? snapshot()) != nil
             return MenuBarCapabilities(
                 canSnapshot: canSnapshot,
                 canMove: canSnapshot,
@@ -83,14 +95,31 @@ actor GoldenGateAXSnapshotProvider {
                 canActivate: canSnapshot,
                 canRestore: canSnapshot,
                 canCapture: false,
-                moveDestinationSupport: .logicalSectionsPreserveNativeOrder
+                moveDestinationSupport: .emptySectionAllowed
             )
         }
     }
 
-    func snapshot() throws -> MenuBarSnapshot {
+    func snapshot() async throws -> MenuBarSnapshot {
+        try await snapshot(forceRefresh: false)
+    }
+
+    private func snapshot(forceRefresh: Bool) async throws -> MenuBarSnapshot {
+        if !didAttemptInterruptedTransactionRecovery {
+            do {
+                try await reconcileInterruptedPositionTransaction()
+            } catch {
+                // Access can be granted later by the first explicit move. Do
+                // not permanently suppress recovery because an early passive
+                // snapshot could not open the scoped position table.
+                logger.debug(
+                    "Golden Gate deferred interrupted-transaction recovery: code=\(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+                )
+            }
+        }
         let now = DispatchTime.now().uptimeNanoseconds
-        if let cachedAt,
+        if !forceRefresh,
+           let cachedAt,
            let cachedSnapshot,
            now >= cachedAt,
            now - cachedAt < GoldenGateTiming.snapshotCacheLifetimeNanoseconds
@@ -101,7 +130,8 @@ actor GoldenGateAXSnapshotProvider {
         guard AXHelpers.isProcessTrusted() else {
             throw MenuBarBackendError.unavailableCapability("Accessibility menu bar inventory")
         }
-        let observations = collectEntries().map(\.observation)
+        let entries = collectEntries()
+        let observations = entries.map(\.observation)
         guard !observations.isEmpty else {
             throw MenuBarBackendError.unavailableCapability("Accessibility menu bar inventory")
         }
@@ -143,24 +173,36 @@ actor GoldenGateAXSnapshotProvider {
             ),
             appSigningIdentifier: signingIdentifier,
             rememberedSections: hiddenControlUsesLiveGeometry ? [:] : rememberedSections,
-            assignedSections: Dictionary(uniqueKeysWithValues: explicitAssignments.map {
-                ($0.key, $0.value.section)
-            }),
+            assignedSections: [:],
             generation: generation
         )
-        let result = GoldenGateRetainedInventoryPolicy.merging(
+        let effectiveAssignments = explicitAssignments.merging(
+            verificationAssignments ?? [:],
+            uniquingKeysWith: { _, proposed in proposed }
+        )
+        var result = GoldenGateRetainedInventoryPolicy.merging(
             live: built,
             retainedDescriptors: retainedDescriptors,
-            assignments: explicitAssignments,
+            assignments: effectiveAssignments,
             runningBundleIdentifiers: Set(
                 NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
             ),
             barlineBundleIdentifier: signingIdentifier
         )
+        let positions = try? await positionTableStore.readPositions(
+            requestAccessIfNeeded: false
+        )
+        result = try applyingPositionTableCapabilities(
+            to: result,
+            observations: observations,
+            positions: positions
+        )
         if hiddenControlUsesLiveGeometry, explicitAssignments.isEmpty {
             rememberSections(from: result)
         }
-        if let prepared = try? prepareRetainedInventory(from: result, requiredItemIDs: []) {
+        if verificationAssignments == nil,
+           let prepared = try? prepareRetainedInventory(from: result, requiredItemIDs: [])
+        {
             commitRetainedInventory(prepared)
         }
         cachedAt = now
@@ -172,70 +214,325 @@ actor GoldenGateAXSnapshotProvider {
     }
 
     func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
-        let before = try snapshot()
-        guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
-            throw MenuBarBackendError.staleItem(operation.itemID)
-        }
-        guard source.isMovable else {
-            throw MenuBarBackendError.operationFailed("menu bar item cannot be assigned independently")
-        }
-        if operation.section != .visible, !source.canBeHidden {
-            throw MenuBarBackendError.operationFailed("menu bar item cannot be hidden")
-        }
+        let preparation: (
+            before: MenuBarSnapshot,
+            source: MenuBarItemDescriptor,
+            persistence: PreparedPersistence,
+            mutation: GoldenGatePositionMutation,
+            stableAxisDirection: GoldenGatePositionTablePlanner.AxisDirection,
+            changedItemIDs: [MenuBarItemID]
+        )
+        do {
+            let initial = try await snapshot()
+            _ = try await positionTableStore.readPositions(
+                requestAccessIfNeeded: true
+            )
+            // A passive startup snapshot cannot prompt. Once this explicit
+            // user action grants access, drain any durable transaction before
+            // planning from a fresh authoritative table.
+            try await reconcileInterruptedPositionTransaction()
+            let positions = try await positionTableStore.readPositions(
+                requestAccessIfNeeded: false
+            )
+            let entries = collectEntries()
+            let before = try applyingPositionTableCapabilities(
+                to: initial,
+                observations: entries.map(\.observation),
+                positions: positions
+            )
+            guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
+                throw MenuBarBackendError.staleItem(operation.itemID)
+            }
+            guard source.isMovable else {
+                throw MenuBarBackendError.operationFailed(
+                    "menu bar item cannot be assigned independently"
+                )
+            }
+            if operation.section != .visible, !source.canBeHidden {
+                throw MenuBarBackendError.operationFailed("menu bar item cannot be hidden")
+            }
 
-        let candidate = try logicalLayoutPlanner.applying(operation, to: before)
-        let persistence = try preparePersistence(
-            from: candidate,
-            requiredItemIDs: [source.id]
+            let candidate = try physicalCandidate(applying: operation, to: before)
+            let persistence = try preparePersistence(
+                from: candidate,
+                requiredItemIDs: [source.id]
+            )
+            let keysByItemID = positionKeys(
+                observations: entries.map(\.observation),
+                positions: positions,
+                snapshot: before
+            )
+            let mutation = try GoldenGatePositionTablePlanner.planMove(
+                operation,
+                in: before,
+                positions: positions,
+                keysByItemID: keysByItemID
+            )
+            let stableAxisDirection = try GoldenGatePositionTablePlanner.resolvedAxisDirection(
+                snapshot: before,
+                positions: positions,
+                keysByItemID: keysByItemID
+            )
+            let changedPositionKeys = Set(mutation.changes.map(\.key))
+            var changedItemIDs = before.items.compactMap { item -> MenuBarItemID? in
+                guard !item.isBarlineControlItem,
+                      item.isMovable,
+                      let positionKey = keysByItemID[item.id],
+                      changedPositionKeys.contains(positionKey)
+                else { return nil }
+                return item.id
+            }
+            if !changedItemIDs.contains(source.id) {
+                changedItemIDs.append(source.id)
+            }
+            guard changedItemIDs.count <= 256 else {
+                throw MenuBarBackendError.operationFailed("move plan exceeds the safe operation limit")
+            }
+            preparation = (
+                before,
+                source,
+                persistence,
+                mutation,
+                stableAxisDirection,
+                changedItemIDs
+            )
+        } catch {
+            didAttemptInterruptedTransactionRecovery = false
+            throw translatedPreflightError(error)
+        }
+        let before = preparation.before
+        let source = preparation.source
+        let persistence = preparation.persistence
+        let mutation = preparation.mutation
+        logger.notice(
+            "Golden Gate move planned: section=\(String(describing: operation.section), privacy: .public), index=\(operation.index, privacy: .public), changes=\(mutation.changes.count, privacy: .public), sourceX=\(source.bounds.x, privacy: .public)"
         )
-        let previousConfiguration = appliedConcealmentConfiguration
-            ?? concealmentConfiguration(for: before)
-        try await applyNativeConfiguration(
-            concealmentConfiguration(for: candidate),
-            previousConfiguration: previousConfiguration,
-            expectations: [source.id: operation.section == .visible]
-        )
-        generation = candidate.generation
-        commitPersistence(persistence)
-        cachedAt = DispatchTime.now().uptimeNanoseconds
-        cachedSnapshot = candidate
+        verificationAssignments = Dictionary(uniqueKeysWithValues: persistence.assignments.map {
+            ($0.itemID, $0)
+        })
+        verificationAffectedItemIDs = Set(preparation.changedItemIDs)
+        verificationAxisDirection = preparation.stableAxisDirection
+        var didApply = false
+        do {
+            try await positionTableStore.apply(mutation)
+            didApply = true
+            cachedAt = nil
+            cachedSnapshot = nil
+            let verified = try await verifyPositionMutation(
+                operation,
+                previousSnapshot: before,
+                timeout: .seconds(3)
+            )
+            logger.notice("Golden Gate position table reached its verified AX postcondition")
+            let verifiedPersistence = try preparePersistence(
+                from: verified,
+                requiredItemIDs: [source.id]
+            )
+            generation = verified.generation
+            try await positionTableStore.markVerified(
+                mutation,
+                companionState: companionState(for: verifiedPersistence)
+            )
+            verificationAssignments = nil
+            verificationAffectedItemIDs = []
+            verificationAxisDirection = nil
+            let didPersist = commitPersistence(verifiedPersistence)
+            do {
+                guard didPersist else {
+                    throw MenuBarBackendError.operationFailed(
+                        "verified menu bar state could not be synchronized"
+                    )
+                }
+                try await positionTableStore.finishTransaction()
+            } catch {
+                // A verified journal is intentionally recoverable as committed
+                // native state. Never roll back after local state is committed.
+                didAttemptInterruptedTransactionRecovery = false
+                logger.error(
+                    "Golden Gate verified journal cleanup deferred: code=\(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+                )
+            }
+            cachedAt = DispatchTime.now().uptimeNanoseconds
+            cachedSnapshot = verified
+        } catch {
+            verificationAssignments = nil
+            verificationAffectedItemIDs = []
+            verificationAxisDirection = nil
+            cachedAt = nil
+            cachedSnapshot = nil
+            didAttemptInterruptedTransactionRecovery = false
+            guard didApply else {
+                throw translatedApplyError(error)
+            }
+            do {
+                _ = try await positionTableStore.rollback(mutation)
+                // Whether the original proposal was restored or a concurrent
+                // native value won, the provider has removed its journal and
+                // the coordinator must observe native state instead of issuing
+                // a stale second restore.
+                throw MenuBarBackendError.mutationSuperseded
+            } catch let backendError as MenuBarBackendError {
+                throw backendError
+            } catch {
+                throw MenuBarBackendError.mutationRecoveryFailed
+            }
+        }
         return MenuBarMutationResult(
-            generation: candidate.generation,
-            changedItemIDs: [source.id]
+            generation: generation,
+            changedItemIDs: preparation.changedItemIDs
         )
     }
 
     func restore(_ target: MenuBarSnapshot) async throws -> MenuBarMutationResult {
-        let current = try snapshot()
-        let candidate = try logicalLayoutPlanner.restoring(target, to: current)
-        let previousConfiguration = appliedConcealmentConfiguration
-            ?? concealmentConfiguration(for: current)
-        let changedItems = candidate.items.filter { candidateItem in
-            current.items.first(where: { $0.id == candidateItem.id })?.section != candidateItem.section
-        }
-        let persistence = try preparePersistence(
-            from: candidate,
-            requiredItemIDs: Set(changedItems.map(\.id))
+        let preparation: (
+            mutation: GoldenGatePositionMutation,
+            changedItemIDs: [MenuBarItemID],
+            stableAxisDirection: GoldenGatePositionTablePlanner.AxisDirection,
+            requiredItemIDs: Set<MenuBarItemID>,
+            verificationPersistence: PreparedPersistence
         )
-        try await applyNativeConfiguration(
-            concealmentConfiguration(for: candidate),
-            previousConfiguration: previousConfiguration,
-            expectations: Dictionary(uniqueKeysWithValues: changedItems.map {
-                ($0.id, $0.section == .visible)
+        do {
+            let initial = try await snapshot()
+            _ = try await positionTableStore.readPositions(requestAccessIfNeeded: true)
+            try await reconcileInterruptedPositionTransaction()
+            let positions = try await positionTableStore.readPositions(requestAccessIfNeeded: false)
+            let entries = collectEntries()
+            let current = try applyingPositionTableCapabilities(
+                to: initial,
+                observations: entries.map(\.observation),
+                positions: positions
+            )
+            let currentIDs = Set(current.items.map(\.id))
+            let keysByItemID = positionKeys(
+                observations: entries.map(\.observation),
+                positions: positions,
+                snapshot: current
+            )
+            let mutation = try GoldenGatePositionTablePlanner.planRestore(
+                target: target,
+                current: current,
+                positions: positions,
+                keysByItemID: keysByItemID
+            )
+            if mutation.changes.isEmpty {
+                return MenuBarMutationResult(
+                    generation: current.generation,
+                    changedItemIDs: []
+                )
+            }
+            let changedPositionKeys = Set(mutation.changes.map(\.key))
+            let changedItemIDs = current.items.compactMap { item -> MenuBarItemID? in
+                guard !item.isBarlineControlItem,
+                      item.isMovable,
+                      let positionKey = keysByItemID[item.id],
+                      changedPositionKeys.contains(positionKey)
+                else { return nil }
+                return item.id
+            }
+            guard changedItemIDs.count <= 256 else {
+                throw MenuBarBackendError.operationFailed(
+                    "restore plan exceeds the safe operation limit"
+                )
+            }
+            let stableAxisDirection = try GoldenGatePositionTablePlanner.resolvedAxisDirection(
+                snapshot: current,
+                positions: positions,
+                keysByItemID: keysByItemID
+            )
+            let requiredItemIDs = Set(target.items.compactMap { item -> MenuBarItemID? in
+                guard !item.isBarlineControlItem, currentIDs.contains(item.id) else { return nil }
+                return item.id
             })
-        )
-        generation = candidate.generation
-        commitPersistence(persistence)
-        cachedAt = DispatchTime.now().uptimeNanoseconds
-        cachedSnapshot = candidate
+            let verificationPersistence = try preparePersistence(
+                from: target,
+                requiredItemIDs: requiredItemIDs
+            )
+            preparation = (
+                mutation,
+                changedItemIDs,
+                stableAxisDirection,
+                requiredItemIDs,
+                verificationPersistence
+            )
+        } catch {
+            didAttemptInterruptedTransactionRecovery = false
+            throw translatedPreflightError(error)
+        }
+        let mutation = preparation.mutation
+        let changedItemIDs = preparation.changedItemIDs
+        let requiredItemIDs = preparation.requiredItemIDs
+        let verificationPersistence = preparation.verificationPersistence
+        verificationAssignments = Dictionary(uniqueKeysWithValues: verificationPersistence.assignments.map {
+            ($0.itemID, $0)
+        })
+        verificationAffectedItemIDs = Set(changedItemIDs)
+        verificationAxisDirection = preparation.stableAxisDirection
+        var didApply = false
+        do {
+            try await positionTableStore.apply(mutation)
+            didApply = true
+            cachedAt = nil
+            cachedSnapshot = nil
+            let verified = try await verifyRestore(
+                target,
+                requiredItemIDs: requiredItemIDs,
+                timeout: .seconds(5)
+            )
+            let persistence = try preparePersistence(
+                from: verified,
+                requiredItemIDs: requiredItemIDs
+            )
+            generation = verified.generation
+            try await positionTableStore.markVerified(
+                mutation,
+                companionState: companionState(for: persistence)
+            )
+            verificationAssignments = nil
+            verificationAffectedItemIDs = []
+            verificationAxisDirection = nil
+            let didPersist = commitPersistence(persistence)
+            do {
+                guard didPersist else {
+                    throw MenuBarBackendError.operationFailed(
+                        "verified menu bar restore state could not be synchronized"
+                    )
+                }
+                try await positionTableStore.finishTransaction()
+            } catch {
+                didAttemptInterruptedTransactionRecovery = false
+                logger.error(
+                    "Golden Gate verified restore journal cleanup deferred: code=\(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+                )
+            }
+            cachedAt = DispatchTime.now().uptimeNanoseconds
+            cachedSnapshot = verified
+        } catch {
+            verificationAssignments = nil
+            verificationAffectedItemIDs = []
+            verificationAxisDirection = nil
+            cachedAt = nil
+            cachedSnapshot = nil
+            didAttemptInterruptedTransactionRecovery = false
+            guard didApply else {
+                throw translatedApplyError(error)
+            }
+            do {
+                _ = try await positionTableStore.rollback(mutation)
+                throw MenuBarBackendError.mutationSuperseded
+            } catch let backendError as MenuBarBackendError {
+                throw backendError
+            } catch {
+                throw MenuBarBackendError.mutationRecoveryFailed
+            }
+        }
         return MenuBarMutationResult(
-            generation: candidate.generation,
-            changedItemIDs: changedItems.map(\.id)
+            generation: generation,
+            changedItemIDs: changedItemIDs
         )
     }
 
     func health() async -> MenuBarBackendHealth {
-        let available = (try? snapshot()) != nil
+        let available = await (try? snapshot()) != nil
         return MenuBarBackendHealth(
             backendName: "GoldenGateMainProcessAX",
             state: available ? .healthy : .unavailable,
@@ -248,15 +545,8 @@ actor GoldenGateAXSnapshotProvider {
     /// failed mutation can therefore restore the actual native presentation,
     /// not a logical-layout approximation.
     func configureConcealment(
-        _ configuration: MenuBarConcealmentConfiguration
-    ) async throws {
-        let previous = appliedConcealmentConfiguration ?? configuration
-        try await applyNativeConfiguration(
-            configuration,
-            previousConfiguration: previous,
-            expectations: [:]
-        )
-    }
+        _: MenuBarConcealmentConfiguration
+    ) async throws {}
 
     func activate(_ itemID: MenuBarItemID, button: MenuBarMouseButton) throws {
         guard button == .left else {
@@ -393,7 +683,8 @@ actor GoldenGateAXSnapshotProvider {
         )
     }
 
-    private func commitPersistence(_ prepared: PreparedPersistence) {
+    @discardableResult
+    private func commitPersistence(_ prepared: PreparedPersistence) -> Bool {
         explicitAssignments = Dictionary(uniqueKeysWithValues: prepared.assignments.map {
             ($0.itemID, $0)
         })
@@ -402,6 +693,77 @@ actor GoldenGateAXSnapshotProvider {
         })
         UserDefaults.standard.set(prepared.assignmentData, forKey: Self.explicitLayoutKey)
         UserDefaults.standard.set(prepared.descriptorData, forKey: Self.retainedInventoryKey)
+        return UserDefaults.standard.synchronize()
+    }
+
+    private func companionState(
+        for prepared: PreparedPersistence
+    ) -> GoldenGatePositionCompanionState {
+        GoldenGatePositionCompanionState(
+            assignmentData: prepared.assignmentData,
+            descriptorData: prepared.descriptorData
+        )
+    }
+
+    private func reconcileInterruptedPositionTransaction() async throws {
+        let recovery = try await positionTableStore.recoverInterruptedTransaction()
+        if case let .committed(companionState) = recovery {
+            do {
+                try recoverCommittedPersistence(companionState)
+            } catch RecoveryPersistenceError.invalidCompanion {
+                try await positionTableStore.quarantineRecoveryJournal()
+                didAttemptInterruptedTransactionRecovery = true
+                logger.fault("Golden Gate invalid recovery companion was quarantined")
+                throw RecoveryPersistenceError.invalidCompanion
+            } catch {
+                // Transient persistence failures retain the valid verified
+                // journal for another bounded recovery pass.
+                throw error
+            }
+            try await positionTableStore.finishTransaction()
+        }
+        didAttemptInterruptedTransactionRecovery = true
+        cachedAt = nil
+        cachedSnapshot = nil
+    }
+
+    private func recoverCommittedPersistence(
+        _ companionState: GoldenGatePositionCompanionState
+    ) throws {
+        guard companionState.assignmentData.count <= Self.maximumRememberedBytes,
+              companionState.descriptorData.count <= Self.maximumRememberedBytes,
+              let layout = try? JSONDecoder().decode(
+                  ExplicitLayout.self,
+                  from: companionState.assignmentData
+              ),
+              layout.version == 1,
+              layout.assignments.count <= Self.maximumRememberedAssignments,
+              let inventory = try? JSONDecoder().decode(
+                  RetainedInventory.self,
+                  from: companionState.descriptorData
+              ),
+              inventory.version == 1,
+              inventory.descriptors.count <= Self.maximumRememberedAssignments,
+              layout.assignments.allSatisfy({
+                  $0.itemID.isPlausiblyStable && $0.rank >= 0
+              }),
+              inventory.descriptors.allSatisfy({ descriptor in
+                  descriptor.id.isPlausiblyStable
+              }),
+              Set(layout.assignments.map(\.itemID)).count == layout.assignments.count,
+              Set(inventory.descriptors.map(\.id)).count == inventory.descriptors.count
+        else {
+            throw RecoveryPersistenceError.invalidCompanion
+        }
+        let prepared = PreparedPersistence(
+            assignments: layout.assignments,
+            assignmentData: companionState.assignmentData,
+            descriptors: inventory.descriptors.map(Self.sanitizedDescriptor),
+            descriptorData: companionState.descriptorData
+        )
+        guard commitPersistence(prepared) else {
+            throw RecoveryPersistenceError.synchronizeFailed
+        }
     }
 
     private func prepareRetainedInventory(
@@ -501,94 +863,215 @@ actor GoldenGateAXSnapshotProvider {
         )
     }
 
-    private func concealmentConfiguration(
-        for snapshot: MenuBarSnapshot
-    ) -> MenuBarConcealmentConfiguration {
-        MenuBarConcealmentConfiguration(
-            visibleItemIDs: snapshot.items.filter {
-                !$0.isBarlineControlItem && $0.section == .visible
-            }.map(\.id),
-            concealedItemIDs: snapshot.items.filter {
-                !$0.isBarlineControlItem && $0.section != .visible
-            }.map(\.id)
+    private func physicalCandidate(
+        applying operation: MenuBarMoveOperation,
+        to snapshot: MenuBarSnapshot
+    ) throws -> MenuBarSnapshot {
+        try GoldenGatePositionTablePlanner.candidateSnapshot(
+            applying: operation,
+            to: snapshot
         )
     }
 
-    /// Native activation is atomic: a rejected candidate leaves the prior
-    /// assertion active. Only a successful candidate followed by a failed
-    /// reveal postcondition requires rollback, and that rollback must itself
-    /// be acknowledged before the logical transaction can fail safely.
-    private func applyNativeConfiguration(
-        _ candidateConfiguration: MenuBarConcealmentConfiguration,
-        previousConfiguration: MenuBarConcealmentConfiguration,
-        expectations: [MenuBarItemID: Bool]
-    ) async throws {
-        logger.info(
-            "Golden Gate layout transaction started: assignments=\(expectations.count, privacy: .public)"
-        )
-        do {
-            try await BarlineMenuService.Connection.shared.configureConcealment(
-                candidateConfiguration
-            )
-        } catch {
-            logger.error(
-                "Golden Gate native configuration rejected: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
-            )
-            throw error
+    private func positionKeys(
+        observations: [GoldenGateMenuBarObservation],
+        positions: [String: Int],
+        snapshot: MenuBarSnapshot? = nil
+    ) -> [MenuBarItemID: String] {
+        let identifiers = GoldenGateMenuBarSnapshotBuilder.identifiers(for: observations)
+        let liveCandidates = zip(observations, identifiers).compactMap { observation, itemID in
+            GoldenGatePositionTablePlanner.resolvedKey(
+                for: itemID,
+                localizedApplicationName: observation.localizedApplicationName,
+                existingKeys: positions.keys
+            ).map { (itemID, $0) }
         }
+        let liveIDs = Set(identifiers)
+        let retainedCandidates = snapshot?.items.compactMap { item -> (MenuBarItemID, String)? in
+            guard !liveIDs.contains(item.id), item.id.isPlausiblyStable else { return nil }
+            return GoldenGatePositionTablePlanner.resolvedKey(
+                for: item.id,
+                localizedApplicationName: NSRunningApplication
+                    .runningApplications(withBundleIdentifier: item.id.bundleIdentifier)
+                    .first?
+                    .localizedName,
+                existingKeys: positions.keys
+            ).map { (item.id, $0) }
+        } ?? []
+        let candidates = liveCandidates + retainedCandidates
+        let counts = Dictionary(grouping: candidates, by: { $0.1 }).mapValues(\.count)
+        return Dictionary(uniqueKeysWithValues: candidates.compactMap { itemID, key in
+            counts[key] == 1 ? (itemID, key) : nil
+        })
+    }
 
-        do {
-            try await verifyNativeAssignments(expectations)
-            appliedConcealmentConfiguration = candidateConfiguration
-            logger.info("Golden Gate layout transaction reached its native postcondition")
-        } catch {
-            let postconditionError = error
+    private func applyingPositionTableCapabilities(
+        to snapshot: MenuBarSnapshot,
+        observations: [GoldenGateMenuBarObservation],
+        positions: [String: Int]?
+    ) throws -> MenuBarSnapshot {
+        let resolvedKeys: [MenuBarItemID: String]? = positions.map {
+            positionKeys(
+                observations: observations,
+                positions: $0,
+                snapshot: snapshot
+            )
+        }
+        let positioned: MenuBarSnapshot
+        if let positions, let resolvedKeys {
             do {
-                try await BarlineMenuService.Connection.shared.configureConcealment(
-                    previousConfiguration
+                positioned = try GoldenGatePositionTablePlanner.applyingPositions(
+                    to: snapshot,
+                    positions: positions,
+                    keysByItemID: resolvedKeys,
+                    excludingFromAxis: verificationAffectedItemIDs,
+                    usingKnownAxis: verificationAxisDirection
                 )
-                appliedConcealmentConfiguration = previousConfiguration
-                logger.info("Golden Gate layout transaction rollback was acknowledged")
             } catch {
-                logger.fault(
-                    "Golden Gate layout transaction rollback failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
-                )
-                throw MenuBarBackendError.mutationRecoveryFailed
+                guard verificationAssignments == nil else { throw error }
+                positioned = snapshot
             }
-            throw postconditionError
+        } else {
+            guard verificationAssignments == nil else {
+                throw GoldenGatePositionTableError.unresolvedItem
+            }
+            positioned = snapshot
+        }
+        let items = positioned.items.map { item in
+            let isThirdParty = item.sourceOwnership == .application &&
+                !item.id.bundleIdentifier.hasPrefix("com.apple.")
+            // A passive snapshot never opens a permission panel. Before scoped
+            // access exists, eligible third-party items remain actionable only
+            // so an explicit user drag can request that access. `move` and
+            // `restore` immediately re-read the authorized table and require an
+            // exact position key before planning or writing anything.
+            let hasResolvedPositionOrCanRequestAccess = resolvedKeys.map {
+                $0[item.id] != nil
+            } ?? isThirdParty
+            return item.replacing(
+                isMovable: isThirdParty &&
+                    !item.isBarlineControlItem &&
+                    item.canBeHidden &&
+                    hasResolvedPositionOrCanRequestAccess
+            )
+        }
+        return MenuBarSnapshot(
+            generation: positioned.generation,
+            capturedAt: positioned.capturedAt,
+            items: items,
+            displayIDs: positioned.displayIDs,
+            displayIdentities: positioned.displayIdentities,
+            activeSpaceIsValid: positioned.activeSpaceIsValid,
+            menuTrackingIsActive: positioned.menuTrackingIsActive
+        )
+    }
+
+    /// Planning is observational: no native proposal has been staged. Keep
+    /// access denial actionable, but tell the coordinator that every other
+    /// preflight rejection is safe to surface without a stale restore.
+    private func translatedPreflightError(_ error: Error) -> Error {
+        if let storeError = error as? GoldenGatePositionTableStore.StoreError {
+            if case .accessNotGranted = storeError {
+                return MenuBarBackendError.positionTableAccessNotGranted
+            }
+        }
+        return MenuBarBackendError.mutationNotStarted
+    }
+
+    /// Once `apply` has been entered, a persistence failure can mean a staged
+    /// proposal or durable journal exists. Preserve recovery-required errors;
+    /// the store maps verified rollback and external winners separately.
+    private func translatedApplyError(_ error: Error) -> Error {
+        guard let storeError = error as? GoldenGatePositionTableStore.StoreError else {
+            return error
+        }
+        return switch storeError {
+        case .writeFailed:
+            MenuBarBackendError.mutationRecoveryFailed
+        case .accessNotGranted:
+            MenuBarBackendError.positionTableAccessNotGranted
+        case .unexpectedFile:
+            MenuBarBackendError.mutationNotStarted
+        case .invalidDocument:
+            MenuBarBackendError.mutationNotStarted
+        case .concurrentModification:
+            MenuBarBackendError.mutationSuperseded
+        case .externalStateWon:
+            MenuBarBackendError.mutationSuperseded
+        case .transactionPending:
+            MenuBarBackendError.mutationRecoveryRequired
+        case .invalidJournal:
+            MenuBarBackendError.mutationNotStarted
         }
     }
 
-    /// A successful native assertion callback is authoritative for concealment.
-    /// Accessibility presence cannot prove that an item is visible because
-    /// macOS may retain a concealed node. For reveal operations, however, a
-    /// fresh AX observation is a strong postcondition and prevents committing a
-    /// logical state before the item can actually be used.
-    private func verifyNativeAssignments(
-        _ expectations: [MenuBarItemID: Bool]
-    ) async throws {
-        guard !expectations.isEmpty else { return }
-        let visibleExpectations = expectations.filter(\.value)
-        guard !visibleExpectations.isEmpty else { return }
-        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+    private func verifyPositionMutation(
+        _ operation: MenuBarMoveOperation,
+        previousSnapshot: MenuBarSnapshot,
+        timeout: Duration
+    ) async throws -> MenuBarSnapshot {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        var poll = 0
         repeat {
             try Task.checkCancellation()
-            let observedIDs = GoldenGateMenuBarSnapshotBuilder.identifiers(
-                for: collectEntries().map(\.observation)
-            )
-            let didConverge = visibleExpectations.keys.allSatisfy {
-                GoldenGateMenuBarIdentityResolver.resolve(
-                    $0,
-                    among: observedIDs
-                ) != nil
+            do {
+                let current = try await snapshot(forceRefresh: true)
+                poll += 1
+                if let source = current.items.first(where: { $0.id == operation.itemID }) {
+                    logger.debug(
+                        "Golden Gate verification poll: poll=\(poll, privacy: .public), section=\(String(describing: source.section), privacy: .public), x=\(source.bounds.x, privacy: .public), items=\(current.items.count, privacy: .public)"
+                    )
+                } else {
+                    logger.debug(
+                        "Golden Gate verification poll: poll=\(poll, privacy: .public), source=missing, items=\(current.items.count, privacy: .public)"
+                    )
+                }
+                if MenuBarMovePlanner().resultMatches(
+                    operation,
+                    in: current,
+                    from: previousSnapshot,
+                    destinationSupport: .emptySectionAllowed
+                ) {
+                    logger.info("Golden Gate position transaction reached its AX postcondition")
+                    return current
+                }
+            } catch {
+                // The owning status-item process can rebuild its AX element
+                // while the system is applying a move. Keep polling only
+                // within the bounded deadline.
+                poll += 1
+                logger.debug(
+                    "Golden Gate verification poll failed: poll=\(poll, privacy: .public), code=\(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+                )
             }
-            if didConverge {
-                return
-            }
-            try await Task.sleep(for: .milliseconds(100))
+            try await Task.sleep(for: .milliseconds(150))
         } while ContinuousClock.now < deadline
         throw MenuBarBackendError.operationFailed(
-            "native concealment did not reach requested visibility"
+            "menu bar position did not reach the requested section"
+        )
+    }
+
+    private func verifyRestore(
+        _ target: MenuBarSnapshot,
+        requiredItemIDs: Set<MenuBarItemID>,
+        timeout: Duration
+    ) async throws -> MenuBarSnapshot {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        repeat {
+            try Task.checkCancellation()
+            if let current = try? await snapshot(forceRefresh: true),
+               GoldenGatePositionTablePlanner.restoreMatches(
+                   target: target,
+                   current: current,
+                   requiredItemIDs: requiredItemIDs
+               )
+            {
+                return current
+            }
+            try await Task.sleep(for: .milliseconds(150))
+        } while ContinuousClock.now < deadline
+        throw MenuBarBackendError.operationFailed(
+            "saved menu bar layout did not reach its requested order"
         )
     }
 

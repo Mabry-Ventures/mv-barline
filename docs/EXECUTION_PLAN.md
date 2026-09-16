@@ -1,19 +1,23 @@
 # Barline execution plan
 
-## Barline 1.0.16 macOS 27 layout parity candidate — September 15, 2026
+## Barline 1.0.17 macOS 27 position-table candidate — September 15, 2026
 
-The macOS 27 layout inventory no longer advertises a read-only compatibility
-boundary. Supported single-item applications and explicitly mapped Apple system
-items can be assigned between visible and hidden sections. Each operation builds
-and validates a complete logical candidate, asks the helper's native concealment
-controller to apply it, and persists the new state only after Accessibility
-inventory proves that the requested native visibility has converged. Failed
-operations restore the previously verified configuration.
-Ambiguous multi-item applications and unmapped Apple items remain disabled and
-fail visible. Pure empty-section, reverse, same-section, persistence-order, and
-unsupported-item cases pass alongside both operating-system fast gates. Exact
-installed persistence/reversal evidence and the full release gates remain
-required before 1.0.16 is eligible for publication.
+The macOS 27 backend now treats the system menu-bar position table as the
+authoritative ordering substrate. It resolves exact item identities, plans only
+bounded key changes, synchronizes through CFPreferences, verifies fresh
+Accessibility convergence, and conditionally rolls back its own proposal when
+verification fails. A fully synchronized versioned journal protects staged,
+applied, and verified phases across interruption without overwriting a later
+native or user change.
+
+macOS 26 remains on its established XPC backend. The shared coordinator now
+distinguishes preflight rejection, external supersession, and recovery-owned
+transactions so it never manufactures a stale second restore. Pure planning,
+multi-key re-spacing, protected-anchor, recovery, profile-compensation, and OS
+routing gates pass in the 531-test source suite on macOS 26.6.2. Exact installed
+journeys on macOS 26 and CPLCODEX01 on macOS 27, including first authorization,
+relaunch persistence, interruption recovery, and native convergence timing,
+remain required before 1.0.17 is eligible for publication.
 
 ## Barline 1.0.14 macOS 27 compatibility release published — September 14, 2026
 

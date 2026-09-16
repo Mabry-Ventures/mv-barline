@@ -48,6 +48,10 @@ public enum PrivacySafeDiagnostics {
         case let .invalidSnapshot(reason): return snapshotCode(reason)
         case .interrupted: return "helper_interrupted"
         case .timedOut: return "helper_timed_out"
+        case .mutationSuperseded: return "mutation_superseded"
+        case .mutationRecoveryRequired: return "mutation_recovery_required"
+        case .positionTableAccessNotGranted: return "position_table_access_not_granted"
+        case .mutationNotStarted: return "mutation_not_started"
         case .mutationRecoveryFailed: return "mutation_recovery_failed"
         case let .operationFailed(reason): return operationCode(reason)
         }
