@@ -77,6 +77,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         private static let runtimeSmokeSetupReadyKey = "RuntimeSmokeSetupReady"
         private static let runtimeSmokeSetupReadyProcessIdentifierKey = "RuntimeSmokeSetupReadyProcessIdentifier"
         private static let runtimeSmokeSetupFailureKey = "RuntimeSmokeSetupFailure"
+        private static let runtimeSmokeToggleReceivedKey = "RuntimeSmokeToggleReceived"
+        private static let runtimeSmokeToggleProcessIdentifierKey = "RuntimeSmokeToggleProcessIdentifier"
+        private static let runtimeSmokePresentationStateKey = "RuntimeSmokePresentationState"
     #endif
 
     // MARK: NSApplicationDelegate Methods
@@ -128,6 +131,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     forKey: Self.runtimeSmokeSetupReadyProcessIdentifierKey
                 )
                 UserDefaults.standard.removeObject(forKey: Self.runtimeSmokeSetupFailureKey)
+                UserDefaults.standard.removeObject(forKey: Self.runtimeSmokeToggleReceivedKey)
+                UserDefaults.standard.removeObject(forKey: Self.runtimeSmokeToggleProcessIdentifierKey)
+                UserDefaults.standard.removeObject(forKey: Self.runtimeSmokePresentationStateKey)
                 UserDefaults.standard.synchronize()
                 DistributedNotificationCenter.default().addObserver(
                     self,
@@ -535,7 +541,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             // until those controls are created, but the local smoke notification
             // can. Do not wait for the rest of best-effort setup, because a real
             // user is also allowed to click while inventory recovers.
-            Task { [appState] in
+            let processIdentifier = ProcessInfo.processInfo.processIdentifier
+            UserDefaults.standard.set(true, forKey: Self.runtimeSmokeToggleReceivedKey)
+            UserDefaults.standard.set(processIdentifier, forKey: Self.runtimeSmokeToggleProcessIdentifierKey)
+            UserDefaults.standard.set("notification-received", forKey: Self.runtimeSmokePresentationStateKey)
+            UserDefaults.standard.synchronize()
+
+            Task { @MainActor [appState] in
                 await appState.waitForMenuBarAgentSetup()
 
                 // Exercise the production menu-bar-agent state: the status item
@@ -543,7 +555,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 // application accessory-only while the shelf is presented.
                 NSApp.setActivationPolicy(.accessory)
                 NSApp.deactivate()
-                appState.menuBarManager.section(withName: .visible)?.toggle()
+                guard let section = appState.menuBarManager.section(withName: .visible) else {
+                    UserDefaults.standard.set("visible-section-unavailable", forKey: Self.runtimeSmokePresentationStateKey)
+                    UserDefaults.standard.synchronize()
+                    return
+                }
+                section.toggle()
+
+                // Record the post-toggle presentation state for the shell
+                // probe. This DEBUG-only receipt distinguishes a rejected show
+                // request from a WindowServer commit that the external probe
+                // could not observe on a beta OS.
+                try? await Task.sleep(for: .milliseconds(600))
+                let panel = appState.menuBarManager.barlineShelfPanel
+                let state = [
+                    "sectionHidden=\(section.isHidden)",
+                    "navigationPresented=\(appState.navigationState.isBarlineShelfPresented)",
+                    "panelVisible=\(panel.isVisible)",
+                    "panelOnActiveSpace=\(panel.isOnActiveSpace)",
+                    "panelFrame=\(Int(panel.frame.origin.x)),\(Int(panel.frame.origin.y)),\(Int(panel.frame.width)),\(Int(panel.frame.height))",
+                ].joined(separator: ";")
+                UserDefaults.standard.set(state, forKey: Self.runtimeSmokePresentationStateKey)
+                UserDefaults.standard.synchronize()
             }
         }
     #endif

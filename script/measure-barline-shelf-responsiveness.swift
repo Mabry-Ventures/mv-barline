@@ -582,6 +582,30 @@ private func milliseconds(_ duration: Duration) -> Double {
     return Double(components.seconds) * 1000 + Double(components.attoseconds) / 1e15
 }
 
+/// Returns DEBUG-only presentation receipts when a runtime shelf probe fails.
+/// They make failures actionable without altering production behavior.
+private func runtimeSmokeDiagnostics() -> String? {
+    guard Configuration.probe == "runtime-smoke" else { return nil }
+    let applicationID = Configuration.appBundleIdentifier as CFString
+    CFPreferencesAppSynchronize(applicationID)
+    let received = (CFPreferencesCopyAppValue(
+        "RuntimeSmokeToggleReceived" as CFString,
+        applicationID
+    ) as? NSNumber)?.boolValue
+    let processIdentifier = (CFPreferencesCopyAppValue(
+        "RuntimeSmokeToggleProcessIdentifier" as CFString,
+        applicationID
+    ) as? NSNumber)?.int32Value
+    let state = CFPreferencesCopyAppValue(
+        "RuntimeSmokePresentationState" as CFString,
+        applicationID
+    ) as? String
+    let receivedDescription = received?.description ?? "missing"
+    let processIdentifierDescription = processIdentifier.map { String($0) } ?? "missing"
+    let stateDescription = state ?? "missing"
+    return "toggleReceived=\(receivedDescription) togglePID=\(processIdentifierDescription) state=\(stateDescription)"
+}
+
 private func percentile(_ values: [Double], _ percentile: Double) -> Double {
     guard !values.isEmpty else {
         return 0
@@ -842,5 +866,8 @@ do {
     exit(passed ? EXIT_SUCCESS : EXIT_FAILURE)
 } catch {
     fputs("ERROR \(error)\n", stderr)
+    if let diagnostics = runtimeSmokeDiagnostics() {
+        fputs("RUNTIME_SMOKE_DIAGNOSTICS \(diagnostics)\n", stderr)
+    }
     exit(EXIT_FAILURE)
 }
