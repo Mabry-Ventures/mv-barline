@@ -58,6 +58,13 @@ actor GoldenGateAXSnapshotProvider {
     private struct Entry {
         let observation: GoldenGateMenuBarObservation
         let element: AXUIElement
+        /// The application that published this menu-bar item. Its bundle ID and
+        /// signing identity must be derived from the same process.
+        let publisherProcessIdentifier: Int32
+        /// The process reported by the AX element. On macOS 27 this can be a
+        /// MenuBarAgent re-vend, so it is not suitable for publisher signing
+        /// identity resolution.
+        let axElementProcessIdentifier: Int32?
     }
 
     private static let maximumItemHeight: CGFloat = 40
@@ -236,12 +243,12 @@ actor GoldenGateAXSnapshotProvider {
                 requestAccessIfNeeded: false
             )
             let entries = collectEntries()
-            let teamIdentifiersByPID = signingTeamIdentifiers(for: entries)
+            let teamIdentifiersByItemID = signingTeamIdentifiers(for: entries)
             let before = try applyingPositionTableCapabilities(
                 to: initial,
                 observations: entries.map(\.observation),
                 positions: positions,
-                teamIdentifiersByPID: teamIdentifiersByPID
+                teamIdentifiersByItemID: teamIdentifiersByItemID
             )
             guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
                 throw MenuBarBackendError.staleItem(operation.itemID)
@@ -262,7 +269,14 @@ actor GoldenGateAXSnapshotProvider {
                 observations: entries.map(\.observation),
                 positions: positions,
                 snapshot: before,
-                teamIdentifiersByPID: teamIdentifiersByPID
+                teamIdentifiersByItemID: teamIdentifiersByItemID
+            )
+            logIdentityResolutionAudit(
+                source: source,
+                entries: entries,
+                positions: positions,
+                teamIdentifiersByItemID: teamIdentifiersByItemID,
+                resolvedKeys: keysByItemID
             )
             guard keysByItemID[source.id] != nil else {
                 throw MenuBarBackendError.positionTableIdentityUnresolved
@@ -405,19 +419,19 @@ actor GoldenGateAXSnapshotProvider {
             try await reconcileInterruptedPositionTransaction()
             let positions = try await positionTableStore.readPositions(requestAccessIfNeeded: false)
             let entries = collectEntries()
-            let teamIdentifiersByPID = signingTeamIdentifiers(for: entries)
+            let teamIdentifiersByItemID = signingTeamIdentifiers(for: entries)
             let current = try applyingPositionTableCapabilities(
                 to: initial,
                 observations: entries.map(\.observation),
                 positions: positions,
-                teamIdentifiersByPID: teamIdentifiersByPID
+                teamIdentifiersByItemID: teamIdentifiersByItemID
             )
             let currentIDs = Set(current.items.map(\.id))
             let keysByItemID = positionKeys(
                 observations: entries.map(\.observation),
                 positions: positions,
                 snapshot: current,
-                teamIdentifiersByPID: teamIdentifiersByPID
+                teamIdentifiersByItemID: teamIdentifiersByItemID
             )
             let mutation = try GoldenGatePositionTablePlanner.planRestore(
                 target: target,
@@ -888,14 +902,14 @@ actor GoldenGateAXSnapshotProvider {
         observations: [GoldenGateMenuBarObservation],
         positions: [String: Int],
         snapshot: MenuBarSnapshot? = nil,
-        teamIdentifiersByPID: [Int32: String] = [:]
+        teamIdentifiersByItemID: [MenuBarItemID: String] = [:]
     ) -> [MenuBarItemID: String] {
         let identifiers = GoldenGateMenuBarSnapshotBuilder.identifiers(for: observations)
         let liveCandidates = zip(observations, identifiers).compactMap { observation, itemID in
             GoldenGatePositionTablePlanner.resolvedKey(
                 for: itemID,
                 localizedApplicationName: observation.localizedApplicationName,
-                signingTeamIdentifier: teamIdentifiersByPID[observation.ownerProcessIdentifier],
+                signingTeamIdentifier: teamIdentifiersByItemID[itemID],
                 existingKeys: positions.keys
             ).map { (itemID, $0) }
         }
@@ -908,9 +922,7 @@ actor GoldenGateAXSnapshotProvider {
                     .runningApplications(withBundleIdentifier: item.id.bundleIdentifier)
                     .first?
                     .localizedName,
-                signingTeamIdentifier: item.ownerProcessIdentifier.flatMap {
-                    teamIdentifiersByPID[$0]
-                },
+                signingTeamIdentifier: teamIdentifiersByItemID[item.id],
                 existingKeys: positions.keys
             ).map { (item.id, $0) }
         } ?? []
@@ -925,14 +937,14 @@ actor GoldenGateAXSnapshotProvider {
         to snapshot: MenuBarSnapshot,
         observations: [GoldenGateMenuBarObservation],
         positions: [String: Int]?,
-        teamIdentifiersByPID: [Int32: String] = [:]
+        teamIdentifiersByItemID: [MenuBarItemID: String] = [:]
     ) throws -> MenuBarSnapshot {
         let resolvedKeys: [MenuBarItemID: String]? = positions.map {
             positionKeys(
                 observations: observations,
                 positions: $0,
                 snapshot: snapshot,
-                teamIdentifiersByPID: teamIdentifiersByPID
+                teamIdentifiersByItemID: teamIdentifiersByItemID
             )
         }
         let positioned: MenuBarSnapshot
@@ -1194,6 +1206,7 @@ actor GoldenGateAXSnapshotProvider {
                 ) else {
                     continue
                 }
+                let axElementProcessIdentifier = AXHelpers.pid(for: child)
 
                 entries.append(
                     Entry(
@@ -1213,10 +1226,12 @@ actor GoldenGateAXSnapshotProvider {
                                 width: semanticBounds.width,
                                 height: semanticBounds.height
                             ),
-                            ownerProcessIdentifier: AXHelpers.pid(for: child)
+                            ownerProcessIdentifier: axElementProcessIdentifier
                                 ?? runningApplication.processIdentifier
                         ),
-                        element: child.element
+                        element: child.element,
+                        publisherProcessIdentifier: runningApplication.processIdentifier,
+                        axElementProcessIdentifier: axElementProcessIdentifier
                     )
                 )
             }
@@ -1232,11 +1247,47 @@ actor GoldenGateAXSnapshotProvider {
     /// Resolve process signing teams only while an explicit native mutation is
     /// in flight. Passive inventory stays lightweight, and a failed lookup is
     /// intentionally treated as unresolved rather than guessing an owner.
-    private func signingTeamIdentifiers(for entries: [Entry]) -> [Int32: String] {
-        let resolved = Set(entries.map(\.observation.ownerProcessIdentifier)).compactMap { pid in
-            Self.signingTeamIdentifier(for: pid).map { (pid, $0) }
+    private func signingTeamIdentifiers(for entries: [Entry]) -> [MenuBarItemID: String] {
+        let itemIDs = GoldenGateMenuBarSnapshotBuilder.identifiers(for: entries.map(\.observation))
+        let resolved = zip(entries, itemIDs).compactMap { entry, itemID in
+            Self.signingTeamIdentifier(for: entry.publisherProcessIdentifier).map { (itemID, $0) }
         }
         return Dictionary(uniqueKeysWithValues: resolved)
+    }
+
+    /// Produces only booleans about the currently selected source item. It is
+    /// deliberately confined to an explicit mutation and never records a
+    /// menu-item name, preference key, signing identity, process ID, or path.
+    private func logIdentityResolutionAudit(
+        source: MenuBarItemDescriptor,
+        entries: [Entry],
+        positions: [String: Int],
+        teamIdentifiersByItemID: [MenuBarItemID: String],
+        resolvedKeys: [MenuBarItemID: String]
+    ) {
+        let itemIDs = GoldenGateMenuBarSnapshotBuilder.identifiers(for: entries.map(\.observation))
+        guard let index = itemIDs.firstIndex(of: source.id) else {
+            logger.notice("Golden Gate identity audit: source_entry_found=false")
+            return
+        }
+        let entry = entries[index]
+        let publisherTeam = teamIdentifiersByItemID[source.id]
+        let axTeam = entry.axElementProcessIdentifier.flatMap(Self.signingTeamIdentifier(for:))
+        let publisherKeyResolved = GoldenGatePositionTablePlanner.resolvedKey(
+            for: source.id,
+            localizedApplicationName: entry.observation.localizedApplicationName,
+            signingTeamIdentifier: publisherTeam,
+            existingKeys: positions.keys
+        ) != nil
+        let axKeyResolved = GoldenGatePositionTablePlanner.resolvedKey(
+            for: source.id,
+            localizedApplicationName: entry.observation.localizedApplicationName,
+            signingTeamIdentifier: axTeam,
+            existingKeys: positions.keys
+        ) != nil
+        logger.notice(
+            "Golden Gate identity audit: source_entry_found=true, ax_pid_matches_publisher=\(entry.axElementProcessIdentifier == entry.publisherProcessIdentifier, privacy: .public), publisher_team_resolved=\(publisherTeam != nil, privacy: .public), ax_team_resolved=\(axTeam != nil, privacy: .public), publisher_key_resolved=\(publisherKeyResolved, privacy: .public), ax_key_resolved=\(axKeyResolved, privacy: .public), globally_unique_source_key=\(resolvedKeys[source.id] != nil, privacy: .public)"
+        )
     }
 
     private static func signingTeamIdentifier(for processIdentifier: Int32) -> String? {
