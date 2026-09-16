@@ -76,6 +76,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         private static let runtimeSmokeSetupReadyKey = "RuntimeSmokeSetupReady"
         private static let runtimeSmokeSetupReadyProcessIdentifierKey = "RuntimeSmokeSetupReadyProcessIdentifier"
+        private static let runtimeSmokeSetupFailureKey = "RuntimeSmokeSetupFailure"
     #endif
 
     // MARK: NSApplicationDelegate Methods
@@ -126,6 +127,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     ProcessInfo.processInfo.processIdentifier,
                     forKey: Self.runtimeSmokeSetupReadyProcessIdentifierKey
                 )
+                UserDefaults.standard.removeObject(forKey: Self.runtimeSmokeSetupFailureKey)
                 UserDefaults.standard.synchronize()
                 DistributedNotificationCenter.default().addObserver(
                     self,
@@ -134,8 +136,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                     object: nil
                 )
                 appState.performSetup()
-                Task { [appState] in
+                Task { @MainActor [appState] in
                     await appState.waitForMenuBarAgentSetup()
+                    guard await waitForRuntimeSmokeControlReadiness(appState) else {
+                        UserDefaults.standard.set(
+                            "visible-control-not-ready",
+                            forKey: Self.runtimeSmokeSetupFailureKey
+                        )
+                        UserDefaults.standard.synchronize()
+                        Logger.default.error("Runtime smoke control did not become interactable")
+                        return
+                    }
                     UserDefaults.standard.set(true, forKey: Self.runtimeSmokeSetupReadyKey)
                     UserDefaults.standard.set(
                         ProcessInfo.processInfo.processIdentifier,
@@ -498,6 +509,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     #if DEBUG
+        /// A smoke notification can arrive before a user could physically click
+        /// the control. Wait for the same visual affordance that gates a real
+        /// interaction, without extending production startup work.
+        @MainActor
+        private func waitForRuntimeSmokeControlReadiness(_ appState: AppState) async -> Bool {
+            for _ in 0 ..< 60 {
+                if let control = appState.menuBarManager.controlItem(withName: .visible),
+                   control.isAddedToMenuBar,
+                   control.onScreenFrame != nil,
+                   appState.menuBarManager.section(withName: .visible)?.isEnabled == true
+                {
+                    return true
+                }
+                try? await Task.sleep(for: .milliseconds(50))
+            }
+            return false
+        }
+
         /// Gives a separate local probe a deterministic activation path without
         /// adding any behavior to Release builds.
         @objc private func toggleShelfForRuntimeSmoke() {
