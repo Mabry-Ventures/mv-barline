@@ -946,9 +946,7 @@ actor GoldenGateAXSnapshotProvider {
             // `restore` immediately re-read the authorized table and require an
             // exact position key before planning or writing anything.
             return item.replacing(
-                isMovable: isThirdParty &&
-                    !item.isBarlineControlItem &&
-                    item.canBeHidden
+                isMovable: isThirdParty
             )
         }
         return MenuBarSnapshot(
@@ -968,10 +966,7 @@ actor GoldenGateAXSnapshotProvider {
     /// resolves an exact record after authorization or fails without writing;
     /// disabling the control here would make that recovery impossible.
     private static func isPositionTableEligible(_ item: MenuBarItemDescriptor) -> Bool {
-        item.sourceOwnership == .application &&
-            !item.id.bundleIdentifier.hasPrefix("com.apple.") &&
-            !item.isBarlineControlItem &&
-            item.canBeHidden
+        GoldenGatePositionTableCapability.isCandidate(item)
     }
 
     /// Planning is observational: no native proposal has been staged. Keep

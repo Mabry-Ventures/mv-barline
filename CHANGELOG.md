@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.19 (build 93) — September 16, 2026
+
+- Restore macOS 27 hidden third-party items even when macOS does not permit a
+  second concealment operation. The direction-specific capability rule now
+  applies only to moves into Hidden, so a hidden item never becomes stranded.
+
 ## 1.0.18 (build 92) — September 16, 2026
 
 - Make the macOS 27 layout path actionable: eligible third-party items now
