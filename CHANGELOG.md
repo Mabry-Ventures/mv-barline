@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.21 (build 95) — September 16, 2026
+
+- macOS 27: add privacy-safe transaction-stage diagnostics so an unrecognized system preference change fails closed with an actionable support code rather than an opaque error.
+
 ## 1.0.20 (build 94) — September 16, 2026
 
 - macOS 27: reliably request scoped access to the exact system menu-bar position file before attempting a layout change. This avoids POSIX permission false positives that could prevent the access picker from appearing.

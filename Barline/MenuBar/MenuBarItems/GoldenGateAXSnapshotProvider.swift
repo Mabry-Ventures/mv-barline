@@ -299,6 +299,9 @@ actor GoldenGateAXSnapshotProvider {
             )
         } catch {
             didAttemptInterruptedTransactionRecovery = false
+            logger.error(
+                "Golden Gate move preflight rejected: \(Self.preflightDiagnosticCode(error), privacy: .public)"
+            )
             throw translatedPreflightError(error)
         }
         let before = preparation.before
@@ -984,6 +987,25 @@ actor GoldenGateAXSnapshotProvider {
             return MenuBarBackendError.positionTableIdentityUnresolved
         }
         return MenuBarBackendError.mutationNotStarted
+    }
+
+    /// Preflight failures occur before a native write. Emit a closed code that
+    /// distinguishes the transaction stage without recording item identities,
+    /// preference values, file paths, or underlying error descriptions.
+    private static func preflightDiagnosticCode(_ error: Error) -> String {
+        guard let storeError = error as? GoldenGatePositionTableStore.StoreError else {
+            return PrivacySafeDiagnostics.errorCode(error)
+        }
+        return switch storeError {
+        case .accessNotGranted: "position_access_not_granted"
+        case .unexpectedFile: "position_unexpected_file"
+        case .invalidDocument: "position_invalid_document"
+        case .concurrentModification: "position_concurrent_modification"
+        case .externalStateWon: "position_external_state_won"
+        case .transactionPending: "position_transaction_pending"
+        case .writeFailed: "position_write_failed"
+        case .invalidJournal: "position_invalid_journal"
+        }
     }
 
     /// Once `apply` has been entered, a persistence failure can mean a staged
