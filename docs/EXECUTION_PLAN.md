@@ -1,6 +1,28 @@
 # Barline execution plan
 
-## Barline 1.0.17 macOS 27 position-table candidate — September 15, 2026
+## Barline 1.0.31 macOS 27 native arrangement release published — September 17, 2026
+
+Barline 1.0.31 (build 108), annotated tag `v1.0.31` at
+`0e6ddd1823baa07247b5f7efdd7baf2114c95987`, is public. The release keeps the
+established macOS 26 XPC backend and uses the system position table as the
+authoritative arrangement substrate on macOS 27, with exact identity,
+convergence verification, serialized transactions, rollback, and interruption
+recovery.
+
+The exact candidate passed 582 Core tests, 201 Xcode tests, three XCUITests,
+build/analyze, repository/privacy/accessibility gates, UI smoke, performance,
+and helper recovery on macOS 26. The exact packaged build passed native
+visible/hidden moves in both directions, independent third-party item moves,
+competing-click rejection, relaunch persistence, and helper interruption and
+recovery on macOS 27. Its Developer ID app and disk image are notarized,
+stapled, and Gatekeeper-accepted. Fresh public downloads match their checksums.
+Gemini Flash 3.8 High and GPT-6 Astra High returned GO on the bounded evidence.
+
+A 1.0.31 clean install and signed upgrade from 1.0.15 were not rerun before
+publication. Physical display transitions, release-duration soak, VoiceOver,
+and Full Keyboard Access remain separate evidence classes.
+
+## Historical: Barline 1.0.17 macOS 27 position-table candidate — September 15, 2026
 
 The macOS 27 backend now treats the system menu-bar position table as the
 authoritative ordering substrate. It resolves exact item identities, plans only
@@ -10,14 +32,12 @@ verification fails. A fully synchronized versioned journal protects staged,
 applied, and verified phases across interruption without overwriting a later
 native or user change.
 
-macOS 26 remains on its established XPC backend. The shared coordinator now
+macOS 26 remained on its established XPC backend. The shared coordinator
 distinguishes preflight rejection, external supersession, and recovery-owned
 transactions so it never manufactures a stale second restore. Pure planning,
 multi-key re-spacing, protected-anchor, recovery, profile-compensation, and OS
-routing gates pass in the 531-test source suite on macOS 26.6.2. Exact installed
-journeys on macOS 26 and CPLCODEX01 on macOS 27, including first authorization,
-relaunch persistence, interruption recovery, and native convergence timing,
-remain required before 1.0.17 is eligible for publication.
+routing gates passed in the 531-test source suite on macOS 26.6.2. This record
+is retained as the research-stage predecessor to the published 1.0.31 design.
 
 ## Barline 1.0.14 macOS 27 compatibility release published — September 14, 2026
 

@@ -1,19 +1,18 @@
 # Known limitations and release status
 
-This page distinguishes the published Barline 1.0.15 boundary from the
-unpublished 1.0.17 candidate. Release evidence is bound to its exact source and
-signed binary; it is not blanket approval for later changes.
+This page records the published Barline 1.0.31 boundary. Release evidence is
+bound to its exact source and signed binary; it is not blanket approval for
+later changes.
 
 ## Compatibility
 
 - The target platform is Apple Silicon running macOS 26 or macOS 27. Intel is
   unsupported.
-- macOS 27 discovery and layout presentation were exercised on an Apple
-  Silicon macOS 27.0 host. Barline 1.0.15's graphical layout was read-only on
-  that system. The unpublished 1.0.17 candidate adds transactional assignment
-  and reordering through the system position table, with exact identity,
-  convergence verification, and interruption recovery. Runtime qualification
-  of that exact candidate remains open.
+- macOS 27 discovery, native assignment, reordering, relaunch persistence, and
+  interruption recovery were exercised on an Apple Silicon macOS 27.0 host.
+  Barline uses the system position table on macOS 27 with exact identity,
+  convergence verification, and interruption recovery. macOS 26 remains on the
+  established XPC arrangement backend.
 - The secondary shelf and graphical layout editor require an always-visible
   menu bar. Auto-hide uses native reveal instead; see
   [supported configurations](SUPPORTED_CONFIGURATIONS.md).
@@ -43,32 +42,26 @@ validation requirements; see [search architecture](SEARCH_AND_APPLE_INTELLIGENCE
 
 ## Current reliability and distribution boundary
 
-Barline 1.0.15 (build 76) was published on September 15, 2026. Its exact
-Developer ID executable and disk image are notarized, stapled, Gatekeeper-
-accepted, and hash-bound to tag `v1.0.15`. Native left/right and popover journeys,
-20-cycle shelf performance, and forced helper recovery passed on macOS 26.6.2
-and macOS 27 RC 26A428 with zero timeouts. The signed update from public 1.0.14,
-clean DMG installs, and fresh public-asset downloads passed on both supported systems.
+Barline 1.0.31 (build 108) was published on September 17, 2026. Tag `v1.0.31`
+points to source `0e6ddd1823baa07247b5f7efdd7baf2114c95987`. Its exact
+Developer ID app and disk image are notarized, stapled, Gatekeeper-accepted,
+and checksum-bound to the public release. The full macOS 26 gate passed 582
+Core tests, 201 Xcode tests, three XCUITests, helper recovery, UI smoke, and
+performance checks. On macOS 27, the exact packaged build passed native
+visible/hidden assignment in both directions, independent third-party item
+moves, competing-click rejection, relaunch persistence, and helper
+interruption/recovery.
 
-One immediate macOS 26 fixture restoration attempt and one extra fresh
-synthetic post-upgrade restoration attempt did not restore position within the
-test deadline. Both were retained; the source-bound acceptance receipts later
-passed. The app preserves an interrupted temporary reveal in a local recovery
-journal instead of silently discarding the original position. Physical display
-transitions, release-duration soak, VoiceOver, and Full Keyboard Access remain
-separate open evidence classes.
-
-A rare rapid-close miss was recorded in releases through 1.0.13. Build 76's
-candidate-bound performance receipts completed without a shelf-open timeout on
-either supported operating system, but that bounded result is not a claim that
-third-party status items or future macOS updates can never fail.
+Fresh downloads of every public release asset matched the published checksums;
+the public disk image again passed stapling and Gatekeeper assessment. Gemini
+Flash 3.8 High and GPT-6 Astra High independently returned GO on the bounded
+release evidence. A clean install and a signed upgrade from 1.0.15 were not
+rerun for 1.0.31 before publication. Physical display transitions,
+release-duration soak, VoiceOver, and Full Keyboard Access remain separate open
+evidence classes.
 
 The public support site and hosted Stripe checkout do not qualify the app and do
 not unlock features.
-
-Barline 1.0.17 is not published. Its source gates and independent code reviews
-authorize only controlled installed qualification; they are not a release
-verdict.
 
 See [release requirements](RELEASING.md), [the test matrix](TEST_MATRIX.md),
 and the [reliability-first acceptance contract](RELIABILITY_FIRST.md).

@@ -1,12 +1,11 @@
 # Reliability-first feature qualification
 
-Published release: **1.0.15, build 76** (September 15, 2026), tag `v1.0.15` at
-`b68f9fc6442849f7b2d48901ffb9686082314d0b`. Its exact signed executable passed
-the six-receipt installed suite on macOS 26.6.2 and macOS 27 RC 26A428. The
+Published release: **1.0.31, build 108** (September 17, 2026), tag `v1.0.31` at
+`0e6ddd1823baa07247b5f7efdd7baf2114c95987`. Its exact packaged build passed
+the macOS 26 full gate and macOS 27 native arrangement qualification. The
 public DMG, ZIP, source archive, SBOM, checksums, and appcast were downloaded
-again and matched the locally qualified artifacts. A signed Sparkle update from
-public 1.0.14 preserved preferences and installed the exact candidate hash.
-Installed build 62 is the update-source runtime evidence baseline.
+again and matched the locally qualified artifacts. A clean install and a signed
+upgrade from 1.0.15 were not rerun before publication.
 Implementation is not a release certificate.
 Use the final source SHA and signed executable hash for every installed receipt.
 Failed attempts remain in local evidence; do not replace them with a later pass.
@@ -45,22 +44,21 @@ Failed attempts remain in local evidence; do not replace them with a later pass.
 
 ## Current boundary
 
-Build 76 passed 430 Core tests, fixture and independent Accessibility checks,
-Debug/Release build and analysis, privacy and permission checks, release
-topology, signing, notarization, stapling, Gatekeeper, and repository hygiene.
-On both supported operating systems, native left/right and popover left/reuse
-journeys, a 20-cycle performance receipt, and forced helper recovery passed with
-zero timeouts. Measured shelf p95 was 102.2 ms on macOS 26 and 123.3 ms on
-macOS 27, below the 250 ms budget. Signed upgrades from public 1.0.14 and clean DMG installs
-also passed on both systems with the exact candidate executable hash.
+Build 108 passed 582 Core tests in 60 suites, 201 Xcode tests in four suites,
+three XCUITests, Debug/Release build and analysis, privacy and permission checks,
+release topology, signing, notarization, stapling, Gatekeeper, repository
+hygiene, helper recovery, UI smoke, and performance gates on macOS 26. On
+macOS 27, the exact packaged build passed sidebar-away/back state integrity,
+competing-click rejection, independent 1Password and Stats moves, movement in
+both visible/hidden directions, relaunch persistence, and helper
+interruption/recovery.
 
-Earlier failed fixture and synthetic restoration attempts remain retained; later
-passes do not erase them. Build 76's Xcode test plan passed on both hosts. All
-three XCUITests ran on macOS 26; Xcode 27 ran the non-injection case and explicitly
-skipped two status-item injections that the runner does not deliver. The stronger
-installed physical journeys passed all four target lanes on macOS 27. Physical
-display-transition, long soak, and manual assistive-technology scenarios remain
-separate from the shipped core qualification.
+Fresh public assets matched their checksums; the downloaded disk image again
+passed stapling and Gatekeeper assessment. Gemini Flash 3.8 High and GPT-6 Astra
+High independently returned GO on the bounded evidence. Physical display
+transition, long soak, clean-install, signed-upgrade, and manual
+assistive-technology scenarios remain separate from the shipped core
+qualification.
 
 ### Historical candidate evidence
 
