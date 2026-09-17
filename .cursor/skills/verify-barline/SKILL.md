@@ -168,6 +168,8 @@ Minimum files for a Linux hygiene proof:
 - `linux-gates.log` — full stdout/stderr of `linux-gates`
 - `result.txt` — `ui: gated`; list of gates that passed
 
+The generator run on the Linux Cursor VM is summarized in `proof/linux-host.md`. That file is not a menu-bar UI proof.
+
 ## Cleanup
 
 ```bash
