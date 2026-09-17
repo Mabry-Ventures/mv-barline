@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.31 (build 105) — September 17, 2026
+## 1.0.31 (build 106) — September 17, 2026
 
 - Give multi-item macOS 27 publishers a stable application-level identity so
   Accessibility alias or inventory-order churn cannot invalidate an in-flight
@@ -9,6 +9,10 @@
   arbitrary status-item title, including matching VoiceOver guidance.
 - Resolve the current representative immediately before each grouped move and
   reject malformed empty application identifiers.
+- Keep application discovery off the main actor by rendering only names already
+  present in the current menu-bar inventory.
+- Serialize layout assignment controls while a move is in flight and treat a
+  drop back onto the current section as an intentional no-op.
 
 ## 1.0.30 (build 104) — September 17, 2026
 
