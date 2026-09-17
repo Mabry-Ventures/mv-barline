@@ -93,6 +93,23 @@ REMOTE_X="$(/usr/bin/plutil -extract sourceFrameAfter.x raw "$LOCAL_PROBE")"
 REMOTE_Y="$(/usr/bin/plutil -extract sourceFrameAfter.y raw "$LOCAL_PROBE")"
 REMOTE_WIDTH="$(/usr/bin/plutil -extract sourceFrameAfter.width raw "$LOCAL_PROBE")"
 REMOTE_HEIGHT="$(/usr/bin/plutil -extract sourceFrameAfter.height raw "$LOCAL_PROBE")"
+ACTIVATION_FRAME_SOURCE="placementProbe"
+SOURCE_ITEM_COUNT="$(remote_exec /usr/bin/python3 -c \
+    'import json,sys; print(len(json.load(open(sys.argv[1]))["items"]))' "$SOURCE_RECEIPT")"
+if [[ "$SOURCE_ITEM_COUNT" -eq 1 ]]; then
+    ACTIVATION_OBSERVATION="${PROBE_OUTPUT%.json}-activation-observation.json"
+    # The expansion must happen on CPLCODEX01, not on the coordinating host.
+    # shellcheck disable=SC2016
+    remote_exec /bin/bash -lc \
+        'exec "$HOME/Applications/BarlineArrangementLab/script/observe-fixture.sh" "$@"' \
+        barline-cycle "$SOURCE_RECEIPT" "$ACTIVATION_OBSERVATION" >/dev/null
+    remote_exec /bin/cat "$ACTIVATION_OBSERVATION" > "$TEMP_DIRECTORY/activation-observation.json"
+    REMOTE_X="$(/usr/bin/plutil -extract items.0.frame.x raw "$TEMP_DIRECTORY/activation-observation.json")"
+    REMOTE_Y="$(/usr/bin/plutil -extract items.0.frame.y raw "$TEMP_DIRECTORY/activation-observation.json")"
+    REMOTE_WIDTH="$(/usr/bin/plutil -extract items.0.frame.width raw "$TEMP_DIRECTORY/activation-observation.json")"
+    REMOTE_HEIGHT="$(/usr/bin/plutil -extract items.0.frame.height raw "$TEMP_DIRECTORY/activation-observation.json")"
+    ACTIVATION_FRAME_SOURCE="freshSingleItemObservation"
+fi
 REMOTE_CENTER_X="$(/usr/bin/awk -v x="$REMOTE_X" -v w="$REMOTE_WIDTH" 'BEGIN { printf "%.6f", x + w / 2 }')"
 REMOTE_CENTER_Y="$(/usr/bin/awk -v y="$REMOTE_Y" -v h="$REMOTE_HEIGHT" 'BEGIN { printf "%.6f", y + h / 2 }')"
 
@@ -109,11 +126,25 @@ APPLESCRIPT
 )"
 /usr/bin/osascript -e 'tell application "Screen Sharing" to activate'
 SCREEN_SHARING_ACTIVATED=true
-/bin/sleep 0.2
+SCREEN_SHARING_FRONTMOST=false
+for _ in {1..20}; do
+    if [[ "$(/usr/bin/osascript <<'APPLESCRIPT'
+tell application "System Events" to return frontmost of process "Screen Sharing"
+APPLESCRIPT
+)" == true ]]; then
+        SCREEN_SHARING_FRONTMOST=true
+        break
+    fi
+    /bin/sleep 0.05
+    /usr/bin/osascript -e 'tell application "Screen Sharing" to activate' >/dev/null
+done
+[[ "$SCREEN_SHARING_FRONTMOST" == true ]] || {
+    /usr/bin/printf 'error: Screen Sharing did not become frontmost\n' >&2
+    exit 1
+}
 SHARED_FRAME="$(/usr/bin/osascript <<'APPLESCRIPT'
 tell application "System Events"
   tell process "Screen Sharing"
-    if frontmost is false then error "Screen Sharing did not become frontmost"
     set targetWindows to every window whose name contains "CPLCODEX01"
     if (count of targetWindows) is not 1 then error "expected exactly one CPLCODEX01 window"
     set sharedScreen to UI element 1 of item 1 of targetWindows
@@ -180,6 +211,7 @@ ACTIVATION_DELTA="$((ACTIVATION_AFTER - ACTIVATION_BEFORE))"
 /usr/bin/plutil -insert destinationToken -string "$DESTINATION_TOKEN" "$LOCAL_CYCLE"
 /usr/bin/plutil -insert placement -string "$PLACEMENT" "$LOCAL_CYCLE"
 /usr/bin/plutil -insert activationMethod -string screenSharingForwardedPhysicalClick "$LOCAL_CYCLE"
+/usr/bin/plutil -insert activationFrameSource -string "$ACTIVATION_FRAME_SOURCE" "$LOCAL_CYCLE"
 /usr/bin/plutil -insert activationDelta -integer "$ACTIVATION_DELTA" "$LOCAL_CYCLE"
 /usr/bin/plutil -insert probeResultSHA256 -string "$(/usr/bin/shasum -a 256 "$LOCAL_PROBE" | /usr/bin/awk '{print $1}')" "$LOCAL_CYCLE"
 /usr/bin/plutil -insert remoteItemCenter -dictionary "$LOCAL_CYCLE"

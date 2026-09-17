@@ -134,17 +134,22 @@ struct ArrangementObserverMain {
             throw ObserverError.inaccessibleFixture
         }
         let candidates = descendants(of: extrasMenuBar, maximumDepth: 3, maximumCount: 64)
+        let menuExtras = candidates.compactMap { element -> (AXUIElement, LabRect)? in
+            guard stringAttribute(element, kAXRoleAttribute as CFString) == "AXMenuBarItem",
+                  stringAttribute(element, kAXSubroleAttribute as CFString) == "AXMenuExtra",
+                  let actual = frame(of: element)
+            else { return nil }
+            return (element, actual)
+        }
         let matched = receipt.items.compactMap { item -> (FixtureItemReceipt, AXUIElement, LabRect)? in
+            if receipt.items.count == 1, menuExtras.count == 1, let match = menuExtras.first {
+                return (item, match.0, match.1)
+            }
             guard let appKitFrame = item.frame,
                   let expected = accessibilityFrame(for: appKitFrame)
             else { return nil }
-            let matches = candidates.compactMap { element -> (AXUIElement, LabRect)? in
-                guard stringAttribute(element, kAXRoleAttribute as CFString) == "AXMenuBarItem",
-                      stringAttribute(element, kAXSubroleAttribute as CFString) == "AXMenuExtra",
-                      let actual = frame(of: element),
-                      actual.approximatelySharesCenter(with: expected)
-                else { return nil }
-                return (element, actual)
+            let matches = menuExtras.filter { _, actual in
+                actual.approximatelySharesCenter(with: expected)
             }
             guard matches.count == 1, let match = matches.first else { return nil }
             return (item, match.0, match.1)

@@ -32,6 +32,8 @@ Phase 3 cycles use two independently verified input paths:
   delta of exactly one, and restores the previously frontmost app. This is
   necessary because macOS 27 accepts the native drag but its menu-bar proxy can
   report a successful `AXPress` while declining direct synthetic activation.
+  Single-item publishers receive a fresh cardinality-bounded AX observation
+  immediately before that click so dynamic title changes cannot stale its frame.
 
 The coordinator rejects mismatched display geometry, multiple CPLCODEX01
 windows, a non-frontmost Screen Sharing app, an incomplete probe, or any

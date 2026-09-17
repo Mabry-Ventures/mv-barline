@@ -233,17 +233,29 @@ private func resolve(receipt: FixtureReceipt) throws -> [ResolvedFixtureItem] {
         throw ProbeError.fixtureInaccessible
     }
     let candidates = descendants(of: extrasMenuBar, maximumDepth: 3, maximumCount: 64)
+    let menuExtras = candidates.compactMap { element -> (AXUIElement, LabRect)? in
+        guard stringAttribute(element, kAXRoleAttribute as CFString) == "AXMenuBarItem",
+              stringAttribute(element, kAXSubroleAttribute as CFString) == "AXMenuExtra",
+              let actual = frame(of: element)
+        else { return nil }
+        return (element, actual)
+    }
     return try receipt.items.map { item in
+        if receipt.items.count == 1, menuExtras.count == 1, let match = menuExtras.first {
+            return ResolvedFixtureItem(
+                token: item.token,
+                generation: item.generation,
+                activations: item.activations,
+                processIdentifier: receipt.processIdentifier,
+                frame: match.1,
+                element: match.0
+            )
+        }
         guard let appKitFrame = item.frame,
               let expected = accessibilityFrame(for: appKitFrame)
         else { throw ProbeError.rejected("fixture-frame-unavailable") }
-        let matches = candidates.compactMap { element -> (AXUIElement, LabRect)? in
-            guard stringAttribute(element, kAXRoleAttribute as CFString) == "AXMenuBarItem",
-                  stringAttribute(element, kAXSubroleAttribute as CFString) == "AXMenuExtra",
-                  let actual = frame(of: element),
-                  actual.approximatelySharesCenter(with: expected)
-            else { return nil }
-            return (element, actual)
+        let matches = menuExtras.filter { _, actual in
+            actual.approximatelySharesCenter(with: expected)
         }
         guard matches.count == 1, let match = matches.first else {
             throw ProbeError.rejected("fixture-element-ambiguous-or-missing")
