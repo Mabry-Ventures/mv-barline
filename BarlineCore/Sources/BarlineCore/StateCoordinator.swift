@@ -549,8 +549,22 @@ public actor MenuBarStateCoordinator {
         let before = try await validatedStartingSnapshot(now: now)
         let backendCapabilities = await backend.capabilities
         let moveDestinationSupport = backendCapabilities.moveDestinationSupport
-        let visibilityAssignmentGranularity = backendCapabilities.arrangement?
+        let probedVisibilityAssignmentGranularity = backendCapabilities.arrangement?
             .visibilityAssignmentGranularity
+        // The macOS 27 logical-section backend has one fixed native contract:
+        // third-party visibility is application-group scoped and known Apple
+        // items are individually addressable. Its helper capability probe can
+        // transiently time out during cold-start replacement even though the
+        // subsequent native write succeeds. Once that write returns, do not
+        // verify it with the stale pre-write `.unavailable` fallback.
+        let visibilityAssignmentGranularity = if
+            moveDestinationSupport == .logicalSectionsPreserveNativeOrder,
+            probedVisibilityAssignmentGranularity == .unavailable
+        {
+            MenuBarVisibilityAssignmentGranularity.applicationGroupAndKnownSystemItem
+        } else {
+            probedVisibilityAssignmentGranularity
+        }
         guard !before.menuTrackingIsActive else {
             throw MenuBarBackendError.unsafeMenuTracking
         }

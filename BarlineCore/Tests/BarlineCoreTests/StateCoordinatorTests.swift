@@ -763,6 +763,78 @@ struct StateCoordinatorTests {
         #expect(await backend.moveOperations.count == 1)
     }
 
+    @Test("macOS 27 verifies a successful cold-start write after capability fallback")
+    func verifiesGoldenGateWriteAfterUnavailableCapabilityProbe() async throws {
+        let display = MenuBarDisplayID("test-display")
+        let source = MenuBarItemID(
+            bundleIdentifier: "com.example.grouped",
+            accessibilityIdentifier: "source"
+        )
+        let sibling = MenuBarItemID(
+            bundleIdentifier: "com.example.grouped",
+            accessibilityIdentifier: "sibling"
+        )
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: Date(),
+            items: [
+                MenuBarItemDescriptor(id: source, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: sibling, section: .visible, order: 1, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let collapsed = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: before.capturedAt,
+            items: [
+                MenuBarItemDescriptor(id: sibling, section: .hidden, order: 0, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
+            snapshots: [before, collapsed, collapsed],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: false,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: .unavailable,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
+            )
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(
+                maximumAttempts: 1,
+                baseDelay: .zero,
+                maximumDelay: .zero,
+                maximumJitterPermille: 0
+            )
+        )
+
+        let result = try await coordinator.perform(
+            .move(MenuBarMoveOperation(
+                itemID: source,
+                section: .hidden,
+                index: 0,
+                destinationDisplayID: display
+            )),
+            now: before.capturedAt
+        )
+
+        #expect(result == collapsed)
+        #expect(await backend.snapshotCallCount == 3)
+        #expect(await backend.moveOperations.count == 1)
+    }
+
     @Test("macOS 27 validates delayed convergence against an advancing clock")
     func advancesValidationClockDuringGoldenGateConvergence() async throws {
         let display = MenuBarDisplayID("test-display")
