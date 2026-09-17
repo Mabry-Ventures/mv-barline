@@ -61,6 +61,25 @@ the native position table's serialized preference value has the same SHA-256
 before and after the pilot. The script stops on the first mismatch and
 invalidates any assertion left active by a failed check.
 
+Phase 5 varies only fixture-owned identity signals while performing a real
+native Command-drag in every case. It records current AX metadata and reads the
+native position table without mutating it. Position keys are retained only as
+per-run HMAC aliases, so the evidence can compare stability without exporting
+the private keys themselves.
+
+Run the bounded P5 identity study with an absolute directory on CPLCODEX01:
+
+```bash
+./script/run-p5-identity-study.sh \
+  "/Users/jaredmabry/Library/Application Support/BarlineArrangementLab/evidence/<sha>/p5-identity"
+```
+
+The study changes AX identifier, title, title uniqueness, creation order,
+in-process lifecycle, and autosave revision independently. Historical native
+records are reported separately from the three records matched to the current
+fixture receipt. A pass establishes only the classification written to
+`summary.json`; it never authorizes a position-table writer.
+
 Run the full P3 pilot with an absolute directory on CPLCODEX01:
 
 ```bash

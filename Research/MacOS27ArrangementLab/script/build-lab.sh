@@ -33,6 +33,7 @@ stage_app() {
 /bin/mkdir -p "$DIST"
 stage_app BarlineArrangementMultiFixture BarlineArrangementFixture com.mabryventures.Barline.ArrangementMultiFixture
 stage_app BarlineArrangementSingleFixture BarlineArrangementFixture com.mabryventures.Barline.ArrangementSingleFixture
+stage_app BarlineIdentityFixture BarlineArrangementFixture com.mabryventures.Barline.IdentityFixture
 stage_app BarlineArrangementObserver BarlineArrangementObserver com.mabryventures.Barline.ArrangementObserver
 stage_app BarlineVisibilityProbe BarlineVisibilityProbe com.mabryventures.Barline.VisibilityProbe
 

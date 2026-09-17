@@ -61,6 +61,8 @@ public struct FixtureItemReceipt: Codable, Equatable, Sendable {
     public let token: String
     public let generation: Int
     public let autosaveName: String
+    public let accessibilityIdentifier: String?
+    public let title: String?
     public let creationOrdinal: Int
     public let frame: LabRect?
     public let activations: Int
@@ -69,6 +71,8 @@ public struct FixtureItemReceipt: Codable, Equatable, Sendable {
         token: String,
         generation: Int,
         autosaveName: String,
+        accessibilityIdentifier: String? = nil,
+        title: String? = nil,
         creationOrdinal: Int,
         frame: LabRect?,
         activations: Int
@@ -76,6 +80,8 @@ public struct FixtureItemReceipt: Codable, Equatable, Sendable {
         self.token = token
         self.generation = generation
         self.autosaveName = autosaveName
+        self.accessibilityIdentifier = accessibilityIdentifier
+        self.title = title
         self.creationOrdinal = creationOrdinal
         self.frame = frame
         self.activations = activations

@@ -24,6 +24,7 @@ LAB_SOURCE_DIGEST="$(
 )"
 MULTI_HASH="$(/usr/bin/shasum -a 256 "$ROOT/Research/MacOS27ArrangementLab/dist/BarlineArrangementMultiFixture.app/Contents/MacOS/BarlineArrangementMultiFixture" | /usr/bin/awk '{print $1}')"
 SINGLE_HASH="$(/usr/bin/shasum -a 256 "$ROOT/Research/MacOS27ArrangementLab/dist/BarlineArrangementSingleFixture.app/Contents/MacOS/BarlineArrangementSingleFixture" | /usr/bin/awk '{print $1}')"
+IDENTITY_HASH="$(/usr/bin/shasum -a 256 "$ROOT/Research/MacOS27ArrangementLab/dist/BarlineIdentityFixture.app/Contents/MacOS/BarlineIdentityFixture" | /usr/bin/awk '{print $1}')"
 OBSERVER_HASH="$(/usr/bin/shasum -a 256 "$ROOT/Research/MacOS27ArrangementLab/dist/BarlineArrangementObserver.app/Contents/MacOS/BarlineArrangementObserver" | /usr/bin/awk '{print $1}')"
 VISIBILITY_HASH="$(/usr/bin/shasum -a 256 "$ROOT/Research/MacOS27ArrangementLab/dist/BarlineVisibilityProbe.app/Contents/MacOS/BarlineVisibilityProbe" | /usr/bin/awk '{print $1}')"
 
@@ -73,6 +74,7 @@ IFS='|' read -r PRODUCT_VERSION BUILD_VERSION ARCHITECTURE XCODE_VERSION AUTO_HI
 /usr/bin/plutil -insert installedBarlineExecutableSHA256 -string "$BARLINE_HASH" "$MANIFEST"
 /usr/bin/plutil -insert multiFixtureExecutableSHA256 -string "$MULTI_HASH" "$MANIFEST"
 /usr/bin/plutil -insert singleFixtureExecutableSHA256 -string "$SINGLE_HASH" "$MANIFEST"
+/usr/bin/plutil -insert identityFixtureExecutableSHA256 -string "$IDENTITY_HASH" "$MANIFEST"
 /usr/bin/plutil -insert observerExecutableSHA256 -string "$OBSERVER_HASH" "$MANIFEST"
 /usr/bin/plutil -insert visibilityProbeExecutableSHA256 -string "$VISIBILITY_HASH" "$MANIFEST"
 /usr/bin/plutil -convert json -o "$MANIFEST" "$MANIFEST"
