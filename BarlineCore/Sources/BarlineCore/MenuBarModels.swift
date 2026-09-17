@@ -341,7 +341,8 @@ public struct MenuBarItemDescriptor: Codable, Hashable, Sendable {
     public func replacing(
         section: MenuBarSection? = nil,
         order: Int? = nil,
-        isMovable: Bool? = nil
+        isMovable: Bool? = nil,
+        canBeHidden: Bool? = nil
     ) -> MenuBarItemDescriptor {
         MenuBarItemDescriptor(
             id: id,
@@ -359,7 +360,7 @@ public struct MenuBarItemDescriptor: Codable, Hashable, Sendable {
             bounds: bounds,
             isOnScreen: isOnScreen,
             isMovable: isMovable ?? self.isMovable,
-            canBeHidden: canBeHidden,
+            canBeHidden: canBeHidden ?? self.canBeHidden,
             isBentoBox: isBentoBox,
             isSystemClone: isSystemClone,
             isResponsive: isResponsive

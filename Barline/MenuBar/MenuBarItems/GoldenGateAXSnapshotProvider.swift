@@ -360,14 +360,37 @@ actor GoldenGateAXSnapshotProvider {
             ),
             barlineBundleIdentifier: signingIdentifier
         )
+        let canonicalization = canonicalizingUnsupportedConcealment(in: result)
+        result = canonicalization.snapshot
         result = applyingNativeArrangementCapabilities(to: result)
         if hiddenControlUsesLiveGeometry, explicitAssignments.isEmpty {
             rememberSections(from: result)
         }
-        if verificationAssignments == nil,
-           let prepared = try? prepareRetainedInventory(from: result, requiredItemIDs: [])
-        {
-            commitRetainedInventory(prepared)
+        if verificationAssignments == nil {
+            if !canonicalization.repairedItemIDs.isEmpty {
+                do {
+                    let prepared = try preparePersistence(
+                        from: result,
+                        requiredItemIDs: canonicalization.repairedItemIDs
+                    )
+                    if commitPersistence(prepared) {
+                        logger.notice(
+                            "Golden Gate repaired unsupported legacy concealment assignments: count=\(canonicalization.repairedItemIDs.count, privacy: .public)"
+                        )
+                    } else {
+                        logger.error("Golden Gate legacy concealment repair could not be synchronized")
+                    }
+                } catch {
+                    logger.error(
+                        "Golden Gate legacy concealment repair could not be prepared: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+                    )
+                }
+            } else if let prepared = try? prepareRetainedInventory(
+                from: result,
+                requiredItemIDs: []
+            ) {
+                commitRetainedInventory(prepared)
+            }
         }
         cachedAt = now
         cachedSnapshot = result
@@ -1352,6 +1375,37 @@ actor GoldenGateAXSnapshotProvider {
         )
     }
 
+    private func canonicalizingUnsupportedConcealment(
+        in snapshot: MenuBarSnapshot
+    ) -> (snapshot: MenuBarSnapshot, repairedItemIDs: Set<MenuBarItemID>) {
+        let items = snapshot.items.filter { !$0.isBarlineControlItem }
+        let configuration = concealmentConfiguration(for: snapshot)
+        let canonical = GoldenGateConcealmentPolicy.canonicalConfiguration(
+            configuration,
+            allItems: items.map(\.id),
+            barlineBundleIdentifier: Bundle.main.bundleIdentifier
+                ?? "com.mabryventures.Barline"
+        )
+        let canonicalVisible = Set(canonical.visibleItemIDs)
+        let repairedItemIDs = Set(items.compactMap { item in
+            item.section != .visible && canonicalVisible.contains(item.id) ? item.id : nil
+        })
+        guard !repairedItemIDs.isEmpty else {
+            return (snapshot, [])
+        }
+        return (
+            self.snapshot(
+                replacing: snapshot.items.map { item in
+                    repairedItemIDs.contains(item.id)
+                        ? item.replacingSection(.visible)
+                        : item
+                },
+                in: snapshot
+            ),
+            repairedItemIDs
+        )
+    }
+
     private func verifyNativeOrderMutation(
         _ operation: MenuBarMoveOperation,
         previousSnapshot: MenuBarSnapshot,
@@ -1518,7 +1572,11 @@ actor GoldenGateAXSnapshotProvider {
             )
             return item.replacing(
                 isMovable: !item.isBarlineControlItem &&
-                    (canReorderVisibleItem || canReorderShelfItem || canAssignVisibility)
+                    (canReorderVisibleItem || canReorderShelfItem || canAssignVisibility),
+                canBeHidden: item.canBeHidden &&
+                    !item.isBarlineControlItem &&
+                    (!item.id.bundleIdentifier.hasPrefix("com.apple.") ||
+                        GoldenGateConcealmentPolicy.systemItemIdentifier(for: item.id) != nil)
             )
         }
         return MenuBarSnapshot(

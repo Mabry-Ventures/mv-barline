@@ -61,11 +61,24 @@ public enum GoldenGateConcealmentPolicy {
     }
 
     public static func systemItemIdentifier(for item: MenuBarItemID) -> Int? {
-        guard item.bundleIdentifier == "com.apple.controlcenter" else { return nil }
-        let title = (item.accessibilityIdentifier ?? item.title ?? "")
-            .lowercased()
-            .filter(\.isLetter)
-        return switch title {
+        guard item.bundleIdentifier == "com.apple.controlcenter" ||
+            item.bundleIdentifier == "com.apple.menubaragent"
+        else { return nil }
+        let semanticName = [item.accessibilityIdentifier, item.title]
+            .compactMap(\.self)
+            .lazy
+            .map { value in
+                (value.split(separator: ".").last.map(String.init) ?? value)
+                    .lowercased()
+                    .filter(\.isLetter)
+            }
+            .first(where: { knownSystemItemIdentifier(for: $0) != nil })
+        guard let semanticName else { return nil }
+        return knownSystemItemIdentifier(for: semanticName)
+    }
+
+    private static func knownSystemItemIdentifier(for semanticName: String) -> Int? {
+        switch semanticName {
         case "battery": 0
         case "bluetooth": 1
         case "clock": 2
@@ -124,6 +137,57 @@ public enum GoldenGateConcealmentPolicy {
             }
         }
         return true
+    }
+
+    /// Repairs legacy or cross-version assignments that macOS 27 cannot
+    /// represent. Unsupported state always fails visible: Barline never hides
+    /// an unknown Apple control, itself, or only part of a third-party app's
+    /// status-item group. The returned arrays follow `allItems` order and are
+    /// deduplicated so the result is safe to persist as the new baseline.
+    public static func canonicalConfiguration(
+        _ configuration: MenuBarConcealmentConfiguration,
+        allItems: [MenuBarItemID],
+        barlineBundleIdentifier: String
+    ) -> MenuBarConcealmentConfiguration {
+        let barlineBundleIdentifier = barlineBundleIdentifier.lowercased()
+        var orderedItems = [MenuBarItemID]()
+        var seen = Set<MenuBarItemID>()
+        for item in allItems where seen.insert(item).inserted {
+            orderedItems.append(item)
+        }
+
+        let allItemSet = Set(orderedItems)
+        var visible = Set(configuration.visibleItemIDs).intersection(allItemSet)
+        var concealed = Set(configuration.concealedItemIDs)
+            .intersection(allItemSet)
+            .subtracting(visible)
+
+        for (bundleIdentifier, items) in Dictionary(grouping: orderedItems, by: \.bundleIdentifier) {
+            let itemSet = Set(items)
+            if bundleIdentifier == barlineBundleIdentifier {
+                visible.formUnion(itemSet)
+                concealed.subtract(itemSet)
+                continue
+            }
+            if bundleIdentifier.hasPrefix("com.apple.") {
+                let unsupported = itemSet.filter { systemItemIdentifier(for: $0) == nil }
+                visible.formUnion(unsupported)
+                concealed.subtract(unsupported)
+                continue
+            }
+            if !visible.isDisjoint(with: itemSet), !concealed.isDisjoint(with: itemSet) {
+                visible.formUnion(itemSet)
+                concealed.subtract(itemSet)
+            }
+        }
+
+        // Live inventory is complete. Any newly observed item missing from an
+        // older persistence document also fails visible.
+        visible.formUnion(allItemSet.subtracting(concealed))
+        return MenuBarConcealmentConfiguration(
+            visibleItemIDs: orderedItems.filter(visible.contains),
+            concealedItemIDs: orderedItems.filter(concealed.contains)
+        )
     }
 
     /// Returns whether macOS 27 can independently assign an item between
