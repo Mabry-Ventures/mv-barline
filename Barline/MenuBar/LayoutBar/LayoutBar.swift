@@ -90,12 +90,33 @@ struct LayoutBar: View {
 }
 
 @available(macOS 27.0, *)
+private enum MenuBarAssignmentTarget: Codable, Hashable {
+    case item(MenuBarItemID)
+    case application(String)
+
+    func resolve(in items: [MenuBarItem]) -> MenuBarItemID? {
+        switch self {
+        case let .item(itemID):
+            items.first { $0.stableID == itemID }?.stableID
+        case let .application(normalizedBundleIdentifier):
+            items
+                .filter {
+                    $0.stableID.bundleIdentifier.lowercased() == normalizedBundleIdentifier
+                }
+                .map(\.stableID)
+                .sorted { $0.description < $1.description }
+                .first
+        }
+    }
+}
+
+@available(macOS 27.0, *)
 private struct MenuBarInventoryBar: View {
     private struct AssignmentEntry: Identifiable {
+        let id: MenuBarAssignmentTarget
         let item: MenuBarItem
+        let displayName: String
         let assignmentGroupSize: Int
-
-        var id: MenuBarItemID { item.stableID }
     }
 
     @ObservedObject var itemManager: MenuBarItemManager
@@ -125,21 +146,70 @@ private struct MenuBarInventoryBar: View {
         return items.compactMap { item in
             let normalizedBundleIdentifier = item.stableID.bundleIdentifier.lowercased()
             guard !normalizedBundleIdentifier.hasPrefix("com.apple.") else {
-                return AssignmentEntry(item: item, assignmentGroupSize: 1)
+                return AssignmentEntry(
+                    id: .item(item.stableID),
+                    item: item,
+                    displayName: item.isControlItem ? "Barline" : item.displayName,
+                    assignmentGroupSize: 1
+                )
             }
-            let groupSize = allItems.count {
+            let group = allItems.filter {
                 $0.stableID.bundleIdentifier.caseInsensitiveCompare(
                     item.stableID.bundleIdentifier
                 ) == .orderedSame
             }
-            guard groupSize > 1 else {
-                return AssignmentEntry(item: item, assignmentGroupSize: 1)
+            guard group.count > 1 else {
+                return AssignmentEntry(
+                    id: .item(item.stableID),
+                    item: item,
+                    displayName: item.isControlItem ? "Barline" : item.displayName,
+                    assignmentGroupSize: 1
+                )
             }
             guard representedBundles.insert(normalizedBundleIdentifier).inserted else {
                 return nil
             }
-            return AssignmentEntry(item: item, assignmentGroupSize: groupSize)
+            let representative = items.filter {
+                $0.stableID.bundleIdentifier.caseInsensitiveCompare(
+                    item.stableID.bundleIdentifier
+                ) == .orderedSame
+            }.sorted {
+                $0.stableID.description < $1.stableID.description
+            }.first ?? item
+            let applicationName = group
+                .compactMap { $0.sourceApplication?.localizedName ?? $0.owningApplication?.localizedName }
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+                .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+                .first ?? installedApplicationName(
+                    bundleIdentifier: representative.stableID.bundleIdentifier
+                ) ?? representative.displayName
+            return AssignmentEntry(
+                id: .application(normalizedBundleIdentifier),
+                item: representative,
+                displayName: applicationName,
+                assignmentGroupSize: group.count
+            )
         }
+    }
+
+    private func installedApplicationName(bundleIdentifier: String) -> String? {
+        guard
+            let applicationURL = NSWorkspace.shared.urlForApplication(
+                withBundleIdentifier: bundleIdentifier
+            ),
+            let bundle = Bundle(url: applicationURL)
+        else { return nil }
+        for key in ["CFBundleDisplayName", kCFBundleNameKey as String] {
+            guard
+                let candidate = bundle.object(forInfoDictionaryKey: key) as? String
+            else { continue }
+            let normalized = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !normalized.isEmpty {
+                return normalized
+            }
+        }
+        return nil
     }
 
     var body: some View {
@@ -155,11 +225,13 @@ private struct MenuBarInventoryBar: View {
                         ForEach(assignmentEntries) { entry in
                             MenuBarInventoryItem(
                                 item: entry.item,
+                                assignmentTarget: entry.id,
+                                displayName: entry.displayName,
                                 assignmentGroupSize: entry.assignmentGroupSize,
                                 colorScheme: colorScheme,
                                 canAssign: entry.item.isMovable &&
                                     (section != .visible || entry.item.canBeHidden),
-                                onAssign: { assign(entry.item.stableID) }
+                                onAssign: { assign(entry.id) }
                             )
                         }
                     }
@@ -179,7 +251,7 @@ private struct MenuBarInventoryBar: View {
         .dropDestination(for: MenuBarLayoutTransfer.self) { transfers, _ in
             guard let transfer = transfers.first else { return false }
             Task { @MainActor in
-                await assign(transfer.itemID, to: section)
+                await assign(transfer.target, to: section)
             }
             return true
         } isTargeted: { targeted in
@@ -203,15 +275,30 @@ private struct MenuBarInventoryBar: View {
         }
     }
 
-    private func assign(_ itemID: MenuBarItemID) {
+    private func assign(_ target: MenuBarAssignmentTarget) {
         let destination: MenuBarSection.Name = section == .visible ? .hidden : .visible
         Task { @MainActor in
-            await assign(itemID, to: destination)
+            await assign(target, to: destination)
         }
     }
 
     @MainActor
-    private func assign(_ itemID: MenuBarItemID, to destination: MenuBarSection.Name) async {
+    private func assign(
+        _ target: MenuBarAssignmentTarget,
+        to destination: MenuBarSection.Name
+    ) async {
+        let destinationSection: BarlineCore.MenuBarSection = switch destination {
+        case .visible: .visible
+        case .hidden: .hidden
+        case .alwaysHidden: .alwaysHidden
+        }
+        let allItems = itemManager.itemCache.managedItems
+        let sourceItems = allItems.filter { $0.section != destinationSection }
+        guard let itemID = target.resolve(in: sourceItems) ?? target.resolve(in: allItems) else {
+            assignmentFailureMessage = "The menu bar changed before the layout could be updated. Refresh the layout and try again."
+            assignmentFailed = true
+            return
+        }
         do {
             try await itemManager.assign(
                 itemID: itemID,
@@ -228,6 +315,8 @@ private struct MenuBarInventoryBar: View {
 @available(macOS 27.0, *)
 private struct MenuBarInventoryItem: View {
     let item: MenuBarItem
+    let assignmentTarget: MenuBarAssignmentTarget
+    let displayName: String
     let assignmentGroupSize: Int
     let colorScheme: ColorScheme
     let canAssign: Bool
@@ -251,10 +340,6 @@ private struct MenuBarInventoryItem: View {
         colorScheme == .dark
             ? Color.white.opacity(0.16)
             : Color.black.opacity(0.14)
-    }
-
-    private var displayName: String {
-        item.isControlItem ? "Barline" : item.displayName
     }
 
     private var applicationIcon: NSImage? {
@@ -309,7 +394,7 @@ private struct MenuBarInventoryItem: View {
         .accessibilityElement(children: .combine)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(assignmentHint)
-        .draggable(MenuBarLayoutTransfer(itemID: item.stableID))
+        .draggable(MenuBarLayoutTransfer(target: assignmentTarget))
         .help(canAssign ? assignmentHint : "This item cannot be moved independently")
         .disabled(!canAssign)
     }
@@ -329,7 +414,7 @@ private struct MenuBarInventoryItem: View {
 
 @available(macOS 27.0, *)
 private struct MenuBarLayoutTransfer: Codable, Transferable {
-    let itemID: MenuBarItemID
+    let target: MenuBarAssignmentTarget
 
     static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .barlineLayoutItem)

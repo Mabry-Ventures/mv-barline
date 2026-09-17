@@ -215,6 +215,9 @@ public enum GoldenGateConcealmentPolicy {
         barlineBundleIdentifier: String
     ) -> Bool {
         let normalizedBundleIdentifier = item.bundleIdentifier.lowercased()
+        guard !normalizedBundleIdentifier.isEmpty else {
+            return false
+        }
         guard normalizedBundleIdentifier != barlineBundleIdentifier.lowercased() else {
             return false
         }
@@ -236,6 +239,9 @@ public enum GoldenGateConcealmentPolicy {
         barlineBundleIdentifier: String
     ) -> Bool {
         let normalizedBundleIdentifier = item.bundleIdentifier.lowercased()
+        guard !normalizedBundleIdentifier.isEmpty else {
+            return false
+        }
         guard normalizedBundleIdentifier != barlineBundleIdentifier.lowercased() else {
             return false
         }

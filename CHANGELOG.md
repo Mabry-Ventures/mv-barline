@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.31 (build 105) — September 17, 2026
+
+- Give multi-item macOS 27 publishers a stable application-level identity so
+  Accessibility alias or inventory-order churn cannot invalidate an in-flight
+  visibility action.
+- Label grouped controls with the application's localized name instead of an
+  arbitrary status-item title, including matching VoiceOver guidance.
+- Resolve the current representative immediately before each grouped move and
+  reject malformed empty application identifiers.
+
 ## 1.0.30 (build 104) — September 17, 2026
 
 - Make macOS 27 layout changes transactional: verify complete section, display,

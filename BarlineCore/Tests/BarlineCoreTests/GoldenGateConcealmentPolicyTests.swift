@@ -252,6 +252,20 @@ struct GoldenGateConcealmentPolicyTests {
         ))
     }
 
+    @Test func logicalAssignmentRejectsEmptyBundleIdentifier() {
+        let missingApplication = item("", "status")
+        #expect(!GoldenGateConcealmentPolicy.supportsIndependentAssignment(
+            missingApplication,
+            among: [missingApplication],
+            barlineBundleIdentifier: barlineID
+        ))
+        #expect(!GoldenGateConcealmentPolicy.supportsLogicalAssignment(
+            missingApplication,
+            among: [missingApplication],
+            barlineBundleIdentifier: barlineID
+        ))
+    }
+
     private func item(
         _ bundleIdentifier: String,
         _ title: String,
