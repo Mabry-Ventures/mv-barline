@@ -60,7 +60,7 @@ struct StateCoordinatorTests {
                 canApplySavedNativeOrder: false
             )
         )
-        let backend = FakeBackend(snapshots: [before, after], capabilities: capabilities)
+        let backend = FakeBackend(snapshots: [before, after, after], capabilities: capabilities)
         let coordinator = MenuBarStateCoordinator(backend: backend)
 
         let result = try await coordinator.perform(
@@ -122,7 +122,7 @@ struct StateCoordinatorTests {
             activeSpaceIsValid: true
         )
         let backend = FakeBackend(
-            snapshots: [before, after],
+            snapshots: [before, after, after],
             capabilities: MenuBarCapabilities(
                 canSnapshot: true,
                 canMove: true,
@@ -207,7 +207,7 @@ struct StateCoordinatorTests {
             activeSpaceIsValid: true
         )
         let backend = FakeBackend(
-            snapshots: [before, after],
+            snapshots: [before, after, after],
             capabilities: MenuBarCapabilities(
                 canSnapshot: true,
                 canMove: true,
@@ -280,7 +280,7 @@ struct StateCoordinatorTests {
             activeSpaceIsValid: true
         )
         let backend = FakeBackend(
-            snapshots: [before, after],
+            snapshots: [before, after, after],
             capabilities: MenuBarCapabilities(
                 canSnapshot: true,
                 canMove: true,
@@ -569,7 +569,7 @@ struct StateCoordinatorTests {
             activeSpaceIsValid: true
         )
         let backend = FakeBackend(
-            snapshots: [before, transitional, settled],
+            snapshots: [before, transitional, settled, settled],
             capabilities: MenuBarCapabilities(
                 canSnapshot: true,
                 canMove: true,
@@ -588,7 +588,7 @@ struct StateCoordinatorTests {
         let coordinator = MenuBarStateCoordinator(
             backend: backend,
             retryPolicy: RetryPolicy(
-                maximumAttempts: 2,
+                maximumAttempts: 3,
                 baseDelay: .zero,
                 maximumDelay: .zero,
                 maximumJitterPermille: 0
@@ -606,9 +606,93 @@ struct StateCoordinatorTests {
         )
 
         #expect(result == settled)
-        #expect(await backend.snapshotCallCount == 3)
+        #expect(await backend.snapshotCallCount == 4)
         #expect(await backend.moveOperations.count == 1)
         #expect(await coordinator.lastRejection == nil)
+    }
+
+    @Test("macOS 27 resets grouped visibility convergence after an invalid observation")
+    func resetsGoldenGateVisibilityConvergenceAfterInvalidObservation() async throws {
+        let display = MenuBarDisplayID("test-display")
+        let source = MenuBarItemID(
+            bundleIdentifier: "com.example.grouped",
+            accessibilityIdentifier: "source"
+        )
+        let unrelated = MenuBarItemID(
+            bundleIdentifier: "com.example.unrelated",
+            accessibilityIdentifier: "only"
+        )
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: Date(),
+            items: [
+                MenuBarItemDescriptor(id: source, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: unrelated, section: .visible, order: 1, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let valid = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: before.capturedAt,
+            items: [
+                MenuBarItemDescriptor(id: source, section: .hidden, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: unrelated, section: .visible, order: 1, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let invalid = MenuBarSnapshot(
+            generation: 3,
+            capturedAt: before.capturedAt,
+            items: [
+                MenuBarItemDescriptor(id: source, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: unrelated, section: .visible, order: 1, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let capabilities = MenuBarCapabilities(
+            canSnapshot: true,
+            canMove: true,
+            canReveal: false,
+            canActivate: true,
+            canRestore: false,
+            moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+            arrangement: MenuBarArrangementCapabilities(
+                canReorderNativeItems: false,
+                visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                canReorderShelfItems: true,
+                canApplySavedNativeOrder: false
+            )
+        )
+        let backend = FakeBackend(
+            snapshots: [before, valid, invalid, valid, valid],
+            capabilities: capabilities
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(
+                maximumAttempts: 4,
+                baseDelay: .zero,
+                maximumDelay: .zero,
+                maximumJitterPermille: 0
+            )
+        )
+
+        let result = try await coordinator.perform(
+            .move(MenuBarMoveOperation(
+                itemID: source,
+                section: .hidden,
+                index: 0,
+                destinationDisplayID: display
+            )),
+            now: before.capturedAt
+        )
+
+        #expect(result == valid)
+        #expect(await backend.snapshotCallCount == 5)
+        #expect(await backend.moveOperations.count == 1)
     }
 
     @Test("macOS 27 profile activation preserves native visible order")

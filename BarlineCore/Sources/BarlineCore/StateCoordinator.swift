@@ -662,6 +662,7 @@ public actor MenuBarStateCoordinator {
             ? max(1, retryPolicy.maximumAttempts)
             : 1
         var mostRecentError: (any Error)?
+        var previousSuccessfulVisibilitySignature: VisibilityObservationSignature?
 
         for attempt in 0 ..< attemptCount {
             try Task.checkCancellation()
@@ -690,6 +691,20 @@ public actor MenuBarStateCoordinator {
                         "menu bar move did not reach requested section"
                     )
                 }
+                if retriesEventuallyConsistentVisibility,
+                   let operation = mutation.moveOperation
+                {
+                    let signature = VisibilityObservationSignature(
+                        operation: operation,
+                        snapshot: snapshot
+                    )
+                    guard previousSuccessfulVisibilitySignature == signature else {
+                        previousSuccessfulVisibilitySignature = signature
+                        throw MenuBarBackendError.operationFailed(
+                            "menu bar visibility observation has not settled"
+                        )
+                    }
+                }
                 if case let .reveal(itemID) = mutation {
                     guard let beforeItem = before.items.first(where: { $0.id == itemID }),
                           let revealedItem = snapshot.items.first(where: { $0.id == itemID }),
@@ -706,8 +721,17 @@ public actor MenuBarStateCoordinator {
                     try validateHistoryResult(snapshot, matches: restoreTarget)
                 }
                 return snapshot
+            } catch let error as MenuBarBackendError {
+                mostRecentError = error
+                if case .operationFailed("menu bar visibility observation has not settled") = error {
+                    // Preserve the first valid observation so only an identical
+                    // consecutive observation can commit the mutation.
+                } else {
+                    previousSuccessfulVisibilitySignature = nil
+                }
             } catch {
                 mostRecentError = error
+                previousSuccessfulVisibilitySignature = nil
             }
 
             if attempt + 1 < attemptCount {
@@ -718,6 +742,42 @@ public actor MenuBarStateCoordinator {
         throw mostRecentError ?? MenuBarBackendError.operationFailed(
             "menu bar mutation postcondition was unavailable"
         )
+    }
+
+    private struct VisibilityObservationSignature: Equatable {
+        private struct SemanticIdentity: Hashable {
+            let bundleIdentifier: String
+            let accessibilityIdentifier: String?
+            let title: String?
+            let fallbackFingerprint: String?
+
+            init(_ id: MenuBarItemID) {
+                bundleIdentifier = id.bundleIdentifier
+                accessibilityIdentifier = id.accessibilityIdentifier
+                title = id.title
+                fallbackFingerprint = id.fallbackFingerprint
+            }
+        }
+
+        private let identities: Set<SemanticIdentity>
+        private let sections: Set<MenuBarSection>
+        private let displayIDs: Set<MenuBarDisplayID?>
+
+        init(operation: MenuBarMoveOperation, snapshot: MenuBarSnapshot) {
+            let isApplicationGroup = !operation.itemID.bundleIdentifier
+                .lowercased()
+                .hasPrefix("com.apple.")
+            let observed = snapshot.items.filter { item in
+                if isApplicationGroup {
+                    item.id.bundleIdentifier == operation.itemID.bundleIdentifier
+                } else {
+                    item.id == operation.itemID
+                }
+            }
+            identities = Set(observed.map { SemanticIdentity($0.id) })
+            sections = Set(observed.map(\.section))
+            displayIDs = Set(observed.map(\.displayID))
+        }
     }
 
     private func validateProfileResult(

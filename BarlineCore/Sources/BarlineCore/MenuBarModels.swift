@@ -518,24 +518,16 @@ public struct MenuBarMovePlanner: Sendable {
             let currentGroup = snapshot.items.filter {
                 $0.id.bundleIdentifier == bundleIdentifier
             }
-            let previousIdentityCounts = semanticIdentityCounts(in: previousGroup)
-            let currentIdentityCounts = semanticIdentityCounts(in: currentGroup)
+            let previousIdentities = Set(previousGroup.map { LogicalSemanticIdentity($0.id) })
+            let currentIdentities = Set(currentGroup.map { LogicalSemanticIdentity($0.id) })
             // Golden Gate can collapse several status-item AX roots into one
-            // live root when an application group becomes visible. Hiding is
-            // still represented by the complete retained inventory, but a
-            // successful reveal may therefore expose only a semantic subset
-            // of the group Barline knew while it was hidden. The native
-            // concealment primitive is app-scoped, so a non-empty visible
-            // subset is sufficient evidence only when every observed identity
-            // belonged to the prior group. This preserves strict cardinality
-            // for concealment while accepting macOS's post-reveal AX shape.
-            let identitiesMatch = if operation.section == .visible {
-                currentIdentityCounts.allSatisfy { identity, count in
-                    count <= (previousIdentityCounts[identity] ?? 0)
-                }
-            } else {
-                previousIdentityCounts == currentIdentityCounts
-            }
+            // live root after either app-scoped visibility transition, and it
+            // can briefly publish both old and rebound occurrence aliases.
+            // Multiplicity is therefore not an independently verifiable
+            // property. Every semantic identity that remains observable must
+            // still belong to the prior application group; convergence is
+            // confirmed separately from two consecutive observations.
+            let identitiesMatch = currentIdentities.isSubset(of: previousIdentities)
             guard !currentGroup.isEmpty,
                   identitiesMatch,
                   currentGroup.allSatisfy({ $0.section == operation.section }),
@@ -579,13 +571,6 @@ public struct MenuBarMovePlanner: Sendable {
             title = id.title
             fallbackFingerprint = id.fallbackFingerprint
         }
-    }
-
-    private func semanticIdentityCounts(
-        in items: [MenuBarItemDescriptor]
-    ) -> [LogicalSemanticIdentity: Int] {
-        Dictionary(grouping: items, by: { LogicalSemanticIdentity($0.id) })
-            .mapValues(\.count)
     }
 
     private func unchangedLogicalItemsMatch(
