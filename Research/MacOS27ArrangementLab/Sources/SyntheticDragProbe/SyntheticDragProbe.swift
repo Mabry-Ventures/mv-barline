@@ -240,34 +240,57 @@ private func resolve(receipt: FixtureReceipt) throws -> [ResolvedFixtureItem] {
         else { return nil }
         return (element, actual)
     }
-    return try receipt.items.map { item in
-        if receipt.items.count == 1, menuExtras.count == 1, let match = menuExtras.first {
-            return ResolvedFixtureItem(
-                token: item.token,
-                generation: item.generation,
-                activations: item.activations,
-                processIdentifier: receipt.processIdentifier,
-                frame: match.1,
-                element: match.0
-            )
-        }
-        guard let appKitFrame = item.frame,
-              let expected = accessibilityFrame(for: appKitFrame)
-        else { throw ProbeError.rejected("fixture-frame-unavailable") }
-        let matches = menuExtras.filter { _, actual in
-            actual.approximatelySharesCenter(with: expected)
-        }
-        guard matches.count == 1, let match = matches.first else {
-            throw ProbeError.rejected("fixture-element-ambiguous-or-missing")
-        }
-        return ResolvedFixtureItem(
+    func resolved(
+        item: FixtureItemReceipt,
+        match: (element: AXUIElement, frame: LabRect)
+    ) -> ResolvedFixtureItem {
+        ResolvedFixtureItem(
             token: item.token,
             generation: item.generation,
             activations: item.activations,
             processIdentifier: receipt.processIdentifier,
-            frame: match.1,
-            element: match.0
+            frame: match.frame,
+            element: match.element
         )
+    }
+    if receipt.items.count == 1, menuExtras.count == 1, let match = menuExtras.first {
+        return [resolved(item: receipt.items[0], match: (match.0, match.1))]
+    }
+
+    let expectedItems = try receipt.items.map { item -> (FixtureItemReceipt, LabRect) in
+        guard let appKitFrame = item.frame,
+              let expected = accessibilityFrame(for: appKitFrame)
+        else { throw ProbeError.rejected("fixture-frame-unavailable") }
+        return (item, expected)
+    }
+    let directlyResolved = expectedItems.compactMap { item, expected -> ResolvedFixtureItem? in
+        let matches = menuExtras.filter { _, actual in
+            actual.approximatelySharesCenter(with: expected)
+        }
+        guard matches.count == 1, let match = matches.first else { return nil }
+        return resolved(item: item, match: (match.0, match.1))
+    }
+    if directlyResolved.count == receipt.items.count {
+        return directlyResolved
+    }
+
+    guard receipt.variant == .dynamicTitles,
+          expectedItems.count == menuExtras.count,
+          expectedItems.count > 1
+    else { throw ProbeError.rejected("fixture-element-ambiguous-or-missing") }
+    let orderedExpected = expectedItems.sorted { $0.1.centerX < $1.1.centerX }
+    let orderedActual = menuExtras.sorted { $0.1.centerX < $1.1.centerX }
+    guard orderedActual.allSatisfy({ element, frame in
+        abs(frame.centerY - orderedActual[0].1.centerY) <= 2 &&
+            hitTest(x: frame.centerX, y: frame.centerY, relatedTo: element)
+    }), zip(orderedActual, orderedActual.dropFirst()).allSatisfy({ left, right in
+        let centerSeparation = right.1.centerX - left.1.centerX
+        return left.1.x < right.1.x &&
+            centerSeparation > min(left.1.width, right.1.width) / 2
+    })
+    else { throw ProbeError.rejected("dynamic-fixture-order-fallback-rejected") }
+    return zip(orderedExpected, orderedActual).map { expected, actual in
+        resolved(item: expected.0, match: (actual.0, actual.1))
     }
 }
 

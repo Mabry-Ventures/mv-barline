@@ -38,3 +38,14 @@ Phase 3 cycles use two independently verified input paths:
 The coordinator rejects mismatched display geometry, multiple CPLCODEX01
 windows, a non-frontmost Screen Sharing app, an incomplete probe, or any
 activation delta other than one.
+
+Run the full P3 pilot with an absolute directory on CPLCODEX01:
+
+```bash
+./script/run-p3-pilot.sh \
+  "/Users/jaredmabry/Library/Application Support/BarlineArrangementLab/evidence/<sha>/p3-pilot" \
+  20
+```
+
+The pilot discovers the current native order before every cycle, requests the
+opposite placement, and runs 20 fresh-launch cycles for each admitted class.
