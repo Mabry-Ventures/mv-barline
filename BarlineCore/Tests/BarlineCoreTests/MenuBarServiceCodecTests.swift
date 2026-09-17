@@ -67,7 +67,13 @@ struct MenuBarServiceCodecTests {
             canMove: true,
             canReveal: false,
             canActivate: true,
-            canRestore: true
+            canRestore: true,
+            arrangement: MenuBarArrangementCapabilities(
+                canReorderNativeItems: true,
+                visibilityAssignmentGranularity: .item,
+                canReorderShelfItems: true,
+                canApplySavedNativeOrder: true
+            )
         )
         let snapshot = makeCodecSnapshot()
         let capturedImage = MenuBarCapturedImage(
@@ -122,6 +128,45 @@ struct MenuBarServiceCodecTests {
             )
             #expect(decoded == response)
         }
+    }
+
+    @Test("Older capability payloads decode without explicit arrangement ownership")
+    func legacyCapabilitiesDecodeWithoutArrangementOwnership() throws {
+        let data = Data(
+            #"{"canSnapshot":true,"canMove":true,"canReveal":true,"canActivate":true,"canRestore":true,"canCapture":false}"#.utf8
+        )
+
+        let capabilities = try JSONDecoder().decode(MenuBarCapabilities.self, from: data)
+
+        #expect(capabilities.arrangement == nil)
+        #expect(capabilities.canMove)
+        #expect(capabilities.canRestore)
+    }
+
+    @Test("Explicit arrangement ownership survives the helper wire format")
+    func explicitArrangementOwnershipRoundTrips() throws {
+        let expected = MenuBarCapabilities(
+            canSnapshot: true,
+            canMove: true,
+            canReveal: false,
+            canActivate: true,
+            canRestore: false,
+            canCapture: false,
+            moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+            arrangement: MenuBarArrangementCapabilities(
+                canReorderNativeItems: true,
+                visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                canReorderShelfItems: true,
+                canApplySavedNativeOrder: false
+            )
+        )
+
+        let decoded = try JSONDecoder().decode(
+            MenuBarCapabilities.self,
+            from: JSONEncoder().encode(expected)
+        )
+
+        #expect(decoded == expected)
     }
 
     @Test("Every backend failure keeps its associated data across the wire")

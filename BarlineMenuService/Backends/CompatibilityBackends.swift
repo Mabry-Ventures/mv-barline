@@ -16,7 +16,13 @@ actor TahoeMenuBarBackend: MenuBarBackend {
                 canReveal: canSynthesize,
                 canActivate: canSynthesize,
                 canRestore: canSynthesize,
-                canCapture: canSnapshot
+                canCapture: canSnapshot,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: canSynthesize,
+                    visibilityAssignmentGranularity: canSynthesize ? .item : .unavailable,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: canSynthesize
+                )
             )
         }
     }
@@ -113,7 +119,15 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
                 canReveal: false,
                 canActivate: canActivate,
                 canRestore: false,
-                canCapture: false
+                canCapture: false,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: concealmentController.isAvailable
+                        ? .applicationGroupAndKnownSystemItem
+                        : .unavailable,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
             )
         }
     }

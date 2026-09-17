@@ -89,6 +89,43 @@ public enum GoldenGateConcealmentPolicy {
         return resolution.concealedBundleIdentifiers.contains(item.bundleIdentifier)
     }
 
+    public static func supports(
+        _ configuration: MenuBarConcealmentConfiguration,
+        allItems: [MenuBarItemID],
+        barlineBundleIdentifier: String
+    ) -> Bool {
+        let visible = Set(configuration.visibleItemIDs)
+        let concealed = Set(configuration.concealedItemIDs)
+        guard visible.isDisjoint(with: concealed) else { return false }
+        let requested = visible.union(concealed)
+        guard requested.isSubset(of: Set(allItems)) else { return false }
+
+        for (bundleIdentifier, items) in Dictionary(grouping: allItems, by: \.bundleIdentifier) {
+            let itemSet = Set(items)
+            let requestedForBundle = requested.intersection(itemSet)
+            guard requestedForBundle.isEmpty || requestedForBundle == itemSet else {
+                return false
+            }
+            if bundleIdentifier == barlineBundleIdentifier.lowercased(),
+               !concealed.isDisjoint(with: itemSet)
+            {
+                return false
+            }
+            if bundleIdentifier.hasPrefix("com.apple."),
+               concealed.intersection(itemSet).contains(where: { systemItemIdentifier(for: $0) == nil })
+            {
+                return false
+            }
+            if !bundleIdentifier.hasPrefix("com.apple."),
+               !concealed.isDisjoint(with: itemSet),
+               !itemSet.isSubset(of: concealed)
+            {
+                return false
+            }
+        }
+        return true
+    }
+
     /// Returns whether macOS 27 can independently assign an item between
     /// Barline's visible and concealed sections. Third-party applications are
     /// controlled at bundle granularity, so an application exposing multiple

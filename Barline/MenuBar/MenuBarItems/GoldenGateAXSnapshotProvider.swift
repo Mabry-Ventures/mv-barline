@@ -261,12 +261,18 @@ actor GoldenGateAXSnapshotProvider {
             let canSnapshot = await (try? snapshot()) != nil
             return MenuBarCapabilities(
                 canSnapshot: canSnapshot,
-                canMove: canSnapshot,
+                canMove: false,
                 canReveal: false,
                 canActivate: canSnapshot,
-                canRestore: canSnapshot,
+                canRestore: false,
                 canCapture: false,
-                moveDestinationSupport: .emptySectionAllowed
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
             )
         }
     }

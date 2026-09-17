@@ -13,6 +13,38 @@ public enum MenuBarMoveDestinationSupport: String, Codable, Sendable {
     case logicalSectionsPreserveNativeOrder
 }
 
+public enum MenuBarVisibilityAssignmentGranularity: String, Codable, Sendable {
+    case unavailable
+    case item
+    case applicationGroupAndKnownSystemItem
+}
+
+public struct MenuBarArrangementCapabilities: Codable, Equatable, Sendable {
+    public let canReorderNativeItems: Bool
+    public let visibilityAssignmentGranularity: MenuBarVisibilityAssignmentGranularity
+    public let canReorderShelfItems: Bool
+    public let canApplySavedNativeOrder: Bool
+
+    public init(
+        canReorderNativeItems: Bool,
+        visibilityAssignmentGranularity: MenuBarVisibilityAssignmentGranularity,
+        canReorderShelfItems: Bool,
+        canApplySavedNativeOrder: Bool
+    ) {
+        self.canReorderNativeItems = canReorderNativeItems
+        self.visibilityAssignmentGranularity = visibilityAssignmentGranularity
+        self.canReorderShelfItems = canReorderShelfItems
+        self.canApplySavedNativeOrder = canApplySavedNativeOrder
+    }
+
+    public static let unavailable = MenuBarArrangementCapabilities(
+        canReorderNativeItems: false,
+        visibilityAssignmentGranularity: .unavailable,
+        canReorderShelfItems: false,
+        canApplySavedNativeOrder: false
+    )
+}
+
 public struct MenuBarCapabilities: Codable, Equatable, Sendable {
     public let canSnapshot: Bool
     public let canMove: Bool
@@ -22,6 +54,9 @@ public struct MenuBarCapabilities: Codable, Equatable, Sendable {
     public let canCapture: Bool
     /// Missing on older peers means a physical destination item is required.
     public let moveDestinationSupport: MenuBarMoveDestinationSupport?
+    /// Missing on older peers keeps the legacy capability projection in
+    /// effect while callers migrate to explicit state-owner capabilities.
+    public let arrangement: MenuBarArrangementCapabilities?
 
     public init(
         canSnapshot: Bool,
@@ -30,7 +65,8 @@ public struct MenuBarCapabilities: Codable, Equatable, Sendable {
         canActivate: Bool,
         canRestore: Bool,
         canCapture: Bool = false,
-        moveDestinationSupport: MenuBarMoveDestinationSupport? = nil
+        moveDestinationSupport: MenuBarMoveDestinationSupport? = nil,
+        arrangement: MenuBarArrangementCapabilities? = nil
     ) {
         self.canSnapshot = canSnapshot
         self.canMove = canMove
@@ -39,6 +75,7 @@ public struct MenuBarCapabilities: Codable, Equatable, Sendable {
         self.canRestore = canRestore
         self.canCapture = canCapture
         self.moveDestinationSupport = moveDestinationSupport
+        self.arrangement = arrangement
     }
 
     public static let fallback = MenuBarCapabilities(
