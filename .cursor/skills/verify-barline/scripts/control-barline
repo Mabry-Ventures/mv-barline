@@ -418,15 +418,17 @@ cmd_linux_gates() {
         printf 'ui=gated\n'
     } | tee "$dir/linux-gates.log"
 
+    # Match ./script/ci.sh fast: executable hygiene/firewall scripts run directly;
+    # Darwin-free test scripts are invoked with bash even when the file is not +x.
     run_named_gate repo-hygiene ./script/ci/repo_hygiene.sh || failures=$((failures + 1))
     run_named_gate architecture-firewall ./script/ci/architecture_firewall.sh || failures=$((failures + 1))
-    run_named_gate platform-lane ./script/test-platform-lane.sh || failures=$((failures + 1))
+    run_named_gate platform-lane bash ./script/test-platform-lane.sh || failures=$((failures + 1))
     run_named_gate app-intents-topology ruby ./script/test-app-intents-topology.rb || failures=$((failures + 1))
-    run_named_gate installed-evidence ./script/test-installed-evidence.sh || failures=$((failures + 1))
-    run_named_gate evidence-writer ./script/test-evidence-writer.sh || failures=$((failures + 1))
-    run_named_gate installed-app-pause ./script/test-installed-app-pause.sh || failures=$((failures + 1))
-    run_named_gate release-notes ./script/test-release-notes.sh || failures=$((failures + 1))
-    run_named_gate release-evidence-privacy ./script/test-release-evidence-privacy.sh || failures=$((failures + 1))
+    run_named_gate installed-evidence bash ./script/test-installed-evidence.sh || failures=$((failures + 1))
+    run_named_gate evidence-writer bash ./script/test-evidence-writer.sh || failures=$((failures + 1))
+    run_named_gate installed-app-pause bash ./script/test-installed-app-pause.sh || failures=$((failures + 1))
+    run_named_gate release-notes bash ./script/test-release-notes.sh || failures=$((failures + 1))
+    run_named_gate release-evidence-privacy bash ./script/test-release-evidence-privacy.sh || failures=$((failures + 1))
     run_named_gate site-tests node --test site/tests/*.test.mjs || failures=$((failures + 1))
 
     printf '\nlinux-gates failures=%d\n' "$failures" | tee -a "$dir/linux-gates.log"
