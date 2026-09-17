@@ -1157,15 +1157,23 @@ actor GoldenGateAXSnapshotProvider {
 
     @discardableResult
     private func commitPersistence(_ prepared: PreparedPersistence) -> Bool {
+        guard VerifiedUserDefaultsDataCommit.commit(
+            [
+                Self.explicitLayoutKey: prepared.assignmentData,
+                Self.retainedInventoryKey: prepared.descriptorData,
+            ],
+            to: .standard,
+            synchronize: { UserDefaults.standard.synchronize() }
+        ) else {
+            return false
+        }
         explicitAssignments = Dictionary(uniqueKeysWithValues: prepared.assignments.map {
             ($0.itemID, $0)
         })
         retainedDescriptors = Dictionary(uniqueKeysWithValues: prepared.descriptors.map {
             ($0.id, $0)
         })
-        UserDefaults.standard.set(prepared.assignmentData, forKey: Self.explicitLayoutKey)
-        UserDefaults.standard.set(prepared.descriptorData, forKey: Self.retainedInventoryKey)
-        return UserDefaults.standard.synchronize()
+        return true
     }
 
     private func companionState(
