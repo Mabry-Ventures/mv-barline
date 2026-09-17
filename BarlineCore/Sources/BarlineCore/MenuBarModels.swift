@@ -423,6 +423,16 @@ public struct MenuBarSnapshot: Codable, Hashable, Sendable {
 }
 
 public struct MenuBarMovePlanner: Sendable {
+    public enum LogicalSectionVerificationFailure: String, Sendable {
+        case sourceMissing = "source_missing"
+        case applicationGroupEmpty = "application_group_empty"
+        case semanticIdentityChanged = "semantic_identity_changed"
+        case requestedSectionMissing = "requested_section_missing"
+        case requestedDisplayMissing = "requested_display_missing"
+        case unrelatedLayoutChanged = "unrelated_layout_changed"
+        case itemMissing = "item_missing"
+    }
+
     public init() {}
 
     /// Returns the helper's global, section-relative candidate index. Prefer
@@ -504,9 +514,23 @@ public struct MenuBarMovePlanner: Sendable {
         from previousSnapshot: MenuBarSnapshot,
         visibilityAssignmentGranularity: MenuBarVisibilityAssignmentGranularity?
     ) -> Bool {
+        logicalSectionVerificationFailure(
+            operation,
+            in: snapshot,
+            from: previousSnapshot,
+            visibilityAssignmentGranularity: visibilityAssignmentGranularity
+        ) == nil
+    }
+
+    public func logicalSectionVerificationFailure(
+        _ operation: MenuBarMoveOperation,
+        in snapshot: MenuBarSnapshot,
+        from previousSnapshot: MenuBarSnapshot,
+        visibilityAssignmentGranularity: MenuBarVisibilityAssignmentGranularity?
+    ) -> LogicalSectionVerificationFailure? {
         guard let previousItem = previousSnapshot.items.first(where: {
             $0.id == operation.itemID
-        }) else { return false }
+        }) else { return .sourceMissing }
 
         if visibilityAssignmentGranularity == .applicationGroupAndKnownSystemItem,
            !previousItem.id.bundleIdentifier.lowercased().hasPrefix("com.apple.")
@@ -528,35 +552,42 @@ public struct MenuBarMovePlanner: Sendable {
             // still belong to the prior application group; convergence is
             // confirmed separately from two consecutive observations.
             let identitiesMatch = currentIdentities.isSubset(of: previousIdentities)
-            guard !currentGroup.isEmpty,
-                  identitiesMatch,
-                  currentGroup.allSatisfy({ $0.section == operation.section }),
-                  operation.destinationDisplayID.map({ displayID in
-                      currentGroup.allSatisfy { $0.displayID == displayID }
-                  }) != false
-            else {
-                return false
+            guard !currentGroup.isEmpty else { return .applicationGroupEmpty }
+            guard identitiesMatch else { return .semanticIdentityChanged }
+            guard currentGroup.allSatisfy({ $0.section == operation.section }) else {
+                return .requestedSectionMissing
             }
-            return unchangedLogicalItemsMatch(
+            guard operation.destinationDisplayID.map({ displayID in
+                currentGroup.allSatisfy { $0.displayID == displayID }
+            }) != false else {
+                return .requestedDisplayMissing
+            }
+            guard unchangedLogicalItemsMatch(
                 previousSnapshot,
                 snapshot,
                 excludingPrevious: Set(previousGroup.map(\.id)),
                 excludingCurrent: Set(currentGroup.map(\.id))
-            )
+            ) else {
+                return .unrelatedLayoutChanged
+            }
+            return nil
         }
 
         guard let item = snapshot.items.first(where: { $0.id == operation.itemID }),
-              item.section == operation.section,
-              operation.destinationDisplayID.map({ item.displayID == $0 }) != false
-        else {
-            return false
+              item.section == operation.section
+        else { return .itemMissing }
+        guard operation.destinationDisplayID.map({ item.displayID == $0 }) != false else {
+            return .requestedDisplayMissing
         }
-        return unchangedLogicalItemsMatch(
+        guard unchangedLogicalItemsMatch(
             previousSnapshot,
             snapshot,
             excludingPrevious: [operation.itemID],
             excludingCurrent: [operation.itemID]
-        )
+        ) else {
+            return .unrelatedLayoutChanged
+        }
+        return nil
     }
 
     private struct LogicalSemanticIdentity: Hashable {

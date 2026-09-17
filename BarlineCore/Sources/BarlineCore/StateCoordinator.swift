@@ -722,6 +722,18 @@ public actor MenuBarStateCoordinator {
                        visibilityAssignmentGranularity: visibilityAssignmentGranularity
                    )
                 {
+                    if moveDestinationSupport == .logicalSectionsPreserveNativeOrder,
+                       let failure = MenuBarMovePlanner().logicalSectionVerificationFailure(
+                           operation,
+                           in: snapshot,
+                           from: before,
+                           visibilityAssignmentGranularity: visibilityAssignmentGranularity
+                       )
+                    {
+                        Self.logger.notice(
+                            "Visibility logical postcondition mismatch: \(failure.rawValue, privacy: .public)"
+                        )
+                    }
                     throw MenuBarBackendError.operationFailed(
                         "menu bar move did not reach requested section"
                     )
