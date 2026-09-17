@@ -16,7 +16,10 @@ public enum SyntheticDragProbeRunner {
         var afterOrder = [String]()
         var eventReceipt = EventPostReceipt()
         var unrelatedOrderPreserved = false
-        var activationDelta: Int?
+        let activationDelta: Int? = nil
+        var activationMethod: String?
+        var sourceFrameAfter: LabRect?
+        var sourceDisplayFrame: LabRect?
 
         func report(disposition: String, reason: String? = nil) -> SyntheticMoveReport {
             SyntheticMoveReport(
@@ -34,7 +37,10 @@ public enum SyntheticDragProbeRunner {
                 mouseUpPosted: eventReceipt.mouseUpPosted,
                 buttonCleanupVerified: eventReceipt.buttonCleanupVerified,
                 unrelatedOrderPreserved: unrelatedOrderPreserved,
-                activationDelta: activationDelta
+                activationDelta: activationDelta,
+                activationMethod: activationMethod,
+                sourceFrameAfter: sourceFrameAfter,
+                sourceDisplayFrame: sourceDisplayFrame
             )
         }
 
@@ -73,6 +79,13 @@ public enum SyntheticDragProbeRunner {
             guard abs(source.frame.centerY - destination.frame.centerY) <= 2 else {
                 throw ProbeError.rejected("source-and-destination-not-co-linear")
             }
+            sourceDisplayFrame = accessibilityDisplayFrame(containing: CGPoint(
+                x: source.frame.centerX,
+                y: source.frame.centerY
+            ))
+            guard sourceDisplayFrame != nil else {
+                throw ProbeError.rejected("source-display-unresolved")
+            }
             beforeOrder = resolved.sorted(by: screenOrder).map(\.token)
             guard FixtureOrderVerifier.satisfiesPlacement(
                 order: beforeOrder,
@@ -99,6 +112,7 @@ public enum SyntheticDragProbeRunner {
                     to: destinationPoint
                 )
             }
+            eventReceipt.buttonCleanupVerified = waitForLeftButtonRelease()
             if eventReceipt.mouseDownPosted {
                 stages.append(.mouseDownPosted)
                 stages.append(.dragging)
@@ -122,8 +136,8 @@ public enum SyntheticDragProbeRunner {
 
             stages.append(.observing)
             Thread.sleep(forTimeInterval: 0.4)
-            let refreshedReceipts = try refresh(receiptURLs: receiptURLs, priorReceipts: receipts)
-            let refreshed = try refreshedReceipts.flatMap(resolve)
+            _ = try refresh(receiptURLs: receiptURLs, priorReceipts: receipts)
+            let refreshed = try reobserveLive(resolved)
             afterOrder = refreshed.sorted(by: screenOrder).map(\.token)
             unrelatedOrderPreserved = FixtureOrderVerifier.preservesRelativeOrder(
                 before: beforeOrder,
@@ -145,33 +159,10 @@ public enum SyntheticDragProbeRunner {
                 stages.append(.indeterminate)
                 return report(disposition: "cleanupIndeterminate", reason: "moved-source-unresolved")
             }
-            let priorActivationCount = refreshedSource.activations
-            guard postSingleClick(at: CGPoint(
-                x: refreshedSource.frame.centerX,
-                y: refreshedSource.frame.centerY
-            )) else {
-                stages.append(.indeterminate)
-                return report(disposition: "cleanupIndeterminate", reason: "activation-click-construction-failed")
-            }
-            let activatedReceipts = try waitForActivation(
-                receiptURLs: receiptURLs,
-                sourceToken: sourceToken,
-                priorCount: priorActivationCount
-            )
-            guard let activatedSource = activatedReceipts
-                .flatMap(\.items)
-                .first(where: { $0.token == sourceToken })
-            else {
-                stages.append(.indeterminate)
-                return report(disposition: "cleanupIndeterminate", reason: "activation-receipt-unavailable")
-            }
-            activationDelta = activatedSource.activations - priorActivationCount
-            guard activationDelta == 1 else {
-                stages.append(.rejected)
-                return report(disposition: "moveNotObserved", reason: "activation-count-was-not-exactly-one")
-            }
+            sourceFrameAfter = refreshedSource.frame
+            activationMethod = "hostForwardedPhysicalPending"
             stages.append(.verified)
-            return report(disposition: "moveVerified")
+            return report(disposition: "movePlacementVerified")
         } catch let error as ProbeError {
             stages.append(.rejected)
             return report(disposition: "preflightRejected", reason: error.description)
@@ -264,6 +255,26 @@ private func resolve(receipt: FixtureReceipt) throws -> [ResolvedFixtureItem] {
             processIdentifier: receipt.processIdentifier,
             frame: match.1,
             element: match.0
+        )
+    }
+}
+
+private func reobserveLive(_ items: [ResolvedFixtureItem]) throws -> [ResolvedFixtureItem] {
+    try items.map { item in
+        guard stringAttribute(item.element, kAXRoleAttribute as CFString) == "AXMenuBarItem",
+              stringAttribute(item.element, kAXSubroleAttribute as CFString) == "AXMenuExtra",
+              let currentFrame = frame(of: item.element),
+              hitTest(x: currentFrame.centerX, y: currentFrame.centerY, relatedTo: item.element)
+        else {
+            throw ProbeError.rejected("live-element-invalidated-after-drag")
+        }
+        return ResolvedFixtureItem(
+            token: item.token,
+            generation: item.generation,
+            activations: item.activations,
+            processIdentifier: item.processIdentifier,
+            frame: currentFrame,
+            element: item.element
         )
     }
 }
@@ -394,6 +405,21 @@ private func displayTopology() -> [DisplayDescriptor] {
     }.sorted { $0.identifier < $1.identifier }
 }
 
+private func accessibilityDisplayFrame(containing point: CGPoint) -> LabRect? {
+    var display: CGDirectDisplayID = 0
+    var count: UInt32 = 0
+    guard CGGetDisplaysWithPoint(point, 1, &display, &count) == .success, count == 1 else {
+        return nil
+    }
+    let bounds = CGDisplayBounds(display)
+    return LabRect(
+        x: bounds.minX,
+        y: bounds.minY,
+        width: bounds.width,
+        height: bounds.height
+    )
+}
+
 private func waitForQuietPointer() -> Bool {
     let deadline = Date().addingTimeInterval(2)
     repeat {
@@ -452,8 +478,6 @@ private func postCommandDrag(from start: CGPoint, to end: CGPoint) -> EventPostR
             mouseUp.post(tap: .cghidEventTap)
             receipt.mouseUpPosted = true
         }
-        Thread.sleep(forTimeInterval: 0.03)
-        receipt.buttonCleanupVerified = !CGEventSource.buttonState(.combinedSessionState, button: .left)
     }
 
     if let move = CGEvent(
@@ -467,8 +491,10 @@ private func postCommandDrag(from start: CGPoint, to end: CGPoint) -> EventPostR
     }
     mouseDown.post(tap: .cghidEventTap)
     receipt.mouseDownPosted = true
+    Thread.sleep(forTimeInterval: 0.18)
 
-    let steps = 24
+    let distance = abs(end.x - start.x) + abs(end.y - start.y)
+    let steps = min(24, max(6, Int(distance / 40)))
     for step in 1 ... steps {
         let progress = CGFloat(step) / CGFloat(steps)
         let point = CGPoint(
@@ -484,7 +510,7 @@ private func postCommandDrag(from start: CGPoint, to end: CGPoint) -> EventPostR
         dragged.flags = .maskCommand
         dragged.post(tap: .cghidEventTap)
         lastPoint = point
-        Thread.sleep(forTimeInterval: 0.008)
+        Thread.sleep(forTimeInterval: 0.03)
         if let actual = CGEvent(source: nil)?.location,
            hypot(actual.x - point.x, actual.y - point.y) > 8
         {
@@ -492,10 +518,22 @@ private func postCommandDrag(from start: CGPoint, to end: CGPoint) -> EventPostR
             break
         }
     }
+    Thread.sleep(forTimeInterval: 0.12)
     mouseUp.location = lastPoint
     mouseUp.post(tap: .cghidEventTap)
     receipt.mouseUpPosted = true
     return receipt
+}
+
+private func waitForLeftButtonRelease() -> Bool {
+    let deadline = Date().addingTimeInterval(0.5)
+    repeat {
+        if !CGEventSource.buttonState(.combinedSessionState, button: .left) {
+            return true
+        }
+        Thread.sleep(forTimeInterval: 0.01)
+    } while Date() < deadline
+    return false
 }
 
 private func refresh(
@@ -521,46 +559,6 @@ private func refresh(
         Thread.sleep(forTimeInterval: 0.05)
     } while Date() < deadline
     throw ProbeError.rejected("fixture-refresh-timeout")
-}
-
-private func postSingleClick(at point: CGPoint) -> Bool {
-    guard let source = CGEventSource(stateID: .hidSystemState),
-          let down = CGEvent(
-              mouseEventSource: source,
-              mouseType: .leftMouseDown,
-              mouseCursorPosition: point,
-              mouseButton: .left
-          ),
-          let up = CGEvent(
-              mouseEventSource: source,
-              mouseType: .leftMouseUp,
-              mouseCursorPosition: point,
-              mouseButton: .left
-          )
-    else { return false }
-    down.post(tap: .cghidEventTap)
-    Thread.sleep(forTimeInterval: 0.03)
-    up.post(tap: .cghidEventTap)
-    return true
-}
-
-private func waitForActivation(
-    receiptURLs: [URL],
-    sourceToken: String,
-    priorCount: Int
-) throws -> [FixtureReceipt] {
-    let deadline = Date().addingTimeInterval(1.5)
-    repeat {
-        let receipts = try receiptURLs.map(loadReceipt)
-        if let count = receipts.flatMap(\.items)
-            .first(where: { $0.token == sourceToken })?.activations,
-            count > priorCount
-        {
-            return receipts
-        }
-        Thread.sleep(forTimeInterval: 0.05)
-    } while Date() < deadline
-    throw ProbeError.rejected("activation-timeout")
 }
 
 private func screenOrder(_ lhs: ResolvedFixtureItem, _ rhs: ResolvedFixtureItem) -> Bool {

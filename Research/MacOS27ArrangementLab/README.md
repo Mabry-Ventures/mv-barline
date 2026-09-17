@@ -21,3 +21,18 @@ The research gates and runtime safety requirements are defined in
 
 The package deliberately contains no access to `com.apple.MenuBar`,
 `CFPreferencesSetValue`, or Barline's position-table store.
+
+Phase 3 cycles use two independently verified input paths:
+
+- `run-synthetic-move.sh` performs the native HID Command-drag inside the
+  trusted observer and proves relative placement, unrelated order, and button
+  cleanup from live Accessibility elements.
+- `run-p3-cycle.sh` briefly foregrounds the unique CPLCODEX01 Screen Sharing
+  window, forwards one physical click to the moved item, requires an activation
+  delta of exactly one, and restores the previously frontmost app. This is
+  necessary because macOS 27 accepts the native drag but its menu-bar proxy can
+  report a successful `AXPress` while declining direct synthetic activation.
+
+The coordinator rejects mismatched display geometry, multiple CPLCODEX01
+windows, a non-frontmost Screen Sharing app, an incomplete probe, or any
+activation delta other than one.

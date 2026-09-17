@@ -226,6 +226,9 @@ public struct SyntheticMoveReport: Codable, Equatable, Sendable {
     public let buttonCleanupVerified: Bool
     public let unrelatedOrderPreserved: Bool
     public let activationDelta: Int?
+    public let activationMethod: String?
+    public let sourceFrameAfter: LabRect?
+    public let sourceDisplayFrame: LabRect?
 
     public init(
         schema: Int = 1,
@@ -243,7 +246,10 @@ public struct SyntheticMoveReport: Codable, Equatable, Sendable {
         mouseUpPosted: Bool,
         buttonCleanupVerified: Bool,
         unrelatedOrderPreserved: Bool,
-        activationDelta: Int?
+        activationDelta: Int?,
+        activationMethod: String?,
+        sourceFrameAfter: LabRect?,
+        sourceDisplayFrame: LabRect?
     ) {
         self.schema = schema
         self.sourceToken = sourceToken
@@ -261,6 +267,9 @@ public struct SyntheticMoveReport: Codable, Equatable, Sendable {
         self.buttonCleanupVerified = buttonCleanupVerified
         self.unrelatedOrderPreserved = unrelatedOrderPreserved
         self.activationDelta = activationDelta
+        self.activationMethod = activationMethod
+        self.sourceFrameAfter = sourceFrameAfter
+        self.sourceDisplayFrame = sourceDisplayFrame
     }
 }
 
