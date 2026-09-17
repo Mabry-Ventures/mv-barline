@@ -241,6 +241,156 @@ struct StateCoordinatorTests {
         #expect(result.items.first(where: { $0.id == unrelated })?.section == .visible)
     }
 
+    @Test("macOS 27 accepts a collapsed AX application group after reveal")
+    func acceptsGoldenGateApplicationGroupAXCollapseAfterReveal() async throws {
+        let display = MenuBarDisplayID("test-display")
+        let first = MenuBarItemID(
+            bundleIdentifier: "com.example.multi-item",
+            title: "Metric",
+            alias: "occurrence-1"
+        )
+        let second = MenuBarItemID(
+            bundleIdentifier: "com.example.multi-item",
+            title: "Metric",
+            alias: "occurrence-2"
+        )
+        let unrelated = MenuBarItemID(
+            bundleIdentifier: "com.example.unrelated",
+            accessibilityIdentifier: "only"
+        )
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: Date(),
+            items: [
+                MenuBarItemDescriptor(id: unrelated, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: first, section: .hidden, order: 1, displayID: display),
+                MenuBarItemDescriptor(id: second, section: .hidden, order: 2, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let after = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: before.capturedAt,
+            items: [
+                MenuBarItemDescriptor(id: first, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: unrelated, section: .visible, order: 1, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
+            snapshots: [before, after],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: false,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
+            )
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+
+        let result = try await coordinator.perform(
+            .move(MenuBarMoveOperation(
+                itemID: first,
+                section: .visible,
+                index: 0,
+                destinationDisplayID: display
+            )),
+            now: before.capturedAt
+        )
+
+        #expect(result == after)
+        #expect(await backend.moveOperations.count == 1)
+        #expect(await coordinator.lastRejection == nil)
+    }
+
+    @Test("macOS 27 rejects semantic substitution during a collapsed reveal")
+    func rejectsGoldenGateApplicationGroupSemanticSubstitutionAfterReveal() async throws {
+        let display = MenuBarDisplayID("test-display")
+        let first = MenuBarItemID(
+            bundleIdentifier: "com.example.multi-item",
+            title: "Metric",
+            alias: "occurrence-1"
+        )
+        let second = MenuBarItemID(
+            bundleIdentifier: "com.example.multi-item",
+            title: "Metric",
+            alias: "occurrence-2"
+        )
+        let substituted = MenuBarItemID(
+            bundleIdentifier: "com.example.multi-item",
+            title: "Different Metric",
+            alias: "occurrence-3"
+        )
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: Date(),
+            items: [
+                MenuBarItemDescriptor(id: first, section: .hidden, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: second, section: .hidden, order: 1, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let after = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: before.capturedAt,
+            items: [
+                MenuBarItemDescriptor(id: substituted, section: .visible, order: 0, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
+            snapshots: [before, after],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: false,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
+            )
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(
+                maximumAttempts: 1,
+                baseDelay: .zero,
+                maximumDelay: .zero,
+                maximumJitterPermille: 0
+            )
+        )
+
+        await #expect(throws: MenuBarBackendError.mutationRecoveryFailed) {
+            try await coordinator.perform(
+                .move(MenuBarMoveOperation(
+                    itemID: first,
+                    section: .visible,
+                    index: 0,
+                    destinationDisplayID: display
+                )),
+                now: before.capturedAt
+            )
+        }
+        #expect(await backend.moveOperations.count == 1)
+    }
+
     @Test("macOS 27 rejects unrelated within-section reordering during visibility assignment")
     func rejectsGoldenGateUnrelatedNativeReordering() async throws {
         let display = MenuBarDisplayID("test-display")
