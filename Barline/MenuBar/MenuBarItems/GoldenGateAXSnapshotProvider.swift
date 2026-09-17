@@ -332,6 +332,10 @@ actor GoldenGateAXSnapshotProvider {
                     height: observation.bounds.height
                 ))
         }
+        let effectiveAssignments = explicitAssignments.merging(
+            verificationAssignments ?? [:],
+            uniquingKeysWith: { _, proposed in proposed }
+        )
         let built = try GoldenGateMenuBarSnapshotBuilder.build(
             observations: observations,
             displayIdentities: displayIdentities,
@@ -344,12 +348,8 @@ actor GoldenGateAXSnapshotProvider {
             ),
             appSigningIdentifier: signingIdentifier,
             rememberedSections: hiddenControlUsesLiveGeometry ? [:] : rememberedSections,
-            assignedSections: [:],
+            assignedSections: effectiveAssignments.mapValues(\.section),
             generation: generation
-        )
-        let effectiveAssignments = explicitAssignments.merging(
-            verificationAssignments ?? [:],
-            uniquingKeysWith: { _, proposed in proposed }
         )
         var result = GoldenGateRetainedInventoryPolicy.merging(
             live: built,
