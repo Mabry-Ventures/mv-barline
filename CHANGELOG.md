@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.29 (build 103) — September 17, 2026
+## 1.0.30 (build 104) — September 17, 2026
 
 - Make macOS 27 layout changes transactional: verify complete section, display,
   inventory, and shelf-order postconditions, require settled profile
@@ -12,6 +12,8 @@
   assignments and shelf ordering without synthesizing native drags.
 - Treat bundle identifiers case-insensitively and exclude Barline's own controls
   from application-group concealment decisions.
+- Represent multi-item third-party publishers as one explicit application
+  group and keep that group reversible from either visibility section.
 
 ## 1.0.22 (build 96) — September 16, 2026
 

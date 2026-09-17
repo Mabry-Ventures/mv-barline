@@ -225,4 +225,25 @@ public enum GoldenGateConcealmentPolicy {
             $0.bundleIdentifier.caseInsensitiveCompare(item.bundleIdentifier) == .orderedSame
         } == 1
     }
+
+    /// Returns whether selecting this item can express a safe logical
+    /// visibility assignment. Third-party applications are assigned as one
+    /// complete bundle group when they publish multiple status items; Apple
+    /// items remain limited to known native assessment identifiers.
+    public static func supportsLogicalAssignment(
+        _ item: MenuBarItemID,
+        among allItems: [MenuBarItemID],
+        barlineBundleIdentifier: String
+    ) -> Bool {
+        let normalizedBundleIdentifier = item.bundleIdentifier.lowercased()
+        guard normalizedBundleIdentifier != barlineBundleIdentifier.lowercased() else {
+            return false
+        }
+        if normalizedBundleIdentifier.hasPrefix("com.apple.") {
+            return systemItemIdentifier(for: item) != nil
+        }
+        return allItems.contains {
+            $0.bundleIdentifier.caseInsensitiveCompare(item.bundleIdentifier) == .orderedSame
+        }
+    }
 }

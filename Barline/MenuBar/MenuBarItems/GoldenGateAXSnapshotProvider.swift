@@ -1387,7 +1387,7 @@ actor GoldenGateAXSnapshotProvider {
             ?? "com.mabryventures.Barline"
         let items = snapshot.items.map { item in
             let canReorderShelfItem = item.section != .visible
-            let canAssignVisibility = GoldenGateConcealmentPolicy.supportsIndependentAssignment(
+            let canAssignVisibility = GoldenGateConcealmentPolicy.supportsLogicalAssignment(
                 item.id,
                 among: allItemIDs,
                 barlineBundleIdentifier: barlineBundleIdentifier

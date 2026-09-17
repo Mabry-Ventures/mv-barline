@@ -227,6 +227,31 @@ struct GoldenGateConcealmentPolicyTests {
         ))
     }
 
+    @Test func multipleThirdPartyItemsCanBeAssignedAsOneLogicalGroup() {
+        let first = item("COM.EXAMPLE.UTILITY", "first")
+        let second = item("com.example.utility", "second")
+        #expect(GoldenGateConcealmentPolicy.supportsLogicalAssignment(
+            first,
+            among: [first, second],
+            barlineBundleIdentifier: barlineID
+        ))
+    }
+
+    @Test func logicalAssignmentRejectsBarlineAndUnknownAppleItems() {
+        let control = item("com.mabryventures.Barline", "control")
+        let unknownAppleItem = item("com.apple.systemuiserver", "TimeMachine")
+        #expect(!GoldenGateConcealmentPolicy.supportsLogicalAssignment(
+            control,
+            among: [control],
+            barlineBundleIdentifier: barlineID
+        ))
+        #expect(!GoldenGateConcealmentPolicy.supportsLogicalAssignment(
+            unknownAppleItem,
+            among: [unknownAppleItem],
+            barlineBundleIdentifier: barlineID
+        ))
+    }
+
     private func item(
         _ bundleIdentifier: String,
         _ title: String,

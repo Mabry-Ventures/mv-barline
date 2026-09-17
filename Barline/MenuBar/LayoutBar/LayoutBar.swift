@@ -91,6 +91,13 @@ struct LayoutBar: View {
 
 @available(macOS 27.0, *)
 private struct MenuBarInventoryBar: View {
+    private struct AssignmentEntry: Identifiable {
+        let item: MenuBarItem
+        let assignmentGroupSize: Int
+
+        var id: MenuBarItemID { item.stableID }
+    }
+
     @ObservedObject var itemManager: MenuBarItemManager
 
     let section: MenuBarSection.Name
@@ -108,6 +115,33 @@ private struct MenuBarInventoryBar: View {
         itemManager.itemCache.managedItems(for: section)
     }
 
+    /// macOS 27 assigns third-party visibility at application-bundle
+    /// granularity. Present one explicit control for a multi-item publisher so
+    /// the UI never implies that one of its sibling status items can move by
+    /// itself.
+    private var assignmentEntries: [AssignmentEntry] {
+        let allItems = itemManager.itemCache.managedItems
+        var representedBundles = Set<String>()
+        return items.compactMap { item in
+            let normalizedBundleIdentifier = item.stableID.bundleIdentifier.lowercased()
+            guard !normalizedBundleIdentifier.hasPrefix("com.apple.") else {
+                return AssignmentEntry(item: item, assignmentGroupSize: 1)
+            }
+            let groupSize = allItems.count {
+                $0.stableID.bundleIdentifier.caseInsensitiveCompare(
+                    item.stableID.bundleIdentifier
+                ) == .orderedSame
+            }
+            guard groupSize > 1 else {
+                return AssignmentEntry(item: item, assignmentGroupSize: 1)
+            }
+            guard representedBundles.insert(normalizedBundleIdentifier).inserted else {
+                return nil
+            }
+            return AssignmentEntry(item: item, assignmentGroupSize: groupSize)
+        }
+    }
+
     var body: some View {
         Group {
             if items.isEmpty {
@@ -118,12 +152,14 @@ private struct MenuBarInventoryBar: View {
             } else {
                 ScrollView(.horizontal) {
                     HStack(spacing: 8) {
-                        ForEach(items, id: \.stableID) { item in
+                        ForEach(assignmentEntries) { entry in
                             MenuBarInventoryItem(
-                                item: item,
+                                item: entry.item,
+                                assignmentGroupSize: entry.assignmentGroupSize,
                                 colorScheme: colorScheme,
-                                canAssign: item.isMovable && (section != .visible || item.canBeHidden),
-                                onAssign: { assign(item.stableID) }
+                                canAssign: entry.item.isMovable &&
+                                    (section != .visible || entry.item.canBeHidden),
+                                onAssign: { assign(entry.item.stableID) }
                             )
                         }
                     }
@@ -192,6 +228,7 @@ private struct MenuBarInventoryBar: View {
 @available(macOS 27.0, *)
 private struct MenuBarInventoryItem: View {
     let item: MenuBarItem
+    let assignmentGroupSize: Int
     let colorScheme: ColorScheme
     let canAssign: Bool
     let onAssign: () -> Void
@@ -253,6 +290,13 @@ private struct MenuBarInventoryItem: View {
                     .font(.system(size: 12, weight: .medium))
                     .foregroundStyle(foregroundColor)
                     .lineLimit(1)
+
+                if assignmentGroupSize > 1 {
+                    Text("\(assignmentGroupSize)")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(secondaryColor)
+                        .accessibilityHidden(true)
+                }
             }
             .padding(.horizontal, 10)
             .frame(height: 34)
@@ -263,11 +307,23 @@ private struct MenuBarInventoryItem: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(displayName)
-        .accessibilityHint("Move to the other visibility section")
+        .accessibilityLabel(accessibilityLabel)
+        .accessibilityHint(assignmentHint)
         .draggable(MenuBarLayoutTransfer(itemID: item.stableID))
-        .help(canAssign ? "Click or drag to move this item" : "This item cannot be moved independently")
+        .help(canAssign ? assignmentHint : "This item cannot be moved independently")
         .disabled(!canAssign)
+    }
+
+    private var accessibilityLabel: String {
+        guard assignmentGroupSize > 1 else { return displayName }
+        return "\(displayName), \(assignmentGroupSize) menu bar items"
+    }
+
+    private var assignmentHint: String {
+        guard assignmentGroupSize > 1 else {
+            return "Click or drag to move this item to the other visibility section"
+        }
+        return "Click or drag to move all \(assignmentGroupSize) \(displayName) items to the other visibility section"
     }
 }
 
