@@ -28,6 +28,7 @@ user-facing privacy policy in [PRIVACY.md](../PRIVACY.md).
 | [Private API boundary](PRIVATE_API_BOUNDARY.md) | Where private WindowServer behavior is isolated and why |
 | [Compatibility strategy](COMPATIBILITY.md) | Capability-probe backend selection across macOS versions |
 | [Compatibility firewall status](COMPATIBILITY_FIREWALL_STATUS.md) | The strict boundary check that keeps private symbols in the helper |
+| [macOS 27 arrangement research implementation plan](MACOS_27_RESEARCH_IMPLEMENTATION_PLAN.md) | Gated fixture research for a native arrangement primitive before production integration |
 | [Profile schema](PROFILE_SCHEMA.md) | Profile schema version 7, archive format, and migration rules |
 | [Dependencies](DEPENDENCIES.md) | Pinned Swift packages and why each is present |
 | [Architecture decision records](adr/) | Accepted decisions on the service boundary and concurrency exceptions |
