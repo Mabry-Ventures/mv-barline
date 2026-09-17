@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.31 (build 107) — September 17, 2026
+
+- Share one assignment session across every macOS 27 layout section so a
+  suspended move disables both its source and destination until the native
+  transaction has fully settled.
+- Reject opposite-section clicks and drops while another assignment is in
+  flight, preventing competing user actions from surfacing stale-layout
+  failures.
+- Add a deterministic suspension-point regression proving an overlapping
+  assignment never enters the backend and that the session releases after the
+  first operation completes.
+
 ## 1.0.31 (build 106) — September 17, 2026
 
 - Give multi-item macOS 27 publishers a stable application-level identity so

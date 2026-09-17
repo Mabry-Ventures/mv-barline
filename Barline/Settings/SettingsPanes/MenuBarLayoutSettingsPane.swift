@@ -3,11 +3,13 @@
 //  Barline
 //
 
+import BarlineCore
 import SwiftUI
 
 struct MenuBarLayoutSettingsPane: View {
     @EnvironmentObject var appState: AppState
     @ObservedObject var itemManager: MenuBarItemManager
+    @StateObject private var assignmentSession = MenuBarAssignmentSession()
 
     var body: some View {
         if !appState.permissions.accessibility.hasPermission {
@@ -186,7 +188,11 @@ struct MenuBarLayoutSettingsPane: View {
                     .font(.headline)
                     .padding(.leading, 8)
 
-                LayoutBar(imageCache: appState.imageCache, section: name)
+                LayoutBar(
+                    imageCache: appState.imageCache,
+                    assignmentSession: assignmentSession,
+                    section: name
+                )
             }
         }
     }

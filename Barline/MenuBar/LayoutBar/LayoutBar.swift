@@ -23,6 +23,7 @@ struct LayoutBar: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.colorScheme) private var colorScheme
     @ObservedObject var imageCache: MenuBarItemImageCache
+    @ObservedObject var assignmentSession: MenuBarAssignmentSession
 
     let section: MenuBarSection.Name
 
@@ -50,6 +51,7 @@ struct LayoutBar: View {
         if #available(macOS 27.0, *) {
             MenuBarInventoryBar(
                 itemManager: appState.itemManager,
+                assignmentSession: assignmentSession,
                 section: section,
                 colorScheme: colorScheme
             )
@@ -120,12 +122,12 @@ private struct MenuBarInventoryBar: View {
     }
 
     @ObservedObject var itemManager: MenuBarItemManager
+    @ObservedObject var assignmentSession: MenuBarAssignmentSession
 
     let section: MenuBarSection.Name
     let colorScheme: ColorScheme
 
     @State private var isDropTargeted = false
-    @State private var assignmentInFlight = false
     @State private var assignmentFailed = false
     @State private var assignmentFailureMessage = ""
 
@@ -211,7 +213,7 @@ private struct MenuBarInventoryBar: View {
                                 colorScheme: colorScheme,
                                 canAssign: entry.item.isMovable &&
                                     (section != .visible || entry.item.canBeHidden) &&
-                                    !assignmentInFlight,
+                                    !assignmentSession.isInFlight,
                                 onAssign: { assign(entry.id) }
                             )
                         }
@@ -230,7 +232,7 @@ private struct MenuBarInventoryBar: View {
             }
         }
         .dropDestination(for: MenuBarLayoutTransfer.self) { transfers, _ in
-            guard !assignmentInFlight, let transfer = transfers.first else { return false }
+            guard !assignmentSession.isInFlight, let transfer = transfers.first else { return false }
             Task { @MainActor in
                 await assign(transfer.target, to: section)
             }
@@ -268,37 +270,35 @@ private struct MenuBarInventoryBar: View {
         _ target: MenuBarAssignmentTarget,
         to destination: MenuBarSection.Name
     ) async {
-        guard !assignmentInFlight else { return }
-        assignmentInFlight = true
-        defer { assignmentInFlight = false }
-
-        let destinationSection: BarlineCore.MenuBarSection = switch destination {
-        case .visible: .visible
-        case .hidden: .hidden
-        case .alwaysHidden: .alwaysHidden
-        }
-        let allItems = itemManager.itemCache.managedItems
-        let sourceItems = allItems.filter { $0.section != destinationSection }
-        guard let itemID = target.resolve(in: sourceItems) else {
-            if target.resolve(in: allItems) != nil {
-                // Dropping onto the item's current section is a no-op. macOS 27
-                // owns physical status-item order, so this UI never synthesizes
-                // a same-section reorder.
+        await assignmentSession.run {
+            let destinationSection: BarlineCore.MenuBarSection = switch destination {
+            case .visible: .visible
+            case .hidden: .hidden
+            case .alwaysHidden: .alwaysHidden
+            }
+            let allItems = itemManager.itemCache.managedItems
+            let sourceItems = allItems.filter { $0.section != destinationSection }
+            guard let itemID = target.resolve(in: sourceItems) else {
+                if target.resolve(in: allItems) != nil {
+                    // Dropping onto the item's current section is a no-op. macOS 27
+                    // owns physical status-item order, so this UI never synthesizes
+                    // a same-section reorder.
+                    return
+                }
+                assignmentFailureMessage = "The menu bar changed before the layout could be updated. Refresh the layout and try again."
+                assignmentFailed = true
                 return
             }
-            assignmentFailureMessage = "The menu bar changed before the layout could be updated. Refresh the layout and try again."
-            assignmentFailed = true
-            return
-        }
-        do {
-            try await itemManager.assign(
-                itemID: itemID,
-                to: destination,
-                index: itemManager.itemCache.managedItems(for: destination).count
-            )
-        } catch {
-            assignmentFailureMessage = MenuBarAssignmentFailurePresentation.message(for: error)
-            assignmentFailed = true
+            do {
+                try await itemManager.assign(
+                    itemID: itemID,
+                    to: destination,
+                    index: itemManager.itemCache.managedItems(for: destination).count
+                )
+            } catch {
+                assignmentFailureMessage = MenuBarAssignmentFailurePresentation.message(for: error)
+                assignmentFailed = true
+            }
         }
     }
 }
