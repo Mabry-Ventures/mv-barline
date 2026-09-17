@@ -49,10 +49,10 @@ for _ in {1..50}; do
     receipt_is_stable "$MULTI_RECEIPT" && receipt_is_stable "$SINGLE_RECEIPT" && break
     /bin/sleep 0.1
 done
-receipt_is_stable "$MULTI_RECEIPT" && receipt_is_stable "$SINGLE_RECEIPT" || {
+if ! receipt_is_stable "$MULTI_RECEIPT" || ! receipt_is_stable "$SINGLE_RECEIPT"; then
     /usr/bin/printf 'error: stable fixture receipts were not produced\n' >&2
     exit 1
-}
+fi
 /usr/bin/printf 'BARLINE_LAB_SESSION=%s\n' "$SESSION"
 /usr/bin/printf 'BARLINE_LAB_MULTI_RECEIPT=%s\n' "$MULTI_RECEIPT"
 /usr/bin/printf 'BARLINE_LAB_SINGLE_RECEIPT=%s\n' "$SINGLE_RECEIPT"

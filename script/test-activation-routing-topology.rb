@@ -14,6 +14,8 @@ assessment_bridge = File.read('BarlineMenuService/GoldenGateAssessmentModeBridge
 golden_gate_provider = File.read('Barline/MenuBar/MenuBarItems/GoldenGateAXSnapshotProvider.swift')
 golden_gate_positions = File.read('Barline/MenuBar/MenuBarItems/GoldenGatePositionTableStore.swift')
 service_connection = File.read('Barline/MenuBar/MenuBarItems/BarlineMenuServiceConnection.swift')
+golden_gate_snapshot = golden_gate_provider.split('private func snapshot(forceRefresh:', 2).last
+  .split('func move(', 2).first
 layout_bar = File.read('Barline/MenuBar/LayoutBar/LayoutBar.swift')
 bridge_header = File.read('BarlineMenuService/BarlineMenuService-Bridging-Header.h')
 click_delivery = helper_client.split('private func deliverClick', 2).last
@@ -40,8 +42,8 @@ end
 unless backend.match?(/func snapshot\(\).*?#available\(macOS 27\.0, \*\).*?goldenGateProvider\.snapshot\(\).*?connection\.snapshot\(\)/m) &&
        backend.match?(/func move\(.*?#available\(macOS 27\.0, \*\).*?goldenGateProvider\.move\(operation\).*?connection\.move\(operation\)/m) &&
        backend.match?(/func restore\(.*?#available\(macOS 27\.0, \*\).*?goldenGateProvider\.restore\(snapshot\).*?connection\.restore\(snapshot\)/m) &&
-       backend.match?(/func configureConcealment\(.*?#available\(macOS 27\.0, \*\).*?goldenGateProvider\.configureConcealment\(configuration\).*?connection\.configureConcealment\(configuration\)/m)
-  abort('macOS 27 position-table routing is not isolated from the macOS 26 XPC backend')
+       backend.match?(/func configureConcealment\(.*?#available\(macOS 27\.0, \*\).*?goldenGateProvider\.snapshot\(\).*?GoldenGateConcealmentPolicy\.supports\(.*?connection\.configureConcealment\(configuration\).*?goldenGateProvider\.concealmentDidChange\(\)/m)
+  abort('macOS 27 native arrangement routing is not isolated from the macOS 26 backend')
 end
 
 unless shelf.match?(/ignoresMouseEvents = false/) &&
@@ -125,43 +127,17 @@ unless callback.include?('acknowledgeCandidate:candidate token:token error:error
   abort('Golden Gate assertion replacement is not an explicit abortable two-phase transaction')
 end
 
-unless golden_gate_provider.include?('GoldenGatePositionTablePlanner.planMove(') &&
-       golden_gate_provider.include?('GoldenGatePositionTablePlanner.planRestore(') &&
-       golden_gate_provider.include?('positionTableStore.apply(mutation)') &&
-       golden_gate_provider.include?('verifyPositionMutation(') &&
-       golden_gate_provider.include?('verifyRestore(') &&
-       golden_gate_provider.include?('positionTableStore.rollback(mutation)') &&
-       golden_gate_provider.include?('positionTableStore.markVerified(') &&
-       golden_gate_provider.include?('companionState: companionState(for:') &&
-       golden_gate_provider.include?('verificationAssignments') &&
-       golden_gate_provider.include?('await positionTableStore.finishTransaction()') &&
-       golden_gate_provider.include?('positionTableStore.quarantineRecoveryJournal()') &&
-       golden_gate_provider.include?('reconcileInterruptedPositionTransaction()') &&
-       golden_gate_provider.include?('usingKnownAxis: verificationAxisDirection') &&
-       golden_gate_provider.include?('throw translatedPreflightError(error)') &&
-       golden_gate_provider.include?('throw translatedApplyError(error)') &&
-       golden_gate_provider.match?(/case \.transactionPending:\s+MenuBarBackendError\.mutationRecoveryRequired/m) &&
-       golden_gate_provider.match?(/func move\(.*?readPositions\(.*?requestAccessIfNeeded: true.*?guard let source/m) &&
-       golden_gate_provider.match?(/func restore\(.*?readPositions\(requestAccessIfNeeded: true\).*?let currentIDs/m) &&
-       !golden_gate_provider.include?('performCommandDrag') &&
-       !golden_gate_provider.include?('CGEvent(') &&
-       golden_gate_positions.include?('com.apple.MenuBar.plist') &&
-       golden_gate_positions.include?('CFPreferencesSetValue(') &&
-       golden_gate_positions.include?('CFPreferencesSynchronize(') &&
-       golden_gate_positions.include?('kCFPreferencesCurrentUser') &&
-       golden_gate_positions.include?('kCFPreferencesAnyHost') &&
-       golden_gate_positions.include?('F_FULLFSYNC') &&
-       golden_gate_positions.include?('case invalidJournal') &&
-       golden_gate_positions.include?('case transactionPending') &&
-       golden_gate_positions.include?('quarantineInvalidJournal()') &&
-       golden_gate_positions.include?('journal.version == 3') &&
-       golden_gate_positions.include?('lstat(url.path, &metadata)') &&
-       golden_gate_positions.include?('S_IFLNK') &&
-       golden_gate_positions.match?(/func authorizeAccess\(.*?catch \{.*?removeObject\(forKey: Self\.bookmarkKey\).*?guard requestAccessIfNeeded/m) &&
-       !golden_gate_positions.include?('struct ScopedAccess') &&
-       !golden_gate_positions.include?('NSFileCoordinator().coordinate(') &&
-       golden_gate_provider.match?(/func configureConcealment\(.*?async throws \{\}/m)
-  abort('Golden Gate position-table moves are not domain-correct, verified, rolled back, and isolated from synthetic input')
+unless golden_gate_provider.match?(/func move\(.*?applyVisibilityAssignment\(operation, to: before\).*?applyShelfOrder\(operation, to: before\).*?applyNativeVisibleOrder\(operation, to: before\)/m) &&
+       golden_gate_provider.match?(/func applyNativeVisibleOrder\(.*?serviceConnection\.nativeDrag\(transaction\).*?receipt\.completedSafely.*?verifyNativeOrderMutation/m) &&
+       golden_gate_provider.match?(/func applyVisibilityAssignment\(.*?GoldenGateConcealmentPolicy\.supports\(.*?serviceConnection\.configureConcealment\(configuration\).*?commitPersistence\(persistence\)/m) &&
+       golden_gate_provider.match?(/func applyShelfOrder\(.*?physicalCandidate.*?commitPersistence\(persistence\)/m) &&
+       golden_gate_provider.include?('@available(*, unavailable, message: "macOS 27 position records are observational only")') &&
+       golden_gate_snapshot.include?('let now = DispatchTime.now') &&
+       !golden_gate_snapshot.include?('reconcileInterruptedPositionTransaction') &&
+       service_connection.match?(/func nativeDrag\(.*?\.nativeDrag\(.*?deadlineUptimeNanoseconds: mutationDeadline\(\)/m) &&
+       helper_backend.match?(/func nativeDrag\(.*?GoldenGateNativeDragExecutor\.perform\(transaction\)/m) &&
+       helper_backend.match?(/private enum GoldenGateNativeDragExecutor.*?\.leftMouseDown.*?\.leftMouseUp.*?\.leftMouseDragged.*?waitForLeftButtonRelease/m)
+  abort('Golden Gate native arrangement is not helper-executed, postcondition-verified, and position-write quarantined')
 end
 
 unless golden_gate_positions.match?(/func readPositions\(.*?authorizeAccess.*?defer \{ scopedURL\?\.stopAccessingSecurityScopedResource\(\) \}.*?readPreferences/m) &&

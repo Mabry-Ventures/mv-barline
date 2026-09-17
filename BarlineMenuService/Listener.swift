@@ -194,6 +194,24 @@ final class Listener: @unchecked Sendable {
                         }
                     }
                 return .activation(result ?? .failure(.timedOut))
+            case let .nativeDrag(transaction, deadlineUptimeNanoseconds):
+                guard DispatchTime.now().uptimeNanoseconds < deadlineUptimeNanoseconds else {
+                    return .nativeDragReceipt(.failure(.timedOut))
+                }
+                let result: BarlineMenuService.ServiceResult<MenuBarNativeDragReceipt>? =
+                    AsyncRequestBridge.run {
+                        do {
+                            let receipt = try await self.backend.nativeDrag(transaction)
+                            return .success(receipt)
+                        } catch let error as MenuBarBackendError {
+                            return .failure(error)
+                        } catch is MenuBarInputIdleTimeoutError {
+                            return .failure(.mutationNotStarted)
+                        } catch {
+                            return .failure(.operationFailed(error.localizedDescription))
+                        }
+                    }
+                return .nativeDragReceipt(result ?? .failure(.timedOut))
             case let .pointContext(point):
                 let result: BarlineMenuService.ServiceResult<MenuBarPointContext>? =
                     AsyncRequestBridge.run {

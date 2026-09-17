@@ -240,6 +240,7 @@ actor GoldenGateAXSnapshotProvider {
     private static let maximumRememberedAssignments = 512
 
     private let logger = Logger(category: "GoldenGateAXSnapshotProvider")
+    private let serviceConnection = BarlineMenuService.Connection.shared
     private var generation: UInt64 = 0
     private var cachedAt: UInt64?
     private var cachedSnapshot: MenuBarSnapshot?
@@ -261,14 +262,14 @@ actor GoldenGateAXSnapshotProvider {
             let canSnapshot = await (try? snapshot()) != nil
             return MenuBarCapabilities(
                 canSnapshot: canSnapshot,
-                canMove: false,
+                canMove: canSnapshot,
                 canReveal: false,
                 canActivate: canSnapshot,
                 canRestore: false,
                 canCapture: false,
                 moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
                 arrangement: MenuBarArrangementCapabilities(
-                    canReorderNativeItems: false,
+                    canReorderNativeItems: canSnapshot,
                     visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
                     canReorderShelfItems: true,
                     canApplySavedNativeOrder: false
@@ -282,18 +283,6 @@ actor GoldenGateAXSnapshotProvider {
     }
 
     private func snapshot(forceRefresh: Bool) async throws -> MenuBarSnapshot {
-        if !didAttemptInterruptedTransactionRecovery {
-            do {
-                try await reconcileInterruptedPositionTransaction()
-            } catch {
-                // Access can be granted later by the first explicit move. Do
-                // not permanently suppress recovery because an early passive
-                // snapshot could not open the scoped position table.
-                logger.debug(
-                    "Golden Gate deferred interrupted-transaction recovery: code=\(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
-                )
-            }
-        }
         let now = DispatchTime.now().uptimeNanoseconds
         if !forceRefresh,
            let cachedAt,
@@ -366,14 +355,7 @@ actor GoldenGateAXSnapshotProvider {
             ),
             barlineBundleIdentifier: signingIdentifier
         )
-        let positions = try? await positionTableStore.readPositions(
-            requestAccessIfNeeded: false
-        )
-        result = try applyingPositionTableCapabilities(
-            to: result,
-            observations: observations,
-            positions: positions
-        )
+        result = applyingNativeArrangementCapabilities(to: result)
         if hiddenControlUsesLiveGeometry, explicitAssignments.isEmpty {
             rememberSections(from: result)
         }
@@ -391,6 +373,27 @@ actor GoldenGateAXSnapshotProvider {
     }
 
     func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
+        let before = try await snapshot(forceRefresh: true)
+        guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
+            throw MenuBarBackendError.staleItem(operation.itemID)
+        }
+        guard !source.isBarlineControlItem else {
+            throw MenuBarBackendError.mutationNotStarted
+        }
+
+        if source.section != operation.section {
+            return try await applyVisibilityAssignment(operation, to: before)
+        }
+        if source.section != .visible {
+            return try applyShelfOrder(operation, to: before)
+        }
+        return try await applyNativeVisibleOrder(operation, to: before)
+    }
+
+    @available(*, unavailable, message: "macOS 27 position records are observational only")
+    private func legacyPositionTableMove(
+        _ operation: MenuBarMoveOperation
+    ) async throws -> MenuBarMutationResult {
         let preparation: (
             before: MenuBarSnapshot,
             source: MenuBarItemDescriptor,
@@ -574,7 +577,196 @@ actor GoldenGateAXSnapshotProvider {
         )
     }
 
-    func restore(_ target: MenuBarSnapshot) async throws -> MenuBarMutationResult {
+    private func applyVisibilityAssignment(
+        _ operation: MenuBarMoveOperation,
+        to before: MenuBarSnapshot
+    ) async throws -> MenuBarMutationResult {
+        guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
+            throw MenuBarBackendError.staleItem(operation.itemID)
+        }
+        let affectedItems: [MenuBarItemDescriptor] = if source.id.bundleIdentifier.hasPrefix("com.apple.") {
+            [source]
+        } else {
+            before.items.filter {
+                !$0.isBarlineControlItem &&
+                    $0.id.bundleIdentifier == source.id.bundleIdentifier
+            }
+        }
+        guard !affectedItems.isEmpty,
+              operation.section == .visible || affectedItems.allSatisfy(\.canBeHidden)
+        else {
+            throw MenuBarBackendError.mutationNotStarted
+        }
+        let affectedIDs = Set(affectedItems.map(\.id))
+        let candidate = snapshot(
+            replacing: before.items.map { item in
+                affectedIDs.contains(item.id)
+                    ? item.replacingSection(operation.section)
+                    : item
+            },
+            in: before
+        )
+        let configuration = concealmentConfiguration(for: candidate)
+        let allItemIDs = candidate.items.filter { !$0.isBarlineControlItem }.map(\.id)
+        guard GoldenGateConcealmentPolicy.supports(
+            configuration,
+            allItems: allItemIDs,
+            barlineBundleIdentifier: Bundle.main.bundleIdentifier
+                ?? "com.mabryventures.Barline"
+        ) else {
+            throw MenuBarBackendError.mutationNotStarted
+        }
+        let persistence = try preparePersistence(
+            from: candidate,
+            requiredItemIDs: affectedIDs
+        )
+        let previousConfiguration = concealmentConfiguration(for: before)
+        try await serviceConnection.configureConcealment(configuration)
+        guard commitPersistence(persistence) else {
+            do {
+                try await serviceConnection.configureConcealment(previousConfiguration)
+            } catch {
+                throw MenuBarBackendError.mutationRecoveryFailed
+            }
+            throw MenuBarBackendError.mutationRecoveryFailed
+        }
+        generation = candidate.generation
+        cachedAt = nil
+        cachedSnapshot = nil
+        return MenuBarMutationResult(
+            generation: generation,
+            changedItemIDs: affectedItems.map(\.id)
+        )
+    }
+
+    private func applyShelfOrder(
+        _ operation: MenuBarMoveOperation,
+        to before: MenuBarSnapshot
+    ) throws -> MenuBarMutationResult {
+        let candidate = try physicalCandidate(applying: operation, to: before)
+        guard !MenuBarMovePlanner().resultMatches(
+            operation,
+            in: before,
+            from: before,
+            destinationSupport: .emptySectionAllowed
+        ) else {
+            return MenuBarMutationResult(
+                generation: before.generation,
+                changedItemIDs: []
+            )
+        }
+        let persistence = try preparePersistence(
+            from: candidate,
+            requiredItemIDs: [operation.itemID]
+        )
+        guard commitPersistence(persistence) else {
+            throw MenuBarBackendError.mutationNotStarted
+        }
+        generation = candidate.generation
+        cachedAt = DispatchTime.now().uptimeNanoseconds
+        cachedSnapshot = candidate
+        return MenuBarMutationResult(
+            generation: generation,
+            changedItemIDs: [operation.itemID]
+        )
+    }
+
+    private func applyNativeVisibleOrder(
+        _ operation: MenuBarMoveOperation,
+        to before: MenuBarSnapshot
+    ) async throws -> MenuBarMutationResult {
+        let candidate = try physicalCandidate(applying: operation, to: before)
+        if MenuBarMovePlanner().resultMatches(operation, in: before, from: before) {
+            return MenuBarMutationResult(
+                generation: before.generation,
+                changedItemIDs: []
+            )
+        }
+        guard let source = before.items.first(where: { $0.id == operation.itemID }),
+              source.isOnScreen,
+              source.bounds.width > 0,
+              source.bounds.height > 0
+        else {
+            throw MenuBarBackendError.mutationNotStarted
+        }
+        let destinationDisplayID = operation.destinationDisplayID ?? source.displayID
+        let ordered = candidate.items.filter {
+            !$0.isBarlineControlItem &&
+                $0.section == .visible &&
+                $0.displayID == destinationDisplayID
+        }
+        guard let sourceIndex = ordered.firstIndex(where: { $0.id == source.id }) else {
+            throw MenuBarBackendError.mutationNotStarted
+        }
+        let anchor: MenuBarItemDescriptor
+        let placeBefore: Bool
+        if sourceIndex + 1 < ordered.count {
+            anchor = ordered[sourceIndex + 1]
+            placeBefore = true
+        } else if sourceIndex > 0 {
+            anchor = ordered[sourceIndex - 1]
+            placeBefore = false
+        } else {
+            throw MenuBarBackendError.mutationNotStarted
+        }
+        guard anchor.isOnScreen,
+              anchor.bounds.width > 0,
+              anchor.bounds.height > 0,
+              abs(anchor.bounds.y + anchor.bounds.height / 2 -
+                  (source.bounds.y + source.bounds.height / 2)) <= 4
+        else {
+            throw MenuBarBackendError.mutationNotStarted
+        }
+        let offset = max(4, min(anchor.bounds.width / 4, source.bounds.width / 4))
+        let destinationX = anchor.bounds.x + anchor.bounds.width / 2 +
+            (placeBefore ? -offset : offset)
+        let transaction = MenuBarNativeDragTransaction(
+            source: MenuBarPoint(
+                x: source.bounds.x + source.bounds.width / 2,
+                y: source.bounds.y + source.bounds.height / 2
+            ),
+            destination: MenuBarPoint(
+                x: destinationX,
+                y: anchor.bounds.y + anchor.bounds.height / 2
+            )
+        )
+        let receipt = try await serviceConnection.nativeDrag(transaction)
+        guard receipt.transactionID == transaction.transactionID,
+              receipt.completedSafely
+        else {
+            throw MenuBarBackendError.mutationSuperseded
+        }
+        cachedAt = nil
+        cachedSnapshot = nil
+        let verified = try await verifyNativeOrderMutation(
+            operation,
+            previousSnapshot: before,
+            timeout: .seconds(3)
+        )
+        let persistence = try preparePersistence(
+            from: verified,
+            requiredItemIDs: [source.id]
+        )
+        guard commitPersistence(persistence) else {
+            throw MenuBarBackendError.mutationRecoveryFailed
+        }
+        generation = verified.generation
+        cachedAt = DispatchTime.now().uptimeNanoseconds
+        cachedSnapshot = verified
+        return MenuBarMutationResult(
+            generation: generation,
+            changedItemIDs: [source.id]
+        )
+    }
+
+    func restore(_: MenuBarSnapshot) async throws -> MenuBarMutationResult {
+        throw MenuBarBackendError.unavailableCapability("Golden Gate restore")
+    }
+
+    @available(*, unavailable, message: "macOS 27 position records are observational only")
+    private func legacyPositionTableRestore(
+        _ target: MenuBarSnapshot
+    ) async throws -> MenuBarMutationResult {
         let preparation: (
             mutation: GoldenGatePositionMutation,
             changedItemIDs: [MenuBarItemID],
@@ -1067,6 +1259,92 @@ actor GoldenGateAXSnapshotProvider {
         )
     }
 
+    private func snapshot(
+        replacing items: [MenuBarItemDescriptor],
+        in snapshot: MenuBarSnapshot
+    ) -> MenuBarSnapshot {
+        MenuBarSnapshot(
+            generation: snapshot.generation &+ 1,
+            capturedAt: Date(),
+            items: items.enumerated().map { index, item in
+                item.replacing(order: index)
+            },
+            displayIDs: snapshot.displayIDs,
+            displayIdentities: snapshot.displayIdentities,
+            activeSpaceIsValid: snapshot.activeSpaceIsValid,
+            menuTrackingIsActive: false
+        )
+    }
+
+    private func concealmentConfiguration(
+        for snapshot: MenuBarSnapshot
+    ) -> MenuBarConcealmentConfiguration {
+        MenuBarConcealmentConfiguration(
+            visibleItemIDs: snapshot.items.filter {
+                !$0.isBarlineControlItem && $0.section == .visible
+            }.map(\.id),
+            concealedItemIDs: snapshot.items.filter {
+                !$0.isBarlineControlItem && $0.section != .visible
+            }.map(\.id)
+        )
+    }
+
+    private func verifyNativeOrderMutation(
+        _ operation: MenuBarMoveOperation,
+        previousSnapshot: MenuBarSnapshot,
+        timeout: Duration
+    ) async throws -> MenuBarSnapshot {
+        let deadline = ContinuousClock.now.advanced(by: timeout)
+        repeat {
+            try Task.checkCancellation()
+            if let current = try? await snapshot(forceRefresh: true) {
+                let candidateIDs = current.items.map(\.id)
+                if let resolvedSourceID = GoldenGateMenuBarIdentityResolver.resolve(
+                    operation.itemID,
+                    among: candidateIDs
+                ) {
+                    let resolvedOperation = MenuBarMoveOperation(
+                        itemID: resolvedSourceID,
+                        section: operation.section,
+                        index: operation.index,
+                        destinationDisplayID: operation.destinationDisplayID
+                    )
+                    if MenuBarMovePlanner().resultMatches(
+                        resolvedOperation,
+                        in: current,
+                        from: previousSnapshot
+                    ), Self.preservesUnrelatedRelativeOrder(
+                        before: previousSnapshot,
+                        after: current,
+                        excluding: operation.itemID
+                    ) {
+                        return current
+                    }
+                }
+            }
+            try await Task.sleep(for: .milliseconds(150))
+        } while ContinuousClock.now < deadline
+        throw MenuBarBackendError.operationFailed(
+            "menu bar order did not reach the requested position"
+        )
+    }
+
+    private static func preservesUnrelatedRelativeOrder(
+        before: MenuBarSnapshot,
+        after: MenuBarSnapshot,
+        excluding sourceID: MenuBarItemID
+    ) -> Bool {
+        let afterIDs = Set(after.items.map(\.id))
+        let beforeOrder = before.items
+            .filter { $0.id != sourceID && afterIDs.contains($0.id) }
+            .map(\.id)
+        let beforeIDs = Set(beforeOrder)
+        let afterOrder = after.items
+            .filter { $0.id != sourceID && beforeIDs.contains($0.id) }
+            .map(\.id)
+        return beforeOrder == afterOrder
+    }
+
     private func positionKeys(
         observations: [GoldenGateMenuBarObservation],
         positions: [String: Int],
@@ -1155,6 +1433,39 @@ actor GoldenGateAXSnapshotProvider {
             displayIdentities: positioned.displayIdentities,
             activeSpaceIsValid: positioned.activeSpaceIsValid,
             menuTrackingIsActive: positioned.menuTrackingIsActive
+        )
+    }
+
+    private func applyingNativeArrangementCapabilities(
+        to snapshot: MenuBarSnapshot
+    ) -> MenuBarSnapshot {
+        let allItemIDs = snapshot.items.filter { !$0.isBarlineControlItem }.map(\.id)
+        let barlineBundleIdentifier = Bundle.main.bundleIdentifier
+            ?? "com.mabryventures.Barline"
+        let items = snapshot.items.map { item in
+            let canReorderVisibleItem = item.section == .visible &&
+                item.isOnScreen &&
+                item.bounds.width > 0 &&
+                item.bounds.height > 0
+            let canReorderShelfItem = item.section != .visible
+            let canAssignVisibility = GoldenGateConcealmentPolicy.supportsIndependentAssignment(
+                item.id,
+                among: allItemIDs,
+                barlineBundleIdentifier: barlineBundleIdentifier
+            )
+            return item.replacing(
+                isMovable: !item.isBarlineControlItem &&
+                    (canReorderVisibleItem || canReorderShelfItem || canAssignVisibility)
+            )
+        }
+        return MenuBarSnapshot(
+            generation: snapshot.generation,
+            capturedAt: snapshot.capturedAt,
+            items: items,
+            displayIDs: snapshot.displayIDs,
+            displayIdentities: snapshot.displayIdentities,
+            activeSpaceIsValid: snapshot.activeSpaceIsValid,
+            menuTrackingIsActive: snapshot.menuTrackingIsActive
         )
     }
 

@@ -122,6 +122,48 @@ public struct MenuBarPoint: Codable, Equatable, Sendable {
     }
 }
 
+public struct MenuBarNativeDragTransaction: Codable, Equatable, Sendable {
+    public let transactionID: UUID
+    public let source: MenuBarPoint
+    public let destination: MenuBarPoint
+
+    public init(
+        transactionID: UUID = UUID(),
+        source: MenuBarPoint,
+        destination: MenuBarPoint
+    ) {
+        self.transactionID = transactionID
+        self.source = source
+        self.destination = destination
+    }
+}
+
+public struct MenuBarNativeDragReceipt: Codable, Equatable, Sendable {
+    public let transactionID: UUID
+    public let mouseDownPosted: Bool
+    public let mouseUpPosted: Bool
+    public let buttonCleanupVerified: Bool
+    public let pointerInterferenceDetected: Bool
+
+    public init(
+        transactionID: UUID,
+        mouseDownPosted: Bool,
+        mouseUpPosted: Bool,
+        buttonCleanupVerified: Bool,
+        pointerInterferenceDetected: Bool
+    ) {
+        self.transactionID = transactionID
+        self.mouseDownPosted = mouseDownPosted
+        self.mouseUpPosted = mouseUpPosted
+        self.buttonCleanupVerified = buttonCleanupVerified
+        self.pointerInterferenceDetected = pointerInterferenceDetected
+    }
+
+    public var completedSafely: Bool {
+        mouseDownPosted && mouseUpPosted && buttonCleanupVerified && !pointerInterferenceDetected
+    }
+}
+
 public struct MenuBarEnvironmentSnapshot: Codable, Equatable, Sendable {
     public let activeDisplayID: UInt32?
     public let activeStableDisplayID: MenuBarDisplayID?
@@ -330,6 +372,7 @@ public enum MenuBarServiceRequest: Codable, Equatable, Sendable {
     case environment
     case configureCursorInBackground(Bool)
     case configureConcealment(MenuBarConcealmentConfiguration)
+    case nativeDrag(MenuBarNativeDragTransaction, deadlineUptimeNanoseconds: UInt64)
     case pointContext(MenuBarPoint)
     case shelfPresentationObservation(MenuBarShelfPresentationProbe)
     case beginRevealObservation(MenuBarItemID)
@@ -351,6 +394,7 @@ public enum MenuBarServiceResponse: Codable, Equatable, Sendable {
     case pointContext(MenuBarPointContext)
     case shelfPresentationObservation(MenuBarShelfPresentationObservation)
     case revealObservation(MenuBarRevealObservationToken)
+    case nativeDragReceipt(MenuBarNativeDragReceipt)
     case boolean(Bool)
     case health(MenuBarBackendHealth)
     case failure(MenuBarBackendError)
@@ -368,6 +412,7 @@ public protocol MenuBarBackend: Sendable {
     func environment() async throws -> MenuBarEnvironmentSnapshot
     func pointContext(_ point: MenuBarPoint) async throws -> MenuBarPointContext
     func configureConcealment(_ configuration: MenuBarConcealmentConfiguration) async throws
+    func nativeDrag(_ transaction: MenuBarNativeDragTransaction) async throws -> MenuBarNativeDragReceipt
     func beginRevealObservation(_ item: MenuBarItemID) async throws -> MenuBarRevealObservationToken
     func revealObservationIsVisible(_ token: MenuBarRevealObservationToken) async throws -> Bool
     func endRevealObservation(_ token: MenuBarRevealObservationToken) async
@@ -395,6 +440,10 @@ public extension MenuBarBackend {
 
     func configureConcealment(_: MenuBarConcealmentConfiguration) async throws {
         throw MenuBarBackendError.unavailableCapability("native concealment")
+    }
+
+    func nativeDrag(_: MenuBarNativeDragTransaction) async throws -> MenuBarNativeDragReceipt {
+        throw MenuBarBackendError.unavailableCapability("native menu bar drag")
     }
 
     func beginRevealObservation(_: MenuBarItemID) async throws -> MenuBarRevealObservationToken {

@@ -676,6 +676,84 @@ public actor MenuBarStateCoordinator {
         }
     }
 
+    private func validateArrangementResult(
+        layout: ProfileLayout,
+        displayID: MenuBarDisplayID?,
+        plan: MenuBarArrangementExecutionPlan,
+        admittedLayoutPlan: ProfileLayoutReconciler.DisplayPlan,
+        in snapshot: MenuBarSnapshot
+    ) throws {
+        if plan.nativeOrder == .applySavedOrder,
+           plan.shelfOrder == .applySavedOrder
+        {
+            try validateProfileResult(admittedLayoutPlan, in: snapshot)
+            return
+        }
+
+        let scopedItems = displayID.map { requestedDisplayID in
+            snapshot.items.filter { $0.displayID == requestedDisplayID }
+        } ?? snapshot.items
+        let byID = Dictionary(uniqueKeysWithValues: scopedItems.map { ($0.id, $0) })
+        let requestedSections = Dictionary(uniqueKeysWithValues:
+            layout.visible.map { ($0, MenuBarSection.visible) } +
+                layout.hidden.map { ($0, MenuBarSection.hidden) } +
+                layout.alwaysHidden.map { ($0, MenuBarSection.alwaysHidden) })
+        guard requestedSections.allSatisfy({ itemID, section in
+            byID[itemID]?.section == section
+        }) else {
+            throw MenuBarBackendError.operationFailed(
+                "profile activation did not reach requested visibility"
+            )
+        }
+
+        if plan.shelfOrder == .applySavedOrder {
+            for requested in [layout.hidden, layout.alwaysHidden] {
+                let requestedSet = Set(requested)
+                let observed = scopedItems
+                    .sorted { $0.order < $1.order }
+                    .filter { requestedSet.contains($0.id) }
+                    .map(\.id)
+                guard observed == requested else {
+                    throw MenuBarBackendError.operationFailed(
+                        "profile activation did not reach requested shelf order"
+                    )
+                }
+            }
+        }
+    }
+
+    private static func shouldApply(
+        _ operation: MenuBarMoveOperation,
+        to snapshot: MenuBarSnapshot,
+        arrangementPlan: MenuBarArrangementExecutionPlan
+    ) -> Bool {
+        guard let source = snapshot.items.first(where: { $0.id == operation.itemID }) else {
+            return true
+        }
+        if source.section != operation.section {
+            return arrangementPlan.concealment != nil
+        }
+        if operation.section == .visible {
+            return arrangementPlan.nativeOrder == .applySavedOrder
+        }
+        return arrangementPlan.shelfOrder == .applySavedOrder
+    }
+
+    private static func preservingNativeVisibleOrder(
+        in layout: ProfileLayout,
+        snapshot: MenuBarSnapshot
+    ) -> ProfileLayout {
+        let requestedVisible = Set(layout.visible)
+        return ProfileLayout(
+            visible: snapshot.items
+                .sorted { $0.order < $1.order }
+                .filter { requestedVisible.contains($0.id) }
+                .map(\.id),
+            hidden: layout.hidden,
+            alwaysHidden: layout.alwaysHidden
+        )
+    }
+
     /// Captures a fresh, uniquely identified active display without mutating it.
     public func captureDisplayVariant(profile: BarlineProfile) async throws -> DisplayProfileOverride {
         await acquireMutationTurn()
@@ -780,11 +858,25 @@ public actor MenuBarStateCoordinator {
         }
         // Reject an impossible physical destination before journaling or changing
         // workspace state. The helper's own admission checks remain authoritative.
-        let destinationSupport = await backend.capabilities.moveDestinationSupport ?? .existingItemRequired
+        let backendCapabilities = await backend.capabilities
+        let destinationSupport = backendCapabilities.moveDestinationSupport ?? .existingItemRequired
+        let admittedLayout = if backendCapabilities.arrangement?.canApplySavedNativeOrder == false {
+            Self.preservingNativeVisibleOrder(in: layout, snapshot: before)
+        } else {
+            layout
+        }
         let layoutPlan = try ProfileLayoutReconciler.planAcrossDisplays(
-            layout: layout, items: before.items, displayID: profileDisplayID,
+            layout: admittedLayout, items: before.items, displayID: profileDisplayID,
             destinationSupport: destinationSupport
         )
+        let arrangementPlan = try backendCapabilities.arrangement.map {
+            try MenuBarArrangementPolicy().plan(
+                layout: layout,
+                snapshot: before,
+                capabilities: $0,
+                barlineBundleIdentifier: "com.mabryventures.Barline"
+            )
+        }
 
         let priorProfileID = startingCheckpoint.activeProfileID
         if let prepareCheckpoint {
@@ -840,6 +932,15 @@ public actor MenuBarStateCoordinator {
                 }
             }
             for operation in layoutPlan.operations {
+                if let arrangementPlan,
+                   !Self.shouldApply(
+                       operation,
+                       to: before,
+                       arrangementPlan: arrangementPlan
+                   )
+                {
+                    continue
+                }
                 try Task.checkCancellation()
                 try await admission?()
                 didBeginLayoutMutation = true
@@ -883,7 +984,17 @@ public actor MenuBarStateCoordinator {
                 if layoutPlan.isGloballyScoped, snapshot.displayIDs != before.displayIDs {
                     throw MenuBarBackendError.operationFailed("profile display topology changed during activation")
                 }
-                try validateProfileResult(layoutPlan, in: snapshot)
+                if let arrangementPlan {
+                    try validateArrangementResult(
+                        layout: layout,
+                        displayID: profileDisplayID,
+                        plan: arrangementPlan,
+                        admittedLayoutPlan: layoutPlan,
+                        in: snapshot
+                    )
+                } else {
+                    try validateProfileResult(layoutPlan, in: snapshot)
+                }
                 try await admission?()
                 if let appliedWorkspaceRevision,
                    await workspaceTransaction?.currentRevision() != appliedWorkspaceRevision

@@ -40,6 +40,7 @@ extension BarlineMenuService {
         case environment
         case configureCursorInBackground(Bool)
         case configureConcealment(MenuBarConcealmentConfiguration)
+        case nativeDrag(MenuBarNativeDragTransaction, deadlineUptimeNanoseconds: UInt64)
         case pointContext(MenuBarPoint)
         case shelfPresentationObservation(MenuBarShelfPresentationProbe)
         case beginRevealObservation(MenuBarItemID)
@@ -62,6 +63,7 @@ extension BarlineMenuService {
         case pointContext(ServiceResult<MenuBarPointContext>)
         case shelfPresentationObservation(ServiceResult<MenuBarShelfPresentationObservation>)
         case revealObservation(ServiceResult<MenuBarRevealObservationToken>)
+        case nativeDragReceipt(ServiceResult<MenuBarNativeDragReceipt>)
         case boolean(ServiceResult<Bool>)
         case health(MenuBarBackendHealth)
         case restart

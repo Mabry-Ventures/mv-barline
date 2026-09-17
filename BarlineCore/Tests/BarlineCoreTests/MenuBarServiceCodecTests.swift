@@ -29,6 +29,12 @@ struct MenuBarServiceCodecTests {
             ownerProcessIdentifier: 42,
             targetDisplayID: 1
         )
+        let dragID = try #require(UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"))
+        let drag = MenuBarNativeDragTransaction(
+            transactionID: dragID,
+            source: MenuBarPoint(x: 100, y: 20),
+            destination: MenuBarPoint(x: 200, y: 20)
+        )
         let requests: [MenuBarServiceRequest] = [
             .start,
             .capabilities,
@@ -41,6 +47,7 @@ struct MenuBarServiceCodecTests {
             .environment,
             .configureCursorInBackground(true),
             .configureConcealment(.init(visibleItemIDs: [], concealedItemIDs: [itemID])),
+            .nativeDrag(drag, deadlineUptimeNanoseconds: 35000),
             .pointContext(MenuBarPoint(x: 10, y: 20)),
             .shelfPresentationObservation(shelfProbe),
             .beginRevealObservation(itemID),
@@ -105,6 +112,14 @@ struct MenuBarServiceCodecTests {
             ownerMatches: true,
             intersectsTargetDisplay: true
         )
+        let dragID = try #require(UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE"))
+        let dragReceipt = MenuBarNativeDragReceipt(
+            transactionID: dragID,
+            mouseDownPosted: true,
+            mouseUpPosted: true,
+            buttonCleanupVerified: true,
+            pointerInterferenceDetected: false
+        )
         let responses: [MenuBarServiceResponse] = [
             .acknowledged,
             .capabilities(capabilities),
@@ -116,6 +131,7 @@ struct MenuBarServiceCodecTests {
             .pointContext(pointContext),
             .shelfPresentationObservation(shelfObservation),
             .revealObservation(revealToken),
+            .nativeDragReceipt(dragReceipt),
             .boolean(true),
             .health(MenuBarBackendHealth(backendName: "Tahoe", state: .degraded, message: "probe")),
             .failure(.interrupted),

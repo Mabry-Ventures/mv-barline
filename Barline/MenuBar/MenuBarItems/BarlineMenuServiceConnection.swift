@@ -176,6 +176,20 @@ extension BarlineMenuService {
             _ = try result.value()
         }
 
+        func nativeDrag(
+            _ transaction: MenuBarNativeDragTransaction
+        ) async throws -> MenuBarNativeDragReceipt {
+            guard case let .nativeDragReceipt(result) = await send(
+                .nativeDrag(
+                    transaction,
+                    deadlineUptimeNanoseconds: mutationDeadline()
+                )
+            ) else {
+                throw MenuBarBackendError.interrupted
+            }
+            return try result.value()
+        }
+
         func pointContext(at point: CGPoint) async throws -> MenuBarPointContext {
             guard case let .pointContext(result) = await send(
                 .pointContext(MenuBarPoint(x: point.x, y: point.y))

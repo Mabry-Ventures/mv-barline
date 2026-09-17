@@ -9,6 +9,67 @@ import Testing
 
 @Suite("Transactional state coordinator")
 struct StateCoordinatorTests {
+    @Test("macOS 27 profile activation preserves native visible order")
+    func activatesGoldenGateProfileWithoutReplayingSavedNativeOrder() async throws {
+        let seed = makeSnapshot(generation: 1, count: 4)
+        let ids = seed.items.map(\.id)
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: seed.capturedAt,
+            items: [
+                seed.items[0].replacing(section: .visible, order: 0),
+                seed.items[1].replacing(section: .visible, order: 1),
+                seed.items[2].replacing(section: .hidden, order: 2),
+                seed.items[3].replacing(section: .hidden, order: 3),
+            ],
+            displayIDs: seed.displayIDs,
+            activeSpaceIsValid: true
+        )
+        let after = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: seed.capturedAt,
+            items: [
+                seed.items[0].replacing(section: .visible, order: 0),
+                seed.items[1].replacing(section: .visible, order: 1),
+                seed.items[2].replacing(section: .visible, order: 2),
+                seed.items[3].replacing(section: .hidden, order: 3),
+            ],
+            displayIDs: seed.displayIDs,
+            activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
+            snapshots: [before, after],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: false,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: true,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
+            )
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let profile = BarlineProfile(
+            name: "Golden Gate",
+            layout: ProfileLayout(
+                visible: [ids[1], ids[0], ids[2]],
+                hidden: [ids[3]]
+            )
+        )
+
+        let result = try await coordinator.activate(profile: profile, now: before.capturedAt)
+
+        #expect(result.items.filter { $0.section == .visible }.map(\.id) == [ids[0], ids[1], ids[2]])
+        #expect(await backend.moveOperations.allSatisfy { $0.itemID != ids[1] })
+        #expect(await coordinator.activeProfileID == profile.id)
+    }
+
     @Test("A base layout cannot commit across an unadmitted empty-display connection")
     func rejectsBaseTopologyChange() async throws {
         let before = makeSnapshot(generation: 1, count: 1)
