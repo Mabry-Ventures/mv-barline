@@ -763,6 +763,84 @@ struct StateCoordinatorTests {
         #expect(await backend.moveOperations.count == 1)
     }
 
+    @Test("macOS 27 validates delayed convergence against an advancing clock")
+    func advancesValidationClockDuringGoldenGateConvergence() async throws {
+        let display = MenuBarDisplayID("test-display")
+        let source = MenuBarItemID(
+            bundleIdentifier: "com.example.grouped",
+            accessibilityIdentifier: "source"
+        )
+        let startedAt = Date()
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: startedAt,
+            items: [
+                MenuBarItemDescriptor(id: source, section: .visible, order: 0, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let transitional = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: startedAt,
+            items: before.items,
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let settled = MenuBarSnapshot(
+            generation: 3,
+            capturedAt: startedAt.addingTimeInterval(0.03),
+            items: [
+                MenuBarItemDescriptor(id: source, section: .hidden, order: 0, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
+            snapshots: [before, transitional, settled, settled, settled],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: false,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
+            )
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            validator: SnapshotValidator(policy: SnapshotValidationPolicy(
+                maximumFutureClockSkew: 0.005
+            )),
+            retryPolicy: RetryPolicy(
+                maximumAttempts: 4,
+                baseDelay: .milliseconds(20),
+                maximumDelay: .milliseconds(40),
+                maximumJitterPermille: 0
+            )
+        )
+
+        let result = try await coordinator.perform(
+            .move(MenuBarMoveOperation(
+                itemID: source,
+                section: .hidden,
+                index: 0,
+                destinationDisplayID: display
+            )),
+            now: startedAt
+        )
+
+        #expect(result == settled)
+        #expect(await backend.snapshotCallCount == 5)
+        #expect(await backend.moveOperations.count == 1)
+    }
+
     @Test("macOS 27 profile activation preserves native visible order")
     func activatesGoldenGateProfileWithoutReplayingSavedNativeOrder() async throws {
         let seed = makeSnapshot(generation: 1, count: 4)

@@ -673,13 +673,24 @@ public actor MenuBarStateCoordinator {
             : 1
         var mostRecentError: (any Error)?
         var previousSuccessfulVisibilitySignature: VisibilityObservationSignature?
+        let validationClockStartedAt = Date()
 
         for attempt in 0 ..< attemptCount {
             try Task.checkCancellation()
             do {
                 let candidate = try await normalizedBackendSnapshot()
+                // `now` is captured before the mutation starts so callers can
+                // deterministically bind validation to one transaction. The
+                // native Golden Gate inventory can take several seconds to
+                // converge, though, and every later snapshot is necessarily
+                // captured after that original instant. Advance the reference
+                // by elapsed wall-clock time instead of misclassifying fresh
+                // recovery snapshots as future-dated.
+                let validationNow = now.addingTimeInterval(
+                    Date().timeIntervalSince(validationClockStartedAt)
+                )
                 let snapshot: MenuBarSnapshot
-                switch validator.validate(candidate, previous: before, now: now) {
+                switch validator.validate(candidate, previous: before, now: validationNow) {
                 case let .success(validated):
                     lastRejection = nil
                     snapshot = validated
