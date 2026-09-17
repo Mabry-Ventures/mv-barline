@@ -55,6 +55,27 @@ struct MenuBarArrangementPolicyTests {
         #expect(Set(plan.concealment?.concealedItemIDs ?? []) == Set([first.id, second.id]))
     }
 
+    @Test("Barline controls are excluded from Golden Gate concealment validation")
+    func barlineControlsAreExcludedFromConcealment() throws {
+        let visibleItem = item(bundle: "com.example.visible", title: "Visible", order: 0)
+        let control = item(
+            bundle: "com.mabryventures.Barline",
+            title: "Barline.ControlItem.Hidden",
+            order: 1,
+            isBarlineControlItem: true
+        )
+
+        let plan = try MenuBarArrangementPolicy().plan(
+            layout: ProfileLayout(visible: [visibleItem.id]),
+            snapshot: snapshot(items: [visibleItem, control]),
+            capabilities: goldenGateCapabilities,
+            barlineBundleIdentifier: "com.mabryventures.Barline"
+        )
+
+        #expect(plan.concealment?.visibleItemIDs == [visibleItem.id])
+        #expect(plan.concealment?.concealedItemIDs.isEmpty == true)
+    }
+
     @Test("Unavailable visibility accepts an already-matching partial layout")
     func unavailableVisibilityIgnoresUnchangedAndOmittedItems() throws {
         let visible = item(bundle: "com.example.visible", title: "Visible", order: 0)
@@ -94,12 +115,14 @@ struct MenuBarArrangementPolicyTests {
         bundle: String,
         title: String,
         order: Int,
-        section: MenuBarSection = .visible
+        section: MenuBarSection = .visible,
+        isBarlineControlItem: Bool = false
     ) -> MenuBarItemDescriptor {
         MenuBarItemDescriptor(
             id: MenuBarItemID(bundleIdentifier: bundle, title: title),
             section: section,
             order: order,
+            isBarlineControlItem: isBarlineControlItem,
             displayName: title,
             isOnScreen: true
         )

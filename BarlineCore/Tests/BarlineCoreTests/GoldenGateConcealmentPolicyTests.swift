@@ -188,12 +188,24 @@ struct GoldenGateConcealmentPolicyTests {
     }
 
     @Test func barlineControlsCanNeverBeConcealed() {
-        let control = item(barlineID, "Barline.ControlItem.Hidden")
+        let control = item("COM.MABRYVENTURES.BARLINE", "Barline.ControlItem.Hidden")
         let resolved = GoldenGateConcealmentPolicy.resolve(
             .init(visibleItemIDs: [], concealedItemIDs: [control]),
             barlineBundleIdentifier: barlineID
         )
         #expect(resolved.concealedBundleIdentifiers.isEmpty)
+    }
+
+    @Test func bundleIdentityChecksAreCaseInsensitive() {
+        let first = item("COM.EXAMPLE.UTILITY", "first")
+        let second = item("com.example.utility", "second")
+        #expect(!GoldenGateConcealmentPolicy.supportsIndependentAssignment(
+            first,
+            among: [first, second],
+            barlineBundleIdentifier: barlineID
+        ))
+        let clock = item("COM.APPLE.CONTROLCENTER", "Clock")
+        #expect(GoldenGateConcealmentPolicy.systemItemIdentifier(for: clock) == 2)
     }
 
     @Test func singleThirdPartyItemCanBeAssignedIndependently() {

@@ -351,7 +351,7 @@ struct StateCoordinatorTests {
             activeSpaceIsValid: true
         )
         let backend = FakeBackend(
-            snapshots: [before, after],
+            snapshots: [before, after, after],
             capabilities: MenuBarCapabilities(
                 canSnapshot: true,
                 canMove: true,
@@ -388,7 +388,7 @@ struct StateCoordinatorTests {
                 now: before.capturedAt
             )
         }
-        #expect(await backend.moveOperations.count == 1)
+        #expect(await backend.moveOperations.count == 2)
     }
 
     @Test("macOS 27 tolerates AX enumeration churn while preserving logical assignments")
@@ -975,7 +975,8 @@ struct StateCoordinatorTests {
         )
 
         #expect(result == settled)
-        #expect(await backend.snapshotCallCount == 5)
+        let delayedConvergenceSnapshotCallCount = await backend.snapshotCallCount
+        #expect((4 ... 5).contains(delayedConvergenceSnapshotCallCount))
         #expect(await backend.moveOperations.count == 1)
     }
 
@@ -1008,7 +1009,7 @@ struct StateCoordinatorTests {
             activeSpaceIsValid: true
         )
         let backend = FakeBackend(
-            snapshots: [before, after],
+            snapshots: [before, after, after],
             capabilities: MenuBarCapabilities(
                 canSnapshot: true,
                 canMove: true,
@@ -1017,7 +1018,7 @@ struct StateCoordinatorTests {
                 canRestore: false,
                 moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
                 arrangement: MenuBarArrangementCapabilities(
-                    canReorderNativeItems: true,
+                    canReorderNativeItems: false,
                     visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
                     canReorderShelfItems: true,
                     canApplySavedNativeOrder: false

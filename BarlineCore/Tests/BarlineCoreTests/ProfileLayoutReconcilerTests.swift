@@ -123,17 +123,67 @@ struct ProfileLayoutReconcilerTests {
         #expect(!ProfileLayoutReconciler.matches(layout: captured, items: withNewVisibleItem))
     }
 
-    @Test("Logical section profiles reject unsupported native reordering")
-    func logicalSectionsRejectNativeReordering() {
+    @Test("Logical section profiles ignore unsupported native reordering")
+    func logicalSectionsIgnoreNativeReordering() throws {
         let items = [item("a", 0), item("b", 1)]
 
-        #expect(throws: ProfileLayoutReconciler.Failure.immovableOrderChange) {
-            try ProfileLayoutReconciler.planAcrossDisplays(
-                layout: ProfileLayout(visible: [id("b"), id("a")]),
-                items: items,
-                destinationSupport: .logicalSectionsPreserveNativeOrder
-            )
-        }
+        let plan = try ProfileLayoutReconciler.planAcrossDisplays(
+            layout: ProfileLayout(visible: [id("b"), id("a")]),
+            items: items,
+            destinationSupport: .logicalSectionsPreserveNativeOrder
+        )
+        #expect(plan.operations.isEmpty)
+        #expect(plan.targets.first?.layout.visible == [id("a"), id("b")])
+    }
+
+    @Test("Logical profile verification covers omitted sections and source displays")
+    func logicalVerificationCoversCompleteAdmittedInventory() throws {
+        let left = MenuBarDisplayID("left")
+        let right = MenuBarDisplayID("right")
+        let first = MenuBarItemDescriptor(
+            id: id("a"), section: .visible, order: 0, displayID: left
+        )
+        let omitted = MenuBarItemDescriptor(
+            id: id("b"), section: .visible, order: 1, displayID: left
+        )
+        let plan = try ProfileLayoutReconciler.planAcrossDisplays(
+            layout: ProfileLayout(hidden: [first.id]),
+            items: [first, omitted],
+            destinationSupport: .logicalSectionsPreserveNativeOrder
+        )
+        let applied = [first.replacingSection(.hidden), omitted]
+
+        #expect(plan.matchesLogicalArrangement(items: applied, validateShelfOrder: true))
+        #expect(!plan.matchesLogicalArrangement(
+            items: [first.replacingSection(.hidden), omitted.replacingSection(.hidden)],
+            validateShelfOrder: true
+        ))
+        #expect(!plan.matchesLogicalArrangement(
+            items: [
+                first.replacingSection(.hidden),
+                MenuBarItemDescriptor(
+                    id: omitted.id, section: .visible, order: 1, displayID: right
+                ),
+            ],
+            validateShelfOrder: true
+        ))
+    }
+
+    @Test("Logical profiles generate Barline-owned shelf reorder operations")
+    func logicalProfilesReorderShelf() throws {
+        let items = [
+            item("a", 0, section: .hidden),
+            item("b", 1, section: .hidden),
+        ]
+        let plan = try ProfileLayoutReconciler.planAcrossDisplays(
+            layout: ProfileLayout(hidden: [id("b"), id("a")]),
+            items: items,
+            destinationSupport: .logicalSectionsPreserveNativeOrder
+        )
+
+        #expect(plan.targets.first?.layout.hidden == [id("b"), id("a")])
+        #expect(!plan.operations.isEmpty)
+        #expect(plan.operations.allSatisfy { $0.section == .hidden })
     }
 
     @Test("Authority accepts preserved new anchors but rejects wrong saved order and section")

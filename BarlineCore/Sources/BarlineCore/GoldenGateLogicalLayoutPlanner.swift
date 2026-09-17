@@ -74,6 +74,31 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
         return replacingItems(ordered, in: snapshot)
     }
 
+    /// Applies Barline-owned ordering only to concealed shelf sections. The
+    /// visible menu bar is ordered by macOS and must never be cosmetically
+    /// reordered from persisted ranks.
+    public func applyingExplicitShelfOrder(
+        to snapshot: MenuBarSnapshot,
+        assignments: [MenuBarItemID: GoldenGateLogicalAssignment],
+        fallbackRank: Int = 512
+    ) -> MenuBarSnapshot {
+        guard !assignments.isEmpty else { return snapshot }
+        let visible = snapshot.items
+            .filter { $0.section == .visible }
+            .sorted { $0.order < $1.order }
+        let concealed = [MenuBarSection.hidden, .alwaysHidden].flatMap { section in
+            snapshot.items.filter { $0.section == section }.sorted { lhs, rhs in
+                if lhs.isBarlineControlItem != rhs.isBarlineControlItem {
+                    return !lhs.isBarlineControlItem
+                }
+                let lhsRank = assignments[lhs.id]?.rank ?? (fallbackRank + lhs.order)
+                let rhsRank = assignments[rhs.id]?.rank ?? (fallbackRank + rhs.order)
+                return lhsRank == rhsRank ? lhs.order < rhs.order : lhsRank < rhsRank
+            }
+        }
+        return replacingItems(visible + concealed, in: snapshot)
+    }
+
     /// Produces a bounded, deterministic persistence document. Assignments for
     /// temporarily absent applications are retained, while control items and
     /// identities currently observed as invalid are removed.

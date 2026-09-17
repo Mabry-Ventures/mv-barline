@@ -1111,6 +1111,11 @@ extension MenuBarItemManager {
                     destinationIndex -= 1
                 }
                 guard sourceIndex != destinationIndex else { return }
+                if destinationSection == .visible {
+                    throw MenuBarBackendError.unavailableCapability(
+                        "macOS 27 native menu bar reorder"
+                    )
+                }
             }
             let priorProfileID = await appState.compatibilityCoordinator.activeProfileID
             _ = try await appState.compatibilityCoordinator.perform(

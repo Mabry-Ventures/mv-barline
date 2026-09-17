@@ -204,6 +204,27 @@ public actor MenuBarStateCoordinator {
         let order: Int
     }
 
+    private struct ProfileObservationSignature: Equatable, Sendable {
+        struct Item: Hashable, Sendable {
+            let id: MenuBarItemID
+            let displayID: MenuBarDisplayID?
+            let section: MenuBarSection
+        }
+
+        let items: Set<Item>
+        let hiddenOrder: [MenuBarItemID]
+        let alwaysHiddenOrder: [MenuBarItemID]
+
+        init(snapshot: MenuBarSnapshot) {
+            items = Set(snapshot.items.map {
+                Item(id: $0.id, displayID: $0.displayID, section: $0.section)
+            })
+            let ordered = snapshot.items.sorted { $0.order < $1.order }
+            hiddenOrder = ordered.filter { $0.section == .hidden }.map(\.id)
+            alwaysHiddenOrder = ordered.filter { $0.section == .alwaysHidden }.map(\.id)
+        }
+    }
+
     public private(set) var currentSnapshot: MenuBarSnapshot?
     public private(set) var lastKnownGoodSnapshot: MenuBarSnapshot?
     public private(set) var lastRejection: SnapshotRejectionReason?
@@ -630,6 +651,27 @@ public actor MenuBarStateCoordinator {
                 lastKnownGoodProfileID = nil
                 throw mutationError
             }
+            if moveDestinationSupport == .logicalSectionsPreserveNativeOrder,
+               let operation = mutation.moveOperation
+            {
+                do {
+                    let rollbackSnapshot = try await withCompensation {
+                        try await self.compensateLogicalMove(
+                            restoring: before,
+                            operation: operation,
+                            now: now ?? Date()
+                        )
+                    }
+                    currentSnapshot = rollbackSnapshot
+                    lastKnownGoodSnapshot = rollbackSnapshot
+                    lastKnownGoodProfileID = activeProfileID
+                } catch {
+                    currentSnapshot = nil
+                    activeProfileID = nil
+                    throw MenuBarBackendError.mutationRecoveryFailed
+                }
+                throw mutationError
+            }
             guard await backend.capabilities.canRestore else {
                 currentSnapshot = nil
                 activeProfileID = nil
@@ -659,6 +701,78 @@ public actor MenuBarStateCoordinator {
             }
             throw mutationError
         }
+    }
+
+    private func compensateLogicalMove(
+        restoring before: MenuBarSnapshot,
+        operation: MenuBarMoveOperation,
+        now: Date
+    ) async throws -> MenuBarSnapshot {
+        guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
+            throw MenuBarBackendError.mutationRecoveryFailed
+        }
+        let orderedSourceSection = before.items
+            .filter { $0.section == source.section && $0.displayID == source.displayID }
+            .sorted { $0.order < $1.order }
+        guard let index = orderedSourceSection.firstIndex(where: { $0.id == source.id }) else {
+            throw MenuBarBackendError.mutationRecoveryFailed
+        }
+        _ = try await backend.move(MenuBarMoveOperation(
+            itemID: source.id,
+            section: source.section,
+            index: index,
+            destinationDisplayID: source.displayID
+        ))
+
+        let validationClockStartedAt = Date()
+        var mostRecentError: (any Error)?
+        for attempt in 0 ..< max(2, retryPolicy.maximumAttempts + 2) {
+            do {
+                let candidate = try await normalizedBackendSnapshot()
+                let validationNow = now.addingTimeInterval(
+                    Date().timeIntervalSince(validationClockStartedAt)
+                )
+                let restored = try validator.validate(
+                    candidate,
+                    previous: nil,
+                    now: validationNow
+                ).get()
+                guard Self.matchesLogicalArrangement(restored, target: before) else {
+                    throw MenuBarBackendError.operationFailed(
+                        "logical move compensation did not restore the prior layout"
+                    )
+                }
+                return restored
+            } catch {
+                mostRecentError = error
+            }
+            if attempt + 1 < max(2, retryPolicy.maximumAttempts + 2) {
+                try await Task.sleep(for: retryPolicy.delay(forAttempt: attempt))
+            }
+        }
+        throw mostRecentError ?? MenuBarBackendError.mutationRecoveryFailed
+    }
+
+    private static func matchesLogicalArrangement(
+        _ snapshot: MenuBarSnapshot,
+        target: MenuBarSnapshot
+    ) -> Bool {
+        guard Set(snapshot.items.map(\.id)) == Set(target.items.map(\.id)) else {
+            return false
+        }
+        let observed = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
+        guard target.items.allSatisfy({ expected in
+            observed[expected.id]?.section == expected.section &&
+                observed[expected.id]?.displayID == expected.displayID
+        }) else { return false }
+        for section in [MenuBarSection.hidden, .alwaysHidden] {
+            let expected = target.items.sorted { $0.order < $1.order }
+                .filter { $0.section == section }.map(\.id)
+            let actual = snapshot.items.sorted { $0.order < $1.order }
+                .filter { $0.section == section }.map(\.id)
+            guard actual == expected else { return false }
+        }
+        return true
     }
 
     /// macOS 27 publishes visibility changes through several cooperating
@@ -858,6 +972,18 @@ public actor MenuBarStateCoordinator {
             return
         }
 
+        if plan.nativeOrder == .preserveCurrentOrder {
+            guard admittedLayoutPlan.matchesLogicalArrangement(
+                items: snapshot.items,
+                validateShelfOrder: plan.shelfOrder == .applySavedOrder
+            ) else {
+                throw MenuBarBackendError.operationFailed(
+                    "profile activation changed an unrequested section or display"
+                )
+            }
+            return
+        }
+
         let scopedItems = displayID.map { requestedDisplayID in
             snapshot.items.filter { $0.displayID == requestedDisplayID }
         } ?? snapshot.items
@@ -936,6 +1062,79 @@ public actor MenuBarStateCoordinator {
         )
     }
 
+    private func verifiedProfileSnapshot(
+        before: MenuBarSnapshot,
+        layout: ProfileLayout,
+        displayID: MenuBarDisplayID?,
+        arrangementPlan: MenuBarArrangementExecutionPlan?,
+        admittedLayoutPlan: ProfileLayoutReconciler.DisplayPlan,
+        now: Date
+    ) async throws -> MenuBarSnapshot {
+        let retriesLogicalConvergence = arrangementPlan?.nativeOrder == .preserveCurrentOrder
+        let attemptCount = retriesLogicalConvergence
+            ? max(2, retryPolicy.maximumAttempts + 2)
+            : 1
+        let validationClockStartedAt = Date()
+        var previousSignature: ProfileObservationSignature?
+        var mostRecentError: (any Error)?
+
+        for attempt in 0 ..< attemptCount {
+            try Task.checkCancellation()
+            do {
+                let candidate = try await normalizedBackendSnapshot()
+                let validationNow = now.addingTimeInterval(
+                    Date().timeIntervalSince(validationClockStartedAt)
+                )
+                let snapshot: MenuBarSnapshot
+                switch validator.validate(candidate, previous: before, now: validationNow) {
+                case let .success(validated):
+                    lastRejection = nil
+                    snapshot = validated
+                case let .failure(reason):
+                    lastRejection = reason
+                    throw MenuBarBackendError.invalidSnapshot(reason)
+                }
+                if let arrangementPlan {
+                    try validateArrangementResult(
+                        layout: layout,
+                        displayID: displayID,
+                        plan: arrangementPlan,
+                        admittedLayoutPlan: admittedLayoutPlan,
+                        in: snapshot
+                    )
+                } else {
+                    try validateProfileResult(admittedLayoutPlan, in: snapshot)
+                }
+                if retriesLogicalConvergence {
+                    let signature = ProfileObservationSignature(snapshot: snapshot)
+                    guard previousSignature == signature else {
+                        previousSignature = signature
+                        throw MenuBarBackendError.operationFailed(
+                            "profile visibility observation has not settled"
+                        )
+                    }
+                }
+                return snapshot
+            } catch {
+                mostRecentError = error
+                if let backendError = error as? MenuBarBackendError,
+                   case .operationFailed("profile visibility observation has not settled") = backendError
+                {
+                    // Preserve the first accepted observation for the required
+                    // consecutive-stability proof.
+                } else {
+                    previousSignature = nil
+                }
+            }
+            if attempt + 1 < attemptCount {
+                try await Task.sleep(for: retryPolicy.delay(forAttempt: attempt))
+            }
+        }
+        throw mostRecentError ?? MenuBarBackendError.operationFailed(
+            "profile activation postcondition was unavailable"
+        )
+    }
+
     private func compensateSupportedArrangement(
         restoring before: MenuBarSnapshot,
         displayID: MenuBarDisplayID?,
@@ -946,8 +1145,13 @@ public actor MenuBarStateCoordinator {
         guard arrangementPlan.nativeOrder == .preserveCurrentOrder else {
             throw MenuBarBackendError.unavailableCapability("restore")
         }
+        let validationClockStartedAt = Date()
         let observed = try await normalizedBackendSnapshot()
-        let current = try validator.validate(observed, previous: nil, now: now).get()
+        let current = try validator.validate(
+            observed,
+            previous: nil,
+            now: now.addingTimeInterval(Date().timeIntervalSince(validationClockStartedAt))
+        ).get()
         let originalLayout = Self.layout(from: before, displayID: displayID)
         let admittedLayout = Self.preservingNativeVisibleOrder(
             in: originalLayout,
@@ -967,7 +1171,11 @@ public actor MenuBarStateCoordinator {
             _ = try await backend.move(operation)
         }
         let candidate = try await normalizedBackendSnapshot()
-        let restored = try validator.validate(candidate, previous: nil, now: now).get()
+        let restored = try validator.validate(
+            candidate,
+            previous: nil,
+            now: now.addingTimeInterval(Date().timeIntervalSince(validationClockStartedAt))
+        ).get()
         try validateArrangementResult(
             layout: originalLayout,
             displayID: displayID,
@@ -1173,74 +1381,64 @@ public actor MenuBarStateCoordinator {
             }
 
             try Task.checkCancellation()
-            let candidate = try await normalizedBackendSnapshot()
+            let snapshot = try await verifiedProfileSnapshot(
+                before: before,
+                layout: layout,
+                displayID: profileDisplayID,
+                arrangementPlan: arrangementPlan,
+                admittedLayoutPlan: layoutPlan,
+                now: now ?? Date()
+            )
             try await admission?()
-            switch validator.validate(candidate, previous: before, now: now ?? Date()) {
-            case let .success(snapshot):
-                guard generation == mutationGeneration else {
-                    throw CancellationError()
+            guard generation == mutationGeneration else {
+                throw CancellationError()
+            }
+            if let matchingDisplayOverride, let profileDisplayID {
+                guard let verifiedMatch = DisplayProfileOverrideResolver().resolve(
+                    profile: profile,
+                    requestedDisplayID: profileDisplayID,
+                    snapshot: snapshot
+                ),
+                    verifiedMatch.override.displayID == matchingDisplayOverride.override.displayID,
+                    verifiedMatch.override.displayFingerprint
+                    == matchingDisplayOverride.override.displayFingerprint
+                else {
+                    throw MenuBarBackendError.operationFailed(
+                        "profile display identity changed during activation"
+                    )
                 }
-                if let matchingDisplayOverride, let profileDisplayID {
-                    guard let verifiedMatch = DisplayProfileOverrideResolver().resolve(
-                        profile: profile,
-                        requestedDisplayID: profileDisplayID,
-                        snapshot: snapshot
-                    ),
-                        verifiedMatch.override.displayID == matchingDisplayOverride.override.displayID,
-                        verifiedMatch.override.displayFingerprint
-                        == matchingDisplayOverride.override.displayFingerprint
-                    else {
+                if let fingerprint = matchingDisplayOverride.override.displayFingerprint {
+                    let matchingIdentities = snapshot.displayIdentities?.count {
+                        $0.hardwareFingerprint == fingerprint
+                    } ?? 0
+                    guard matchingIdentities == 1 else {
                         throw MenuBarBackendError.operationFailed(
-                            "profile display identity changed during activation"
+                            "profile display identity became ambiguous during activation"
                         )
                     }
-                    if let fingerprint = matchingDisplayOverride.override.displayFingerprint {
-                        let matchingIdentities = snapshot.displayIdentities?.count {
-                            $0.hardwareFingerprint == fingerprint
-                        } ?? 0
-                        guard matchingIdentities == 1 else {
-                            throw MenuBarBackendError.operationFailed(
-                                "profile display identity became ambiguous during activation"
-                            )
-                        }
-                    }
                 }
-                if layoutPlan.isGloballyScoped, snapshot.displayIDs != before.displayIDs {
-                    throw MenuBarBackendError.operationFailed("profile display topology changed during activation")
-                }
-                if let arrangementPlan {
-                    try validateArrangementResult(
-                        layout: layout,
-                        displayID: profileDisplayID,
-                        plan: arrangementPlan,
-                        admittedLayoutPlan: layoutPlan,
-                        in: snapshot
-                    )
-                } else {
-                    try validateProfileResult(layoutPlan, in: snapshot)
-                }
-                try await admission?()
-                if let appliedWorkspaceRevision,
-                   await workspaceTransaction?.currentRevision() != appliedWorkspaceRevision
-                {
-                    throw MenuBarWorkspaceTransactionError.superseded
-                }
-                try Task.checkCancellation()
-                currentSnapshot = snapshot
-                lastKnownGoodSnapshot = snapshot
-                lastRejection = nil
-                activeProfileID = profile.id
-                lastKnownGoodProfileID = profile.id
-                recordUndoCheckpoint(
-                    before,
-                    activeProfileID: priorProfileID,
-                    workspace: workspaceBefore
-                )
-                return snapshot
-            case let .failure(reason):
-                lastRejection = reason
-                throw MenuBarBackendError.invalidSnapshot(reason)
             }
+            if layoutPlan.isGloballyScoped, snapshot.displayIDs != before.displayIDs {
+                throw MenuBarBackendError.operationFailed("profile display topology changed during activation")
+            }
+            try await admission?()
+            if let appliedWorkspaceRevision,
+               await workspaceTransaction?.currentRevision() != appliedWorkspaceRevision
+            {
+                throw MenuBarWorkspaceTransactionError.superseded
+            }
+            try Task.checkCancellation()
+            currentSnapshot = snapshot
+            lastKnownGoodSnapshot = snapshot
+            lastRejection = nil
+            activeProfileID = profile.id
+            lastKnownGoodProfileID = profile.id
+            recordUndoCheckpoint(
+                before,
+                activeProfileID: priorProfileID,
+                workspace: workspaceBefore
+            )
+            return snapshot
         } catch {
             let activationError = error
             // A preflight rejection describes only the move that threw. A

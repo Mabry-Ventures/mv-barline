@@ -41,14 +41,19 @@ public enum GoldenGateConcealmentPolicy {
         let allItems = visible.union(concealed)
 
         var concealedBundles = Set<String>()
-        for (bundleIdentifier, items) in Dictionary(grouping: allItems, by: \.bundleIdentifier) {
+        for (normalizedBundleIdentifier, items) in Dictionary(
+            grouping: allItems,
+            by: { $0.bundleIdentifier.lowercased() }
+        ) {
             guard
-                bundleIdentifier != barlineBundleIdentifier.lowercased(),
-                !bundleIdentifier.hasPrefix("com.apple."),
+                normalizedBundleIdentifier != barlineBundleIdentifier.lowercased(),
+                !normalizedBundleIdentifier.hasPrefix("com.apple."),
                 !items.isEmpty,
                 items.allSatisfy(concealed.contains)
             else { continue }
-            concealedBundles.insert(bundleIdentifier)
+            if let bundleIdentifier = items.first?.bundleIdentifier {
+                concealedBundles.insert(bundleIdentifier)
+            }
         }
 
         let visibleSystemIDs = Set(visible.compactMap(systemItemIdentifier))
@@ -61,8 +66,9 @@ public enum GoldenGateConcealmentPolicy {
     }
 
     public static func systemItemIdentifier(for item: MenuBarItemID) -> Int? {
-        guard item.bundleIdentifier == "com.apple.controlcenter" ||
-            item.bundleIdentifier == "com.apple.menubaragent"
+        let bundleIdentifier = item.bundleIdentifier.lowercased()
+        guard bundleIdentifier == "com.apple.controlcenter" ||
+            bundleIdentifier == "com.apple.menubaragent"
         else { return nil }
         let semanticName = [item.accessibilityIdentifier, item.title]
             .compactMap(\.self)
@@ -99,7 +105,9 @@ public enum GoldenGateConcealmentPolicy {
         if let systemIdentifier = systemItemIdentifier(for: item) {
             return !resolution.allowedSystemItemIdentifiers.contains(systemIdentifier)
         }
-        return resolution.concealedBundleIdentifiers.contains(item.bundleIdentifier)
+        return resolution.concealedBundleIdentifiers.contains {
+            $0.caseInsensitiveCompare(item.bundleIdentifier) == .orderedSame
+        }
     }
 
     public static func supports(
@@ -113,23 +121,26 @@ public enum GoldenGateConcealmentPolicy {
         let requested = visible.union(concealed)
         guard requested.isSubset(of: Set(allItems)) else { return false }
 
-        for (bundleIdentifier, items) in Dictionary(grouping: allItems, by: \.bundleIdentifier) {
+        for (normalizedBundleIdentifier, items) in Dictionary(
+            grouping: allItems,
+            by: { $0.bundleIdentifier.lowercased() }
+        ) {
             let itemSet = Set(items)
             let requestedForBundle = requested.intersection(itemSet)
             guard requestedForBundle.isEmpty || requestedForBundle == itemSet else {
                 return false
             }
-            if bundleIdentifier == barlineBundleIdentifier.lowercased(),
+            if normalizedBundleIdentifier == barlineBundleIdentifier.lowercased(),
                !concealed.isDisjoint(with: itemSet)
             {
                 return false
             }
-            if bundleIdentifier.hasPrefix("com.apple."),
+            if normalizedBundleIdentifier.hasPrefix("com.apple."),
                concealed.intersection(itemSet).contains(where: { systemItemIdentifier(for: $0) == nil })
             {
                 return false
             }
-            if !bundleIdentifier.hasPrefix("com.apple."),
+            if !normalizedBundleIdentifier.hasPrefix("com.apple."),
                !concealed.isDisjoint(with: itemSet),
                !itemSet.isSubset(of: concealed)
             {
@@ -162,14 +173,17 @@ public enum GoldenGateConcealmentPolicy {
             .intersection(allItemSet)
             .subtracting(visible)
 
-        for (bundleIdentifier, items) in Dictionary(grouping: orderedItems, by: \.bundleIdentifier) {
+        for (normalizedBundleIdentifier, items) in Dictionary(
+            grouping: orderedItems,
+            by: { $0.bundleIdentifier.lowercased() }
+        ) {
             let itemSet = Set(items)
-            if bundleIdentifier == barlineBundleIdentifier {
+            if normalizedBundleIdentifier == barlineBundleIdentifier {
                 visible.formUnion(itemSet)
                 concealed.subtract(itemSet)
                 continue
             }
-            if bundleIdentifier.hasPrefix("com.apple.") {
+            if normalizedBundleIdentifier.hasPrefix("com.apple.") {
                 let unsupported = itemSet.filter { systemItemIdentifier(for: $0) == nil }
                 visible.formUnion(unsupported)
                 concealed.subtract(unsupported)
@@ -200,12 +214,15 @@ public enum GoldenGateConcealmentPolicy {
         among allItems: [MenuBarItemID],
         barlineBundleIdentifier: String
     ) -> Bool {
-        guard item.bundleIdentifier != barlineBundleIdentifier.lowercased() else {
+        let normalizedBundleIdentifier = item.bundleIdentifier.lowercased()
+        guard normalizedBundleIdentifier != barlineBundleIdentifier.lowercased() else {
             return false
         }
-        if item.bundleIdentifier.hasPrefix("com.apple.") {
+        if normalizedBundleIdentifier.hasPrefix("com.apple.") {
             return systemItemIdentifier(for: item) != nil
         }
-        return allItems.count { $0.bundleIdentifier == item.bundleIdentifier } == 1
+        return allItems.count {
+            $0.bundleIdentifier.caseInsensitiveCompare(item.bundleIdentifier) == .orderedSame
+        } == 1
     }
 }

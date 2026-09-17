@@ -66,7 +66,7 @@ public struct MenuBarArrangementPolicy: Sendable {
         case .applicationGroupAndKnownSystemItem:
             guard GoldenGateConcealmentPolicy.supports(
                 configuration,
-                allItems: snapshot.items.map(\.id),
+                allItems: snapshot.items.filter { !$0.isBarlineControlItem }.map(\.id),
                 barlineBundleIdentifier: barlineBundleIdentifier
             ) else {
                 throw MenuBarArrangementPolicyError.unsupportedVisibilityAssignment

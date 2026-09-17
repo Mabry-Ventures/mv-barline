@@ -16,6 +16,8 @@ golden_gate_positions = File.read('Barline/MenuBar/MenuBarItems/GoldenGatePositi
 service_connection = File.read('Barline/MenuBar/MenuBarItems/BarlineMenuServiceConnection.swift')
 golden_gate_snapshot = golden_gate_provider.split('private func snapshot(forceRefresh:', 2).last
   .split('func move(', 2).first
+golden_gate_move = golden_gate_provider.split('func move(', 2).last
+  .split('@available(*, unavailable', 2).first
 layout_bar = File.read('Barline/MenuBar/LayoutBar/LayoutBar.swift')
 bridge_header = File.read('BarlineMenuService/BarlineMenuService-Bridging-Header.h')
 click_delivery = helper_client.split('private func deliverClick', 2).last
@@ -127,17 +129,17 @@ unless callback.include?('acknowledgeCandidate:candidate token:token error:error
   abort('Golden Gate assertion replacement is not an explicit abortable two-phase transaction')
 end
 
-unless golden_gate_provider.match?(/func move\(.*?applyVisibilityAssignment\(operation, to: before\).*?applyShelfOrder\(operation, to: before\).*?applyNativeVisibleOrder\(operation, to: before\)/m) &&
-       golden_gate_provider.match?(/func applyNativeVisibleOrder\(.*?serviceConnection\.nativeDrag\(transaction\).*?receipt\.completedSafely.*?verifyNativeOrderMutation/m) &&
+unless golden_gate_provider.match?(/func move\(.*?applyVisibilityAssignment\(operation, to: before\).*?applyShelfOrder\(operation, to: before\).*?unavailableCapability\(\s*"macOS 27 native menu bar reorder"/m) &&
+       golden_gate_provider.match?(/canReorderNativeItems: false/) &&
        golden_gate_provider.match?(/func applyVisibilityAssignment\(.*?GoldenGateConcealmentPolicy\.supports\(.*?serviceConnection\.configureConcealment\(configuration\).*?commitPersistence\(persistence\)/m) &&
        golden_gate_provider.match?(/func applyShelfOrder\(.*?physicalCandidate.*?commitPersistence\(persistence\)/m) &&
        golden_gate_provider.include?('@available(*, unavailable, message: "macOS 27 position records are observational only")') &&
        golden_gate_snapshot.include?('let now = DispatchTime.now') &&
        !golden_gate_snapshot.include?('reconcileInterruptedPositionTransaction') &&
-       service_connection.match?(/func nativeDrag\(.*?\.nativeDrag\(.*?deadlineUptimeNanoseconds: mutationDeadline\(\)/m) &&
-       helper_backend.match?(/func nativeDrag\(.*?GoldenGateNativeDragExecutor\.perform\(transaction\)/m) &&
-       helper_backend.match?(/private enum GoldenGateNativeDragExecutor.*?\.leftMouseDown.*?\.leftMouseUp.*?\.leftMouseDragged.*?waitForLeftButtonRelease/m)
-  abort('Golden Gate native arrangement is not helper-executed, postcondition-verified, and position-write quarantined')
+       helper_backend.match?(/canReorderNativeItems: false/) &&
+       helper_backend.match?(/func nativeDrag\(.*?unavailableCapability\("Golden Gate native menu bar reorder"\)/m) &&
+       !golden_gate_move.include?('serviceConnection.nativeDrag')
+  abort('Golden Gate native arrangement is not hard-disabled while logical assignment and shelf ordering remain available')
 end
 
 unless golden_gate_positions.match?(/func readPositions\(.*?authorizeAccess.*?defer \{ scopedURL\?\.stopAccessingSecurityScopedResource\(\) \}.*?readPreferences/m) &&

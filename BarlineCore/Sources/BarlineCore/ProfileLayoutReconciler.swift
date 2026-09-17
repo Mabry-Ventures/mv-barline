@@ -43,6 +43,38 @@ public enum ProfileLayoutReconciler {
                 ) == target.layout
             }
         }
+
+        /// Golden Gate preserves the system-owned visible sequence but must
+        /// still prove the complete admitted inventory stayed on its original
+        /// display and reached its target section. Shelf order is Barline-owned
+        /// and can therefore be verified independently of visible AX churn.
+        public func matchesLogicalArrangement(
+            items: [MenuBarItemDescriptor],
+            validateShelfOrder: Bool
+        ) -> Bool {
+            guard Set(items.map(\.id)).count == items.count else { return false }
+            if isGloballyScoped,
+               Set(items.map(\.id)) != Set(targets.flatMap(\.layout.allItemIDs))
+            {
+                return false
+            }
+            return targets.allSatisfy { target in
+                let observed = items.filter { $0.displayID == target.displayID }
+                let targetIDs = Set(target.layout.allItemIDs)
+                guard Set(observed.map(\.id)) == targetIDs else { return false }
+                let targetSections = Dictionary(uniqueKeysWithValues:
+                    target.layout.visible.map { ($0, MenuBarSection.visible) } +
+                        target.layout.hidden.map { ($0, MenuBarSection.hidden) } +
+                        target.layout.alwaysHidden.map { ($0, MenuBarSection.alwaysHidden) })
+                guard observed.allSatisfy({ targetSections[$0.id] == $0.section }) else {
+                    return false
+                }
+                guard validateShelfOrder else { return true }
+                let ordered = observed.sorted { $0.order < $1.order }
+                return ordered.filter { $0.section == .hidden }.map(\.id) == target.layout.hidden &&
+                    ordered.filter { $0.section == .alwaysHidden }.map(\.id) == target.layout.alwaysHidden
+            }
+        }
     }
 
     /// Authority is based on the same fixed-anchor ordering as activation, not
@@ -270,6 +302,37 @@ public enum ProfileLayoutReconciler {
                 destinationDisplayID: item.displayID
             ))
         }
+        var current = Dictionary(uniqueKeysWithValues: MenuBarSection.allCases.map { section in
+            (
+                section,
+                ordered.filter {
+                    requestedSections[$0.id, default: $0.section] == section
+                }.map(\.id)
+            )
+        })
+        for section in [MenuBarSection.hidden, .alwaysHidden] {
+            let desired = target.ids(in: section)
+            for position in desired.indices.reversed() {
+                let itemID = desired[position]
+                guard let descriptor = items.first(where: { $0.id == itemID }),
+                      canReposition(descriptor),
+                      let sourcePosition = current[section]?.firstIndex(of: itemID)
+                else { continue }
+                let next = position + 1 < desired.count ? desired[position + 1] : nil
+                let insertion = next.flatMap { current[section]?.firstIndex(of: $0) }
+                    ?? (current[section]?.count ?? 0)
+                let adjusted = insertion - (sourcePosition < insertion ? 1 : 0)
+                guard sourcePosition != adjusted else { continue }
+                operations.append(MenuBarMoveOperation(
+                    itemID: itemID,
+                    section: section,
+                    index: insertion,
+                    destinationDisplayID: descriptor.displayID
+                ))
+                current[section]?.remove(at: sourcePosition)
+                current[section]?.insert(itemID, at: adjusted)
+            }
+        }
         return Plan(target: target, operations: operations)
     }
 
@@ -295,27 +358,43 @@ public enum ProfileLayoutReconciler {
             }
         }
 
-        let ordered = items.sorted { $0.order < $1.order }
-        let target = ProfileLayout(
-            visible: ordered.filter {
-                requestedSections[$0.id, default: $0.section] == .visible
-            }.map(\.id),
-            hidden: ordered.filter {
-                requestedSections[$0.id, default: $0.section] == .hidden
-            }.map(\.id),
-            alwaysHidden: ordered.filter {
-                requestedSections[$0.id, default: $0.section] == .alwaysHidden
-            }.map(\.id)
-        )
         let selected = Set(layout.allItemIDs)
-        for section in MenuBarSection.allCases {
-            let requested = layout.ids(in: section).filter { known[$0]?.isBarlineControlItem != true }
-            let native = target.ids(in: section).filter {
-                selected.contains($0) && known[$0]?.isBarlineControlItem != true
+        let sectionAssignedItems = items
+            .sorted { $0.order < $1.order }
+            .map { item in
+                item.replacingSection(requestedSections[item.id, default: item.section])
             }
-            guard requested == native else { throw Failure.immovableOrderChange }
+        // macOS owns visible status-item order on Golden Gate. Barline owns the
+        // order of user-managed shelf slots, while controls and newly discovered
+        // anchors retain their physical positions.
+        var targetBySection = [MenuBarSection: [MenuBarItemID]]()
+        for section in MenuBarSection.allCases {
+            var sectionItems = sectionAssignedItems.filter { $0.section == section }
+            guard section != .visible else {
+                targetBySection[section] = sectionItems.map(\.id)
+                continue
+            }
+            let desired = layout.ids(in: section).filter {
+                known[$0]?.isBarlineControlItem != true
+            }
+            let slots = sectionItems.indices.filter {
+                selected.contains(sectionItems[$0].id) &&
+                    !sectionItems[$0].isBarlineControlItem
+            }
+            guard Set(slots.map { sectionItems[$0].id }) == Set(desired),
+                  slots.count == desired.count
+            else { throw Failure.immovableOrderChange }
+            for (slot, itemID) in zip(slots, desired) {
+                guard let descriptor = known[itemID] else { throw Failure.missingItem }
+                sectionItems[slot] = descriptor.replacingSection(section)
+            }
+            targetBySection[section] = sectionItems.map(\.id)
         }
-        return target
+        return ProfileLayout(
+            visible: targetBySection[.visible] ?? [],
+            hidden: targetBySection[.hidden] ?? [],
+            alwaysHidden: targetBySection[.alwaysHidden] ?? []
+        )
     }
 
     private static func requestedSections(

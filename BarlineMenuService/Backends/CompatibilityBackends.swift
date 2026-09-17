@@ -124,7 +124,10 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
                 canRestore: false,
                 canCapture: false,
                 arrangement: MenuBarArrangementCapabilities(
-                    canReorderNativeItems: canSnapshot && canSynthesizeInput,
+                    // Native status-item dragging is deliberately outside the
+                    // macOS 27 release boundary. Visibility uses the native
+                    // assessment API; physical ordering remains user-owned.
+                    canReorderNativeItems: false,
                     visibilityAssignmentGranularity: canConceal
                         ? .applicationGroupAndKnownSystemItem
                         : .unavailable,
@@ -227,13 +230,9 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
     }
 
     func nativeDrag(
-        _ transaction: MenuBarNativeDragTransaction
+        _: MenuBarNativeDragTransaction
     ) async throws -> MenuBarNativeDragReceipt {
-        guard revealObservations.canAdmitOperations else { throw MenuBarBackendError.interrupted }
-        guard client.eventSynthesisProbe() else {
-            throw MenuBarBackendError.unavailableCapability("native menu bar drag")
-        }
-        return try GoldenGateNativeDragExecutor.perform(transaction)
+        throw MenuBarBackendError.unavailableCapability("Golden Gate native menu bar reorder")
     }
 
     func restore(_: MenuBarSnapshot) async throws -> MenuBarMutationResult {
@@ -304,151 +303,6 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
                 delay = min(delay * 2, .seconds(5))
             }
         }
-    }
-}
-
-@available(macOS 27.0, *)
-private enum GoldenGateNativeDragExecutor {
-    private static let quietInterval: CFTimeInterval = 0.35
-    private static let quietBudget: CFTimeInterval = 2
-
-    static func perform(
-        _ transaction: MenuBarNativeDragTransaction
-    ) throws -> MenuBarNativeDragReceipt {
-        let source = CGPoint(x: transaction.source.x, y: transaction.source.y)
-        let destination = CGPoint(x: transaction.destination.x, y: transaction.destination.y)
-        guard source.x.isFinite, source.y.isFinite,
-              destination.x.isFinite, destination.y.isFinite,
-              hypot(destination.x - source.x, destination.y - source.y) >= 4,
-              abs(destination.y - source.y) <= 4,
-              displayContaining(source) != nil,
-              displayContaining(destination) != nil
-        else {
-            throw MenuBarBackendError.mutationNotStarted
-        }
-        guard waitForQuietPointer() else {
-            throw MenuBarInputIdleTimeoutError()
-        }
-        guard let eventSource = CGEventSource(stateID: .hidSystemState),
-              let mouseDown = CGEvent(
-                  mouseEventSource: eventSource,
-                  mouseType: .leftMouseDown,
-                  mouseCursorPosition: source,
-                  mouseButton: .left
-              ),
-              let mouseUp = CGEvent(
-                  mouseEventSource: eventSource,
-                  mouseType: .leftMouseUp,
-                  mouseCursorPosition: destination,
-                  mouseButton: .left
-              )
-        else {
-            throw MenuBarBackendError.unavailableCapability("native menu bar drag")
-        }
-        eventSource.localEventsSuppressionInterval = 0
-        mouseDown.flags = .maskCommand
-        mouseUp.flags = .maskCommand
-
-        var mouseDownPosted = false
-        var mouseUpPosted = false
-        var pointerInterferenceDetected = false
-        var lastPoint = source
-        defer {
-            if mouseDownPosted, !mouseUpPosted {
-                mouseUp.location = lastPoint
-                mouseUp.post(tap: .cghidEventTap)
-            }
-        }
-
-        if let move = CGEvent(
-            mouseEventSource: eventSource,
-            mouseType: .mouseMoved,
-            mouseCursorPosition: source,
-            mouseButton: .left
-        ) {
-            move.post(tap: .cghidEventTap)
-            Thread.sleep(forTimeInterval: 0.05)
-        }
-        mouseDown.post(tap: .cghidEventTap)
-        mouseDownPosted = true
-        Thread.sleep(forTimeInterval: 0.18)
-
-        let distance = abs(destination.x - source.x) + abs(destination.y - source.y)
-        let stepCount = min(24, max(6, Int(distance / 40)))
-        for step in 1 ... stepCount {
-            let progress = CGFloat(step) / CGFloat(stepCount)
-            let point = CGPoint(
-                x: source.x + (destination.x - source.x) * progress,
-                y: source.y + (destination.y - source.y) * progress
-            )
-            guard let dragged = CGEvent(
-                mouseEventSource: eventSource,
-                mouseType: .leftMouseDragged,
-                mouseCursorPosition: point,
-                mouseButton: .left
-            ) else { break }
-            dragged.flags = .maskCommand
-            dragged.post(tap: .cghidEventTap)
-            lastPoint = point
-            Thread.sleep(forTimeInterval: 0.03)
-            if let actual = CGEvent(source: nil)?.location,
-               hypot(actual.x - point.x, actual.y - point.y) > 8
-            {
-                pointerInterferenceDetected = true
-                break
-            }
-        }
-        Thread.sleep(forTimeInterval: 0.12)
-        mouseUp.location = lastPoint
-        mouseUp.post(tap: .cghidEventTap)
-        mouseUpPosted = true
-
-        let cleanupVerified = waitForLeftButtonRelease()
-        return MenuBarNativeDragReceipt(
-            transactionID: transaction.transactionID,
-            mouseDownPosted: mouseDownPosted,
-            mouseUpPosted: mouseUpPosted,
-            buttonCleanupVerified: cleanupVerified,
-            pointerInterferenceDetected: pointerInterferenceDetected
-        )
-    }
-
-    private static func displayContaining(_ point: CGPoint) -> CGDirectDisplayID? {
-        var display: CGDirectDisplayID = 0
-        var count: UInt32 = 0
-        guard CGGetDisplaysWithPoint(point, 1, &display, &count) == .success, count == 1 else {
-            return nil
-        }
-        return display
-    }
-
-    private static func waitForQuietPointer() -> Bool {
-        let deadline = Date().addingTimeInterval(quietBudget)
-        repeat {
-            let buttonsUp = !CGEventSource.buttonState(.combinedSessionState, button: .left) &&
-                !CGEventSource.buttonState(.combinedSessionState, button: .right) &&
-                !CGEventSource.buttonState(.combinedSessionState, button: .center)
-            let quietFor = CGEventSource.secondsSinceLastEventType(
-                .combinedSessionState,
-                eventType: .mouseMoved
-            )
-            if buttonsUp, quietFor >= quietInterval {
-                return true
-            }
-            Thread.sleep(forTimeInterval: 0.05)
-        } while Date() < deadline
-        return false
-    }
-
-    private static func waitForLeftButtonRelease() -> Bool {
-        let deadline = Date().addingTimeInterval(0.5)
-        repeat {
-            if !CGEventSource.buttonState(.combinedSessionState, button: .left) {
-                return true
-            }
-            Thread.sleep(forTimeInterval: 0.01)
-        } while Date() < deadline
-        return false
     }
 }
 

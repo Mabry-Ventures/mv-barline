@@ -103,6 +103,30 @@ struct GoldenGateLogicalLayoutPlannerTests {
         #expect(after.items.map(\.id) == [id(2), id(1), id(3)])
     }
 
+    @Test("Persisted shelf rank never cosmetically reorders the native menu bar")
+    func appliesOnlyExplicitShelfRank() {
+        let before = snapshot([
+            item(1, section: .visible, order: 0),
+            item(2, section: .visible, order: 1),
+            item(3, section: .hidden, order: 2),
+            item(4, section: .hidden, order: 3),
+        ])
+        let assignments = [
+            id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .visible, rank: 1),
+            id(2): GoldenGateLogicalAssignment(itemID: id(2), section: .visible, rank: 0),
+            id(3): GoldenGateLogicalAssignment(itemID: id(3), section: .hidden, rank: 1),
+            id(4): GoldenGateLogicalAssignment(itemID: id(4), section: .hidden, rank: 0),
+        ]
+
+        let after = GoldenGateLogicalLayoutPlanner().applyingExplicitShelfOrder(
+            to: before,
+            assignments: assignments
+        )
+
+        #expect(after.items.filter { $0.section == .visible }.map(\.id) == [id(1), id(2)])
+        #expect(after.items.filter { $0.section == .hidden }.map(\.id) == [id(4), id(3)])
+    }
+
     @Test("Persistence retains absent apps and excludes Barline controls")
     func persistenceRetainsAbsentAssignments() {
         let absentID = id(9)
