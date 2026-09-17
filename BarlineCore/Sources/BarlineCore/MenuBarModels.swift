@@ -615,25 +615,16 @@ public struct MenuBarMovePlanner: Sendable {
         let sharedIDs = Set(previousByID.keys)
             .subtracting(previousExcludedIDs)
             .intersection(Set(currentByID.keys).subtracting(currentExcludedIDs))
-        guard sharedIDs.allSatisfy({ id in
-            previousByID[id]?.section == currentByID[id]?.section
-        }) else {
-            return false
-        }
-
-        // A visibility assignment can legitimately move the affected status
-        // items to their native physical positions, changing their placement
-        // in the flattened AX inventory. Verify that it did not reorder any
-        // unaffected peers within their existing section instead of requiring
-        // the entire cross-section inventory to remain byte-for-byte ordered.
-        return MenuBarSection.allCases.allSatisfy { section in
-            let previousOrder = previousSnapshot.items.lazy
-                .filter { sharedIDs.contains($0.id) && $0.section == section }
-                .map(\.id)
-            let currentOrder = snapshot.items.lazy
-                .filter { sharedIDs.contains($0.id) && $0.section == section }
-                .map(\.id)
-            return Array(previousOrder) == Array(currentOrder)
+        // Golden Gate owns native ordering. A visibility transaction can make
+        // AX re-enumerate otherwise unchanged status-item roots in a different
+        // order even though no native item moved. The logical backend must not
+        // reinterpret that observation order as a mutation. It does, however,
+        // still verify every stable unaffected item remains assigned to the
+        // same section and display, so an unrelated visibility or display
+        // side effect continues to fail closed.
+        return sharedIDs.allSatisfy { id in
+            previousByID[id]?.section == currentByID[id]?.section &&
+                previousByID[id]?.displayID == currentByID[id]?.displayID
         }
     }
 

@@ -391,8 +391,8 @@ struct StateCoordinatorTests {
         #expect(await backend.moveOperations.count == 1)
     }
 
-    @Test("macOS 27 rejects unrelated within-section reordering during visibility assignment")
-    func rejectsGoldenGateUnrelatedNativeReordering() async throws {
+    @Test("macOS 27 tolerates AX enumeration churn while preserving logical assignments")
+    func acceptsGoldenGateAXEnumerationChurn() async throws {
         let display = MenuBarDisplayID("test-display")
         let source = MenuBarItemID(
             bundleIdentifier: "com.example.source",
@@ -429,6 +429,72 @@ struct StateCoordinatorTests {
             activeSpaceIsValid: true
         )
         let backend = FakeBackend(
+            snapshots: [before, invalidAfter, invalidAfter],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: false,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
+            )
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+
+        let result = try await coordinator.perform(
+            .move(MenuBarMoveOperation(
+                itemID: source,
+                section: .visible,
+                index: 0,
+                destinationDisplayID: display
+            )),
+            now: before.capturedAt
+        )
+
+        #expect(result.items.first(where: { $0.id == firstUnrelated })?.section == .visible)
+        #expect(result.items.first(where: { $0.id == secondUnrelated })?.section == .visible)
+        #expect(await coordinator.lastRejection == nil)
+    }
+
+    @Test("macOS 27 rejects an unrelated display reassignment during visibility assignment")
+    func rejectsGoldenGateUnrelatedDisplayReassignment() async throws {
+        let display = MenuBarDisplayID("test-display")
+        let otherDisplay = MenuBarDisplayID("other-display")
+        let source = MenuBarItemID(
+            bundleIdentifier: "com.example.source",
+            accessibilityIdentifier: "only"
+        )
+        let unrelated = MenuBarItemID(
+            bundleIdentifier: "com.example.unrelated",
+            accessibilityIdentifier: "only"
+        )
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: Date(),
+            items: [
+                MenuBarItemDescriptor(id: source, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: unrelated, section: .visible, order: 1, displayID: display),
+            ],
+            displayIDs: [display, otherDisplay],
+            activeSpaceIsValid: true
+        )
+        let invalidAfter = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: before.capturedAt,
+            items: [
+                MenuBarItemDescriptor(id: source, section: .hidden, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: unrelated, section: .visible, order: 1, displayID: otherDisplay),
+            ],
+            displayIDs: [display, otherDisplay],
+            activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
             snapshots: [before, invalidAfter],
             capabilities: MenuBarCapabilities(
                 canSnapshot: true,
@@ -451,7 +517,7 @@ struct StateCoordinatorTests {
             try await coordinator.perform(
                 .move(MenuBarMoveOperation(
                     itemID: source,
-                    section: .visible,
+                    section: .hidden,
                     index: 0,
                     destinationDisplayID: display
                 )),
