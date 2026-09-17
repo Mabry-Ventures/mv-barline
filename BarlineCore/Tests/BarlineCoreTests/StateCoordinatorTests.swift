@@ -78,6 +78,154 @@ struct StateCoordinatorTests {
         #expect(result.items.first(where: { $0.id == unrelated })?.section == .visible)
     }
 
+    @Test("macOS 27 accepts native inventory relocation after a visibility assignment")
+    func acceptsGoldenGateApplicationGroupNativeRelocation() async throws {
+        let display = MenuBarDisplayID("test-display")
+        let first = MenuBarItemID(
+            bundleIdentifier: "com.example.multi-item",
+            accessibilityIdentifier: "first"
+        )
+        let second = MenuBarItemID(
+            bundleIdentifier: "com.example.multi-item",
+            accessibilityIdentifier: "second"
+        )
+        let firstUnrelated = MenuBarItemID(
+            bundleIdentifier: "com.example.first-unrelated",
+            accessibilityIdentifier: "only"
+        )
+        let secondUnrelated = MenuBarItemID(
+            bundleIdentifier: "com.example.second-unrelated",
+            accessibilityIdentifier: "only"
+        )
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: Date(),
+            items: [
+                MenuBarItemDescriptor(id: firstUnrelated, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: secondUnrelated, section: .visible, order: 1, displayID: display),
+                MenuBarItemDescriptor(id: first, section: .hidden, order: 2, displayID: display),
+                MenuBarItemDescriptor(id: second, section: .hidden, order: 3, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let after = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: before.capturedAt,
+            items: [
+                MenuBarItemDescriptor(id: first, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: second, section: .visible, order: 1, displayID: display),
+                MenuBarItemDescriptor(id: firstUnrelated, section: .visible, order: 2, displayID: display),
+                MenuBarItemDescriptor(id: secondUnrelated, section: .visible, order: 3, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
+            snapshots: [before, after],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: false,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
+            )
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+
+        let result = try await coordinator.perform(
+            .move(MenuBarMoveOperation(
+                itemID: first,
+                section: .visible,
+                index: 0,
+                destinationDisplayID: display
+            )),
+            now: before.capturedAt
+        )
+
+        #expect(result.items.first(where: { $0.id == first })?.section == .visible)
+        #expect(result.items.first(where: { $0.id == second })?.section == .visible)
+        #expect(result.items.filter {
+            $0.id == firstUnrelated || $0.id == secondUnrelated
+        }.map(\.id) == [firstUnrelated, secondUnrelated])
+    }
+
+    @Test("macOS 27 rejects unrelated within-section reordering during visibility assignment")
+    func rejectsGoldenGateUnrelatedNativeReordering() async throws {
+        let display = MenuBarDisplayID("test-display")
+        let source = MenuBarItemID(
+            bundleIdentifier: "com.example.source",
+            accessibilityIdentifier: "only"
+        )
+        let firstUnrelated = MenuBarItemID(
+            bundleIdentifier: "com.example.first-unrelated",
+            accessibilityIdentifier: "only"
+        )
+        let secondUnrelated = MenuBarItemID(
+            bundleIdentifier: "com.example.second-unrelated",
+            accessibilityIdentifier: "only"
+        )
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: Date(),
+            items: [
+                MenuBarItemDescriptor(id: firstUnrelated, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: secondUnrelated, section: .visible, order: 1, displayID: display),
+                MenuBarItemDescriptor(id: source, section: .hidden, order: 2, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let invalidAfter = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: before.capturedAt,
+            items: [
+                MenuBarItemDescriptor(id: source, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: secondUnrelated, section: .visible, order: 1, displayID: display),
+                MenuBarItemDescriptor(id: firstUnrelated, section: .visible, order: 2, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
+            snapshots: [before, invalidAfter],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: false,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
+            )
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+
+        await #expect(throws: MenuBarBackendError.mutationRecoveryFailed) {
+            try await coordinator.perform(
+                .move(MenuBarMoveOperation(
+                    itemID: source,
+                    section: .visible,
+                    index: 0,
+                    destinationDisplayID: display
+                )),
+                now: before.capturedAt
+            )
+        }
+    }
+
     @Test("macOS 27 rejects unrelated visibility changes during an application assignment")
     func rejectsUnrelatedGoldenGateAssignmentSideEffect() async throws {
         let display = MenuBarDisplayID("test-display")

@@ -515,9 +515,6 @@ public struct MenuBarMovePlanner: Sendable {
         let previousByID = Dictionary(uniqueKeysWithValues: previousSnapshot.items.map { ($0.id, $0) })
         let currentByID = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
         let sharedIDs = Set(previousByID.keys).intersection(currentByID.keys)
-        let previousOrder = previousSnapshot.items.map(\.id).filter(sharedIDs.contains)
-        let currentOrder = snapshot.items.map(\.id).filter(sharedIDs.contains)
-        guard previousOrder == currentOrder else { return false }
 
         let allowedChangedIDs: Set<MenuBarItemID>
         if visibilityAssignmentGranularity == .applicationGroupAndKnownSystemItem,
@@ -530,11 +527,31 @@ public struct MenuBarMovePlanner: Sendable {
             allowedChangedIDs = [operation.itemID]
         }
 
-        return sharedIDs.allSatisfy { id in
+        guard allowedChangedIDs.allSatisfy({ id in
+            currentByID[id]?.section == operation.section
+        }), sharedIDs.allSatisfy({ id in
             if allowedChangedIDs.contains(id) {
                 return currentByID[id]?.section == operation.section
             }
             return previousByID[id]?.section == currentByID[id]?.section
+        }) else {
+            return false
+        }
+
+        // A visibility assignment can legitimately move the affected status
+        // items to their native physical positions, changing their placement
+        // in the flattened AX inventory. Verify that it did not reorder any
+        // unaffected peers within their existing section instead of requiring
+        // the entire cross-section inventory to remain byte-for-byte ordered.
+        let unaffectedIDs = sharedIDs.subtracting(allowedChangedIDs)
+        return MenuBarSection.allCases.allSatisfy { section in
+            let previousOrder = previousSnapshot.items.lazy
+                .filter { unaffectedIDs.contains($0.id) && $0.section == section }
+                .map(\.id)
+            let currentOrder = snapshot.items.lazy
+                .filter { unaffectedIDs.contains($0.id) && $0.section == section }
+                .map(\.id)
+            return Array(previousOrder) == Array(currentOrder)
         }
     }
 
