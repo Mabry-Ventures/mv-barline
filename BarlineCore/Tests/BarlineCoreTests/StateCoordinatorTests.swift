@@ -695,6 +695,74 @@ struct StateCoordinatorTests {
         #expect(await backend.moveOperations.count == 1)
     }
 
+    @Test("macOS 27 reserves convergence observations after compatibility failures")
+    func reservesGoldenGateVisibilityConvergenceObservations() async throws {
+        let display = MenuBarDisplayID("test-display")
+        let source = MenuBarItemID(
+            bundleIdentifier: "com.example.grouped",
+            accessibilityIdentifier: "source"
+        )
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: Date(),
+            items: [
+                MenuBarItemDescriptor(id: source, section: .visible, order: 0, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let after = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: before.capturedAt,
+            items: [
+                MenuBarItemDescriptor(id: source, section: .hidden, order: 0, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
+            snapshots: [before, after, after],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: false,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
+            ),
+            snapshotFailureCallNumbers: [2, 3]
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(
+                maximumAttempts: 4,
+                baseDelay: .zero,
+                maximumDelay: .zero,
+                maximumJitterPermille: 0
+            )
+        )
+
+        let result = try await coordinator.perform(
+            .move(MenuBarMoveOperation(
+                itemID: source,
+                section: .hidden,
+                index: 0,
+                destinationDisplayID: display
+            )),
+            now: before.capturedAt
+        )
+
+        #expect(result == after)
+        #expect(await backend.snapshotCallCount == 5)
+        #expect(await backend.moveOperations.count == 1)
+    }
+
     @Test("macOS 27 profile activation preserves native visible order")
     func activatesGoldenGateProfileWithoutReplayingSavedNativeOrder() async throws {
         let seed = makeSnapshot(generation: 1, count: 4)
@@ -5181,6 +5249,7 @@ private actor FakeBackend: MenuBarBackend {
     private let moveFailureError: MenuBarBackendError
     private let environmentSnapshot: MenuBarEnvironmentSnapshot?
     private var snapshotFailuresRemaining: Int
+    private let snapshotFailureCallNumbers: Set<Int>
     private var restoreFailuresRemaining: Int
     private let restoreFailureCallNumbers: Set<Int>
     private(set) var restoreCallCount = 0
@@ -5208,6 +5277,7 @@ private actor FakeBackend: MenuBarBackend {
         moveFailureError: MenuBarBackendError = .operationFailed("injected move failure"),
         environment: MenuBarEnvironmentSnapshot? = nil,
         snapshotFailures: Int = 0,
+        snapshotFailureCallNumbers: Set<Int> = [],
         restoreFailures: Int = 0,
         restoreFailureError: MenuBarBackendError = .interrupted,
         restoreFailureCallNumbers: Set<Int> = [],
@@ -5224,6 +5294,7 @@ private actor FakeBackend: MenuBarBackend {
         self.moveFailureError = moveFailureError
         environmentSnapshot = environment
         snapshotFailuresRemaining = max(0, snapshotFailures)
+        self.snapshotFailureCallNumbers = snapshotFailureCallNumbers
         restoreFailuresRemaining = max(0, restoreFailures)
         self.restoreFailureError = restoreFailureError
         self.restoreFailureCallNumbers = restoreFailureCallNumbers
@@ -5237,6 +5308,9 @@ private actor FakeBackend: MenuBarBackend {
             try Task.checkCancellation()
         }
         snapshotCallCount += 1
+        if snapshotFailureCallNumbers.contains(snapshotCallCount) {
+            throw MenuBarBackendError.interrupted
+        }
         if snapshotFailuresRemaining > 0 {
             snapshotFailuresRemaining -= 1
             throw MenuBarBackendError.interrupted

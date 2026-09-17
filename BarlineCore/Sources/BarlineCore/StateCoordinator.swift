@@ -659,7 +659,12 @@ public actor MenuBarStateCoordinator {
         let retriesEventuallyConsistentVisibility = mutation.moveOperation != nil &&
             visibilityAssignmentGranularity == .applicationGroupAndKnownSystemItem
         let attemptCount = retriesEventuallyConsistentVisibility
-            ? max(1, retryPolicy.maximumAttempts)
+            // Golden Gate's compatibility inventory request can consume one
+            // complete attempt while its XPC generation is replaced. A
+            // second extra observation is required to prove that the first
+            // valid post-write inventory has actually settled. Neither event
+            // should reduce the caller's ordinary recovery budget.
+            ? max(2, retryPolicy.maximumAttempts + 2)
             : 1
         var mostRecentError: (any Error)?
         var previousSuccessfulVisibilitySignature: VisibilityObservationSignature?
