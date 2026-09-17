@@ -72,7 +72,23 @@ actor XPCMenuBarBackend: MenuBarBackend {
         _ configuration: MenuBarConcealmentConfiguration
     ) async throws {
         if #available(macOS 27.0, *) {
-            try await goldenGateProvider.configureConcealment(configuration)
+            // Accessibility inventory belongs to the signed application, while
+            // the native assessment assertion belongs to the helper. Validate
+            // and retain the complete inventory before the helper can remove
+            // concealed items from the AX tree.
+            let snapshot = try await goldenGateProvider.snapshot()
+            guard GoldenGateConcealmentPolicy.supports(
+                configuration,
+                allItems: snapshot.items.filter { !$0.isBarlineControlItem }.map(\.id),
+                barlineBundleIdentifier: Bundle.main.bundleIdentifier
+                    ?? "com.mabryventures.Barline"
+            ) else {
+                throw MenuBarBackendError.operationFailed(
+                    "menu bar visibility assignment is not supported"
+                )
+            }
+            try await connection.configureConcealment(configuration)
+            await goldenGateProvider.concealmentDidChange()
         } else {
             try await connection.configureConcealment(configuration)
         }

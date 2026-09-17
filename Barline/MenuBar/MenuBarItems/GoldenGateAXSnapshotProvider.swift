@@ -734,13 +734,13 @@ actor GoldenGateAXSnapshotProvider {
         )
     }
 
-    /// Presentation-only synchronization shares this actor with logical moves
-    /// and records the last helper-acknowledged complete configuration. A later
-    /// failed mutation can therefore restore the actual native presentation,
-    /// not a logical-layout approximation.
-    func configureConcealment(
-        _: MenuBarConcealmentConfiguration
-    ) async throws {}
+    /// Native concealment is committed by the helper. Invalidate only the AX
+    /// cache after its acknowledgement; presentation changes must never rewrite
+    /// the user's saved logical layout.
+    func concealmentDidChange() {
+        cachedAt = nil
+        cachedSnapshot = nil
+    }
 
     func activate(_ itemID: MenuBarItemID, button: MenuBarMouseButton) throws {
         guard button == .left else {
