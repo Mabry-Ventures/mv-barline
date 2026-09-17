@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.29 (build 103) — September 17, 2026
+
+- Make macOS 27 layout changes transactional: verify complete section, display,
+  inventory, and shelf-order postconditions, require settled profile
+  observations, and compensate failed or cancelled logical moves.
+- Preserve macOS-owned visible menu-bar order while reliably persisting and
+  restoring Barline-owned Hidden and Always Hidden shelf order.
+- Remove the macOS 27 native HID drag implementation. Visible menu-bar ordering
+  stays user-owned through Command-drag; Barline handles supported visibility
+  assignments and shelf ordering without synthesizing native drags.
+- Treat bundle identifiers case-insensitively and exclude Barline's own controls
+  from application-group concealment decisions.
+
 ## 1.0.22 (build 96) — September 16, 2026
 
 - macOS 27: request read-write access to the one user-selected menu-bar position file. The signed release gate now rejects a build carrying the insufficient read-only entitlement.
