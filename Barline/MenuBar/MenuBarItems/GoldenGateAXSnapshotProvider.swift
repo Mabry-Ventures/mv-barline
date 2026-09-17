@@ -260,17 +260,22 @@ actor GoldenGateAXSnapshotProvider {
     var capabilities: MenuBarCapabilities {
         get async {
             let canSnapshot = await (try? snapshot()) != nil
+            let helperCapabilities = try? await serviceConnection.capabilities()
+            let helperArrangement = helperCapabilities?.arrangement
+            let canMove = canSnapshot && helperCapabilities?.canMove == true
             return MenuBarCapabilities(
                 canSnapshot: canSnapshot,
-                canMove: canSnapshot,
+                canMove: canMove,
                 canReveal: false,
-                canActivate: canSnapshot,
+                canActivate: canSnapshot && helperCapabilities?.canActivate == true,
                 canRestore: false,
                 canCapture: false,
                 moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
                 arrangement: MenuBarArrangementCapabilities(
-                    canReorderNativeItems: canSnapshot,
-                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderNativeItems: canSnapshot &&
+                        helperArrangement?.canReorderNativeItems == true,
+                    visibilityAssignmentGranularity: helperArrangement?
+                        .visibilityAssignmentGranularity ?? .unavailable,
                     canReorderShelfItems: true,
                     canApplySavedNativeOrder: false
                 )
@@ -730,6 +735,29 @@ actor GoldenGateAXSnapshotProvider {
                 y: anchor.bounds.y + anchor.bounds.height / 2
             )
         )
+        let currentEntries = collectEntries()
+        let currentItemIDs = GoldenGateMenuBarSnapshotBuilder.identifiers(
+            for: currentEntries.map(\.observation)
+        )
+        var entriesByItemID = [MenuBarItemID: Entry]()
+        for (itemID, entry) in zip(currentItemIDs, currentEntries) {
+            guard entriesByItemID.updateValue(entry, forKey: itemID) == nil else {
+                throw MenuBarBackendError.mutationNotStarted
+            }
+        }
+        guard let sourceEntry = entriesByItemID[source.id],
+              let anchorEntry = entriesByItemID[anchor.id],
+              Self.hitTest(
+                  CGPoint(x: transaction.source.x, y: transaction.source.y),
+                  relatedTo: sourceEntry.element
+              ),
+              Self.hitTest(
+                  CGPoint(x: transaction.destination.x, y: transaction.destination.y),
+                  relatedTo: anchorEntry.element
+              )
+        else {
+            throw MenuBarBackendError.mutationNotStarted
+        }
         let receipt = try await serviceConnection.nativeDrag(transaction)
         guard receipt.transactionID == transaction.transactionID,
               receipt.completedSafely
@@ -757,6 +785,41 @@ actor GoldenGateAXSnapshotProvider {
             generation: generation,
             changedItemIDs: [source.id]
         )
+    }
+
+    private static func hitTest(_ point: CGPoint, relatedTo expected: AXUIElement) -> Bool {
+        guard let hit = AXHelpers.element(at: point)?.element else { return false }
+        if CFEqual(hit, expected) {
+            return true
+        }
+        return isAncestor(expected, of: hit) || isAncestor(hit, of: expected)
+    }
+
+    private static func isAncestor(_ candidate: AXUIElement, of element: AXUIElement) -> Bool {
+        var current = element
+        for _ in 0 ..< 4 {
+            guard let parent = parent(of: current) else { return false }
+            if CFEqual(parent, candidate) {
+                return true
+            }
+            current = parent
+        }
+        return false
+    }
+
+    private static func parent(of element: AXUIElement) -> AXUIElement? {
+        var value: CFTypeRef?
+        guard AXUIElementCopyAttributeValue(
+            element,
+            kAXParentAttribute as CFString,
+            &value
+        ) == .success,
+            let value,
+            CFGetTypeID(value) == AXUIElementGetTypeID()
+        else {
+            return nil
+        }
+        return unsafeDowncast(value, to: AXUIElement.self)
     }
 
     func restore(_: MenuBarSnapshot) async throws -> MenuBarMutationResult {

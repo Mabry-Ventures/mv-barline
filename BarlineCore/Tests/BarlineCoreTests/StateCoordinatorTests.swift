@@ -70,6 +70,79 @@ struct StateCoordinatorTests {
         #expect(await coordinator.activeProfileID == profile.id)
     }
 
+    @Test("macOS 27 compensates supported profile dimensions without native restore")
+    func compensatesGoldenGateProfileWithoutNativeRestore() async throws {
+        let seed = makeSnapshot(generation: 1, count: 3)
+        let ids = seed.items.map(\.id)
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: seed.capturedAt,
+            items: [
+                seed.items[0].replacing(section: .visible, order: 0),
+                seed.items[1].replacing(section: .hidden, order: 1),
+                seed.items[2].replacing(section: .hidden, order: 2),
+            ],
+            displayIDs: seed.displayIDs,
+            activeSpaceIsValid: true
+        )
+        let partiallyApplied = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: seed.capturedAt,
+            items: [
+                seed.items[0].replacing(section: .hidden, order: 0),
+                seed.items[1].replacing(section: .hidden, order: 1),
+                seed.items[2].replacing(section: .hidden, order: 2),
+            ],
+            displayIDs: seed.displayIDs,
+            activeSpaceIsValid: true
+        )
+        let rolledBack = MenuBarSnapshot(
+            generation: 3,
+            capturedAt: seed.capturedAt,
+            items: before.items,
+            displayIDs: seed.displayIDs,
+            activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
+            snapshots: [before, partiallyApplied, rolledBack],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: false,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: true,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
+            ),
+            failMoveAt: 2
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let profile = BarlineProfile(
+            name: "Partial Golden Gate",
+            layout: ProfileLayout(
+                visible: [ids[1]],
+                hidden: [ids[0], ids[2]]
+            )
+        )
+
+        await #expect(throws: MenuBarBackendError.operationFailed("injected move failure")) {
+            try await coordinator.activate(profile: profile, now: before.capturedAt)
+        }
+
+        #expect(await backend.restoredSnapshots.isEmpty)
+        #expect(await backend.moveOperations.count >= 3)
+        #expect(await backend.moveOperations.contains {
+            $0.itemID == ids[0] && $0.section == .visible
+        })
+        #expect(await coordinator.currentSnapshot == rolledBack)
+        #expect(await coordinator.activeProfileID == nil)
+    }
+
     @Test("A base layout cannot commit across an unadmitted empty-display connection")
     func rejectsBaseTopologyChange() async throws {
         let before = makeSnapshot(generation: 1, count: 1)

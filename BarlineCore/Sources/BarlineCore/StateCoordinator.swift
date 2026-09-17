@@ -754,6 +754,62 @@ public actor MenuBarStateCoordinator {
         )
     }
 
+    private static func layout(
+        from snapshot: MenuBarSnapshot,
+        displayID: MenuBarDisplayID?
+    ) -> ProfileLayout {
+        let ordered = snapshot.items
+            .filter { !$0.isBarlineControlItem && (displayID == nil || $0.displayID == displayID) }
+            .sorted { $0.order < $1.order }
+        return ProfileLayout(
+            visible: ordered.filter { $0.section == .visible }.map(\.id),
+            hidden: ordered.filter { $0.section == .hidden }.map(\.id),
+            alwaysHidden: ordered.filter { $0.section == .alwaysHidden }.map(\.id)
+        )
+    }
+
+    private func compensateSupportedArrangement(
+        restoring before: MenuBarSnapshot,
+        displayID: MenuBarDisplayID?,
+        arrangementPlan: MenuBarArrangementExecutionPlan,
+        destinationSupport: MenuBarMoveDestinationSupport,
+        now: Date
+    ) async throws -> MenuBarSnapshot {
+        guard arrangementPlan.nativeOrder == .preserveCurrentOrder else {
+            throw MenuBarBackendError.unavailableCapability("restore")
+        }
+        let observed = try await normalizedBackendSnapshot()
+        let current = try validator.validate(observed, previous: nil, now: now).get()
+        let originalLayout = Self.layout(from: before, displayID: displayID)
+        let admittedLayout = Self.preservingNativeVisibleOrder(
+            in: originalLayout,
+            snapshot: current
+        )
+        let plan = try ProfileLayoutReconciler.planAcrossDisplays(
+            layout: admittedLayout,
+            items: current.items,
+            displayID: displayID,
+            destinationSupport: destinationSupport
+        )
+        for operation in plan.operations where Self.shouldApply(
+            operation,
+            to: current,
+            arrangementPlan: arrangementPlan
+        ) {
+            _ = try await backend.move(operation)
+        }
+        let candidate = try await normalizedBackendSnapshot()
+        let restored = try validator.validate(candidate, previous: nil, now: now).get()
+        try validateArrangementResult(
+            layout: originalLayout,
+            displayID: displayID,
+            plan: arrangementPlan,
+            admittedLayoutPlan: plan,
+            in: restored
+        )
+        return restored
+    }
+
     /// Captures a fresh, uniquely identified active display without mutating it.
     public func captureDisplayVariant(profile: BarlineProfile) async throws -> DisplayProfileOverride {
         await acquireMutationTurn()
@@ -1085,6 +1141,22 @@ public actor MenuBarStateCoordinator {
                             verifiedRollbackSnapshot = snapshot
                         case let .failure(reason):
                             throw MenuBarBackendError.invalidSnapshot(reason)
+                        }
+                    } catch {
+                        layoutRollbackError = error
+                    }
+                } else if let arrangementPlan,
+                          arrangementPlan.nativeOrder == .preserveCurrentOrder
+                {
+                    do {
+                        verifiedRollbackSnapshot = try await withCompensation {
+                            try await self.compensateSupportedArrangement(
+                                restoring: before,
+                                displayID: profileDisplayID,
+                                arrangementPlan: arrangementPlan,
+                                destinationSupport: destinationSupport,
+                                now: now ?? Date()
+                            )
                         }
                     } catch {
                         layoutRollbackError = error

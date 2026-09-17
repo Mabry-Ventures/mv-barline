@@ -45,12 +45,14 @@ public struct MenuBarArrangementPolicy: Sendable {
             visibleItemIDs: visible,
             concealedItemIDs: concealed
         )
-        let currentVisible = Set(snapshot.items.filter {
-            !$0.isBarlineControlItem && $0.section == .visible
-        }.map(\.id))
-        let requestedVisible = Set(visible)
-        let requestedConcealed = Set(concealed)
-        let changesVisibility = !requestedConcealed.isEmpty || requestedVisible != currentVisible
+        let currentSections = Dictionary(uniqueKeysWithValues: snapshot.items
+            .filter { !$0.isBarlineControlItem }
+            .map { ($0.id, $0.section) })
+        let changesVisibility = visible.contains {
+            currentSections[$0] != .visible
+        } || concealed.contains {
+            currentSections[$0] == .visible
+        }
 
         let concealment: MenuBarConcealmentConfiguration?
         switch capabilities.visibilityAssignmentGranularity {

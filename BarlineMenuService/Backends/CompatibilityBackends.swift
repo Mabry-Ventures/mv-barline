@@ -110,10 +110,12 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
     var capabilities: MenuBarCapabilities {
         capabilityCache.resolve(at: DispatchTime.now().uptimeNanoseconds) {
             let canSnapshot = client.goldenGateBehavioralProbe()
-            let canActivate = canSnapshot && concealmentController.isAvailable && client.eventSynthesisProbe()
+            let canSynthesizeInput = client.eventSynthesisProbe()
+            let canConceal = concealmentController.isAvailable
+            let canActivate = canSnapshot && canConceal && canSynthesizeInput
             return MenuBarCapabilities(
                 canSnapshot: canSnapshot,
-                canMove: false,
+                canMove: canSnapshot && canConceal && canSynthesizeInput,
                 // Golden Gate supports the app's guarded click flow by widening
                 // the native allowlist around activation. It still cannot honor
                 // the public mutation-style `reveal` contract.
@@ -122,8 +124,8 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
                 canRestore: false,
                 canCapture: false,
                 arrangement: MenuBarArrangementCapabilities(
-                    canReorderNativeItems: false,
-                    visibilityAssignmentGranularity: concealmentController.isAvailable
+                    canReorderNativeItems: canSnapshot && canSynthesizeInput,
+                    visibilityAssignmentGranularity: canConceal
                         ? .applicationGroupAndKnownSystemItem
                         : .unavailable,
                     canReorderShelfItems: true,

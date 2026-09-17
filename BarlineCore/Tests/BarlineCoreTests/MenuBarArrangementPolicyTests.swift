@@ -55,6 +55,32 @@ struct MenuBarArrangementPolicyTests {
         #expect(Set(plan.concealment?.concealedItemIDs ?? []) == Set([first.id, second.id]))
     }
 
+    @Test("Unavailable visibility accepts an already-matching partial layout")
+    func unavailableVisibilityIgnoresUnchangedAndOmittedItems() throws {
+        let visible = item(bundle: "com.example.visible", title: "Visible", order: 0)
+        let hidden = item(
+            bundle: "com.example.hidden",
+            title: "Hidden",
+            order: 1,
+            section: .hidden
+        )
+        let omitted = item(bundle: "com.example.omitted", title: "Omitted", order: 2)
+
+        let plan = try MenuBarArrangementPolicy().plan(
+            layout: ProfileLayout(visible: [visible.id], hidden: [hidden.id]),
+            snapshot: snapshot(items: [visible, hidden, omitted]),
+            capabilities: MenuBarArrangementCapabilities(
+                canReorderNativeItems: true,
+                visibilityAssignmentGranularity: .unavailable,
+                canReorderShelfItems: true,
+                canApplySavedNativeOrder: false
+            ),
+            barlineBundleIdentifier: "com.mabryventures.Barline"
+        )
+
+        #expect(plan.concealment == nil)
+    }
+
     private var goldenGateCapabilities: MenuBarArrangementCapabilities {
         MenuBarArrangementCapabilities(
             canReorderNativeItems: true,
@@ -64,10 +90,15 @@ struct MenuBarArrangementPolicyTests {
         )
     }
 
-    private func item(bundle: String, title: String, order: Int) -> MenuBarItemDescriptor {
+    private func item(
+        bundle: String,
+        title: String,
+        order: Int,
+        section: MenuBarSection = .visible
+    ) -> MenuBarItemDescriptor {
         MenuBarItemDescriptor(
             id: MenuBarItemID(bundleIdentifier: bundle, title: title),
-            section: .visible,
+            section: section,
             order: order,
             displayName: title,
             isOnScreen: true
