@@ -10,9 +10,18 @@ let package = Package(
         .library(name: "SyntheticDragProbe", targets: ["SyntheticDragProbe"]),
         .executable(name: "BarlineArrangementFixture", targets: ["BarlineArrangementFixture"]),
         .executable(name: "BarlineArrangementObserver", targets: ["BarlineArrangementObserver"]),
+        .executable(name: "BarlineVisibilityProbe", targets: ["BarlineVisibilityProbe"]),
     ],
     targets: [
         .target(name: "ArrangementLabCore"),
+        .target(
+            name: "AssessmentModeBridge",
+            publicHeadersPath: "include",
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedLibrary("dl"),
+            ]
+        ),
         .target(
             name: "SyntheticDragProbe",
             dependencies: ["ArrangementLabCore"],
@@ -33,6 +42,11 @@ let package = Package(
                 .linkedFramework("AppKit"),
                 .linkedFramework("ApplicationServices"),
             ]
+        ),
+        .executableTarget(
+            name: "BarlineVisibilityProbe",
+            dependencies: ["ArrangementLabCore", "AssessmentModeBridge"],
+            linkerSettings: [.linkedFramework("AppKit")]
         ),
         .testTarget(name: "ArrangementLabCoreTests", dependencies: ["ArrangementLabCore"]),
     ],

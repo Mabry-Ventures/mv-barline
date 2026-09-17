@@ -39,6 +39,28 @@ The coordinator rejects mismatched display geometry, multiple CPLCODEX01
 windows, a non-frontmost Screen Sharing app, an incomplete probe, or any
 activation delta other than one.
 
+Phase 4 visibility research is isolated from native ordering. The visibility
+probe holds one native assessment assertion while the trusted observer records
+only per-application item counts and hit-test results. Unnotarized fixtures are
+intentionally treated as ineligible by the macOS runtime, so the live pilot
+uses installed notarized single-item and multi-item publishers while the pure
+fixture policy tests enforce item versus whole-application assignment.
+
+Run the P4 visibility pilot from the research worktree with an absolute
+directory on CPLCODEX01:
+
+```bash
+./script/run-p4-visibility-pilot.sh \
+  "/Users/jaredmabry/Library/Application Support/BarlineArrangementLab/evidence/<sha>/p4-visibility" \
+  20
+```
+
+Every cycle proves that the selected application is non-hittable, the control
+application remains hittable, invalidating the assertion restores both, and
+the native position table's serialized preference value has the same SHA-256
+before and after the pilot. The script stops on the first mismatch and
+invalidates any assertion left active by a failed check.
+
 Run the full P3 pilot with an absolute directory on CPLCODEX01:
 
 ```bash

@@ -306,3 +306,116 @@ public enum FixtureOrderVerifier {
         }
     }
 }
+
+public enum VisibilityGranularity: String, Codable, Sendable {
+    case item
+    case applicationGroup = "application-group"
+    case unsupported
+}
+
+public enum FixtureVisibilityPolicy {
+    public static func granularity(
+        for token: String,
+        in receipt: FixtureReceipt
+    ) -> VisibilityGranularity {
+        guard receipt.items.contains(where: { $0.token == token }) else {
+            return .unsupported
+        }
+        return receipt.items.count == 1 ? .item : .applicationGroup
+    }
+
+    public static func acceptsAssignment(
+        tokens: Set<String>,
+        in receipt: FixtureReceipt
+    ) -> Bool {
+        let allTokens = Set(receipt.items.map(\.token))
+        guard !tokens.isEmpty, tokens.isSubset(of: allTokens) else { return false }
+        return receipt.items.count == 1 || tokens == allTokens
+    }
+}
+
+public enum LocalShelfOrder {
+    public static func moving(
+        token: String,
+        to destinationIndex: Int,
+        in order: [String]
+    ) -> [String]? {
+        guard let sourceIndex = order.firstIndex(of: token) else { return nil }
+        var result = order
+        result.remove(at: sourceIndex)
+        result.insert(token, at: min(max(destinationIndex, 0), result.count))
+        return result
+    }
+}
+
+public struct FixtureVisibilityObservation: Codable, Equatable, Sendable {
+    public let schema: Int
+    public let session: String
+    public let bundleIdentifier: String
+    public let expectedItemCount: Int
+    public let observedItemCount: Int
+    public let visible: Bool
+    public let tokensByScreenPosition: [String]
+
+    public init(
+        schema: Int = 1,
+        session: String,
+        bundleIdentifier: String,
+        expectedItemCount: Int,
+        observedItemCount: Int,
+        visible: Bool,
+        tokensByScreenPosition: [String]
+    ) {
+        self.schema = schema
+        self.session = session
+        self.bundleIdentifier = bundleIdentifier
+        self.expectedItemCount = expectedItemCount
+        self.observedItemCount = observedItemCount
+        self.visible = visible
+        self.tokensByScreenPosition = tokensByScreenPosition
+    }
+}
+
+public struct VisibilityProbeReceipt: Codable, Equatable, Sendable {
+    public let schema: Int
+    public let processIdentifier: Int32
+    public let sequence: Int
+    public let concealedBundleIdentifiers: [String]
+    public let active: Bool
+
+    public init(
+        schema: Int = 1,
+        processIdentifier: Int32,
+        sequence: Int,
+        concealedBundleIdentifiers: [String],
+        active: Bool
+    ) {
+        self.schema = schema
+        self.processIdentifier = processIdentifier
+        self.sequence = sequence
+        self.concealedBundleIdentifiers = concealedBundleIdentifiers
+        self.active = active
+    }
+}
+
+public struct ApplicationVisibilityObservation: Codable, Equatable, Sendable {
+    public let schema: Int
+    public let bundleIdentifier: String
+    public let processIdentifier: Int32
+    public let menuExtraCount: Int
+    public let hittableMenuExtraCount: Int
+
+    public init(
+        schema: Int = 1,
+        bundleIdentifier: String,
+        processIdentifier: Int32,
+        menuExtraCount: Int,
+        hittableMenuExtraCount: Int
+    ) {
+        self.schema = schema
+        self.bundleIdentifier = bundleIdentifier
+        self.processIdentifier = processIdentifier
+        self.menuExtraCount = menuExtraCount
+        self.hittableMenuExtraCount = hittableMenuExtraCount
+    }
+}

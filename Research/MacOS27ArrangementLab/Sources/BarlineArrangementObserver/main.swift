@@ -33,6 +33,12 @@ struct ArrangementObserverMain {
             if try runSyntheticMoveIfRequested() {
                 return
             }
+            if try runVisibilityObservationIfRequested() {
+                return
+            }
+            if try runApplicationVisibilityIfRequested() {
+                return
+            }
             let observation = try run()
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
@@ -56,6 +62,76 @@ struct ArrangementObserverMain {
             }
             Foundation.exit(EXIT_FAILURE)
         }
+    }
+
+    private static func runApplicationVisibilityIfRequested() throws -> Bool {
+        let arguments = CommandLine.arguments
+        guard arguments.count >= 2, arguments[1] == "application-visibility" else {
+            return false
+        }
+        guard arguments.count == 4,
+              !arguments[2].isEmpty,
+              arguments[3].hasPrefix("/")
+        else { throw ObserverError.usage }
+        guard AXIsProcessTrusted() else { throw ObserverError.untrusted }
+        let bundleIdentifier = arguments[2]
+        guard let application = NSRunningApplication.runningApplications(
+            withBundleIdentifier: bundleIdentifier
+        ).first else { throw ObserverError.inaccessibleFixture }
+        let menuExtras = fixtureMenuExtras(processIdentifier: application.processIdentifier)
+        let hittable = menuExtras.count { element, frame in
+            hitTest(x: frame.centerX, y: frame.centerY, relatedTo: element)
+        }
+        let observation = ApplicationVisibilityObservation(
+            bundleIdentifier: bundleIdentifier,
+            processIdentifier: application.processIdentifier,
+            menuExtraCount: menuExtras.count,
+            hittableMenuExtraCount: hittable
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(observation).write(
+            to: URL(fileURLWithPath: arguments[3]),
+            options: .atomic
+        )
+        return true
+    }
+
+    private static func runVisibilityObservationIfRequested() throws -> Bool {
+        let arguments = CommandLine.arguments
+        guard arguments.count >= 2, arguments[1] == "visibility" else { return false }
+        guard arguments.count == 4,
+              arguments[2].hasPrefix("/"),
+              arguments[3].hasPrefix("/")
+        else { throw ObserverError.usage }
+        guard AXIsProcessTrusted() else { throw ObserverError.untrusted }
+        let receipt = try loadReceipt(at: URL(fileURLWithPath: arguments[2]))
+        let menuExtras = fixtureMenuExtras(processIdentifier: receipt.processIdentifier)
+        let matched = match(receipt: receipt, menuExtras: menuExtras)
+        let visibleMatches = matched.filter { _, element, frame in
+            hitTest(x: frame.centerX, y: frame.centerY, relatedTo: element)
+        }
+        let tokens = visibleMatches.sorted {
+            if $0.2.y != $1.2.y {
+                return $0.2.y < $1.2.y
+            }
+            return $0.2.x < $1.2.x
+        }.map(\.0.token)
+        let observation = FixtureVisibilityObservation(
+            session: receipt.session,
+            bundleIdentifier: receipt.bundleIdentifier,
+            expectedItemCount: receipt.items.count,
+            observedItemCount: visibleMatches.count,
+            visible: visibleMatches.count == receipt.items.count,
+            tokensByScreenPosition: tokens
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(observation).write(
+            to: URL(fileURLWithPath: arguments[3]),
+            options: .atomic
+        )
+        return true
     }
 
     private static func runSyntheticMoveIfRequested() throws -> Bool {
@@ -86,7 +162,7 @@ struct ArrangementObserverMain {
     private static func commandOutputURL() -> URL? {
         let arguments = CommandLine.arguments
         if arguments.count == 4,
-           arguments[1] == "observe",
+           ["observe", "visibility", "application-visibility"].contains(arguments[1]),
            arguments[3].hasPrefix("/")
         {
             return URL(fileURLWithPath: arguments[3])
@@ -119,15 +195,7 @@ struct ArrangementObserverMain {
             throw ObserverError.usage
         }
         guard AXIsProcessTrusted() else { throw ObserverError.untrusted }
-        let receiptURL = URL(fileURLWithPath: arguments[2])
-        guard let data = try? Data(contentsOf: receiptURL),
-              let receipt = try? JSONDecoder().decode(FixtureReceipt.self, from: data),
-              receipt.schema == 1,
-              receipt.processIdentifier > 0,
-              !receipt.items.isEmpty,
-              receipt.items.allSatisfy({ $0.frame != nil })
-        else { throw ObserverError.invalidReceipt }
-
+        let receipt = try loadReceipt(at: URL(fileURLWithPath: arguments[2]))
         let application = AXUIElementCreateApplication(receipt.processIdentifier)
         AXUIElementSetMessagingTimeout(application, 0.25)
         guard let extrasMenuBar = elementAttribute(application, kAXExtrasMenuBarAttribute as CFString) else {
@@ -141,19 +209,7 @@ struct ArrangementObserverMain {
             else { return nil }
             return (element, actual)
         }
-        let matched = receipt.items.compactMap { item -> (FixtureItemReceipt, AXUIElement, LabRect)? in
-            if receipt.items.count == 1, menuExtras.count == 1, let match = menuExtras.first {
-                return (item, match.0, match.1)
-            }
-            guard let appKitFrame = item.frame,
-                  let expected = accessibilityFrame(for: appKitFrame)
-            else { return nil }
-            let matches = menuExtras.filter { _, actual in
-                actual.approximatelySharesCenter(with: expected)
-            }
-            guard matches.count == 1, let match = matches.first else { return nil }
-            return (item, match.0, match.1)
-        }
+        let matched = match(receipt: receipt, menuExtras: menuExtras)
         let ordered = matched.sorted {
             if $0.2.y != $1.2.y {
                 return $0.2.y < $1.2.y
@@ -187,6 +243,55 @@ struct ArrangementObserverMain {
                 )
             }
         )
+    }
+
+    private static func loadReceipt(at url: URL) throws -> FixtureReceipt {
+        guard let data = try? Data(contentsOf: url),
+              let receipt = try? JSONDecoder().decode(FixtureReceipt.self, from: data),
+              receipt.schema == 1,
+              receipt.processIdentifier > 0,
+              !receipt.items.isEmpty,
+              receipt.items.allSatisfy({ $0.frame != nil })
+        else { throw ObserverError.invalidReceipt }
+        return receipt
+    }
+
+    private static func fixtureMenuExtras(
+        processIdentifier: Int32
+    ) -> [(AXUIElement, LabRect)] {
+        let application = AXUIElementCreateApplication(processIdentifier)
+        AXUIElementSetMessagingTimeout(application, 0.25)
+        guard let extrasMenuBar = elementAttribute(
+            application,
+            kAXExtrasMenuBarAttribute as CFString
+        ) else { return [] }
+        return descendants(of: extrasMenuBar, maximumDepth: 3, maximumCount: 64)
+            .compactMap { element -> (AXUIElement, LabRect)? in
+                guard stringAttribute(element, kAXRoleAttribute as CFString) == "AXMenuBarItem",
+                      stringAttribute(element, kAXSubroleAttribute as CFString) == "AXMenuExtra",
+                      let actual = frame(of: element)
+                else { return nil }
+                return (element, actual)
+            }
+    }
+
+    private static func match(
+        receipt: FixtureReceipt,
+        menuExtras: [(AXUIElement, LabRect)]
+    ) -> [(FixtureItemReceipt, AXUIElement, LabRect)] {
+        receipt.items.compactMap { item in
+            if receipt.items.count == 1, menuExtras.count == 1, let match = menuExtras.first {
+                return (item, match.0, match.1)
+            }
+            guard let appKitFrame = item.frame,
+                  let expected = accessibilityFrame(for: appKitFrame)
+            else { return nil }
+            let matches = menuExtras.filter { _, actual in
+                actual.approximatelySharesCenter(with: expected)
+            }
+            guard matches.count == 1, let match = matches.first else { return nil }
+            return (item, match.0, match.1)
+        }
     }
 
     private static func descendants(

@@ -34,5 +34,6 @@ stage_app() {
 stage_app BarlineArrangementMultiFixture BarlineArrangementFixture com.mabryventures.Barline.ArrangementMultiFixture
 stage_app BarlineArrangementSingleFixture BarlineArrangementFixture com.mabryventures.Barline.ArrangementSingleFixture
 stage_app BarlineArrangementObserver BarlineArrangementObserver com.mabryventures.Barline.ArrangementObserver
+stage_app BarlineVisibilityProbe BarlineVisibilityProbe com.mabryventures.Barline.VisibilityProbe
 
 /usr/bin/printf 'Built macOS 27 arrangement lab apps in %s\n' "$DIST"
