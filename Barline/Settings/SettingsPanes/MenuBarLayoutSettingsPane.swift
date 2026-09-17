@@ -9,7 +9,7 @@ import SwiftUI
 struct MenuBarLayoutSettingsPane: View {
     @EnvironmentObject var appState: AppState
     @ObservedObject var itemManager: MenuBarItemManager
-    @StateObject private var assignmentSession = MenuBarAssignmentSession()
+    @ObservedObject var assignmentSession: MenuBarAssignmentSession
 
     var body: some View {
         if !appState.permissions.accessibility.hasPermission {

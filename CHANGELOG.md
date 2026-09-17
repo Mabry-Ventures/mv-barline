@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.31 (build 108) — September 17, 2026
+
+- Keep the shared macOS 27 assignment session alive for the full app process,
+  so switching settings panes or recreating the Settings window cannot bypass
+  an in-flight native transaction.
+- Add a regression proving replacement view owners observe the same locked
+  session and cannot enter the backend until the original operation settles.
+
 ## 1.0.31 (build 107) — September 17, 2026
 
 - Share one assignment session across every macOS 27 layout section so a

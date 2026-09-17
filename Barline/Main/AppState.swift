@@ -41,6 +41,12 @@ final class AppState: ObservableObject {
     /// Manager for menu bar items.
     let itemManager = MenuBarItemManager()
 
+    /// App-lifetime serialization for macOS 27 layout assignments. Keeping
+    /// this above the Settings view hierarchy prevents sidebar navigation or
+    /// window recreation from creating a second unlocked UI session while a
+    /// native assignment is still suspended.
+    let menuBarAssignmentSession = MenuBarAssignmentSession()
+
     /// Global cache for menu bar item images.
     let imageCache = MenuBarItemImageCache()
 

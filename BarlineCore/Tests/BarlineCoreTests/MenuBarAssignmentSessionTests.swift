@@ -61,4 +61,32 @@ struct MenuBarAssignmentSessionTests {
         #expect(completedOperations == 2)
         #expect(session.isInFlight == false)
     }
+
+    @Test("App-lifetime session remains locked across view owner replacement")
+    func remainsLockedAcrossOwnerReplacement() async {
+        let appLifetimeSession = MenuBarAssignmentSession()
+        let suspension = Suspension()
+
+        let firstViewOwner = appLifetimeSession
+        let first = Task { @MainActor in
+            await firstViewOwner.run {
+                await suspension.wait()
+            }
+        }
+
+        while !appLifetimeSession.isInFlight {
+            await Task.yield()
+        }
+
+        let replacementViewOwner = appLifetimeSession
+        var replacementOperationRan = false
+        #expect(await replacementViewOwner.run {
+            replacementOperationRan = true
+        } == false)
+        #expect(replacementOperationRan == false)
+
+        await suspension.resume()
+        #expect(await first.value)
+        #expect(await replacementViewOwner.run {})
+    }
 }
