@@ -7,11 +7,20 @@ let package = Package(
     platforms: [.macOS(.v26)],
     products: [
         .library(name: "ArrangementLabCore", targets: ["ArrangementLabCore"]),
+        .library(name: "SyntheticDragProbe", targets: ["SyntheticDragProbe"]),
         .executable(name: "BarlineArrangementFixture", targets: ["BarlineArrangementFixture"]),
         .executable(name: "BarlineArrangementObserver", targets: ["BarlineArrangementObserver"]),
     ],
     targets: [
         .target(name: "ArrangementLabCore"),
+        .target(
+            name: "SyntheticDragProbe",
+            dependencies: ["ArrangementLabCore"],
+            linkerSettings: [
+                .linkedFramework("AppKit"),
+                .linkedFramework("ApplicationServices"),
+            ]
+        ),
         .executableTarget(
             name: "BarlineArrangementFixture",
             dependencies: ["ArrangementLabCore"],
@@ -19,7 +28,7 @@ let package = Package(
         ),
         .executableTarget(
             name: "BarlineArrangementObserver",
-            dependencies: ["ArrangementLabCore"],
+            dependencies: ["ArrangementLabCore", "SyntheticDragProbe"],
             linkerSettings: [
                 .linkedFramework("AppKit"),
                 .linkedFramework("ApplicationServices"),

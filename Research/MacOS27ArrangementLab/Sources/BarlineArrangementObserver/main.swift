@@ -3,6 +3,7 @@ import AppKit
 import ArrangementLabCore
 import Darwin
 import Foundation
+import SyntheticDragProbe
 
 private enum ObserverError: Error, CustomStringConvertible {
     case usage
@@ -29,18 +30,21 @@ struct ArrangementObserverMain {
                 requestAccessibility()
                 return
             }
+            if try runSyntheticMoveIfRequested() {
+                return
+            }
             let observation = try run()
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
             let data = try encoder.encode(observation)
-            if let outputURL = observationOutputURL() {
+            if let outputURL = commandOutputURL() {
                 try data.write(to: outputURL, options: .atomic)
             } else {
                 FileHandle.standardOutput.write(data)
                 FileHandle.standardOutput.write(Data("\n".utf8))
             }
         } catch {
-            if let outputURL = observationOutputURL(),
+            if let outputURL = commandOutputURL(),
                let data = try? JSONSerialization.data(
                    withJSONObject: ["error": "\(error)"],
                    options: [.prettyPrinted, .sortedKeys]
@@ -54,13 +58,46 @@ struct ArrangementObserverMain {
         }
     }
 
-    private static func observationOutputURL() -> URL? {
+    private static func runSyntheticMoveIfRequested() throws -> Bool {
         let arguments = CommandLine.arguments
-        guard arguments.count == 4,
-              arguments[1] == "observe",
-              arguments[3].hasPrefix("/")
-        else { return nil }
-        return URL(fileURLWithPath: arguments[3])
+        guard arguments.count >= 2, arguments[1] == "synthetic-move" else { return false }
+        guard arguments.count == 8,
+              arguments[2].hasPrefix("/"),
+              arguments[4].hasPrefix("/"),
+              arguments[7].hasPrefix("/"),
+              let placement = SyntheticMovePlacement(rawValue: arguments[6])
+        else { throw ObserverError.usage }
+        let report = SyntheticDragProbeRunner.run(
+            sourceReceiptURL: URL(fileURLWithPath: arguments[2]),
+            sourceToken: arguments[3],
+            destinationReceiptURL: URL(fileURLWithPath: arguments[4]),
+            destinationToken: arguments[5],
+            placement: placement
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(report).write(
+            to: URL(fileURLWithPath: arguments[7]),
+            options: .atomic
+        )
+        return true
+    }
+
+    private static func commandOutputURL() -> URL? {
+        let arguments = CommandLine.arguments
+        if arguments.count == 4,
+           arguments[1] == "observe",
+           arguments[3].hasPrefix("/")
+        {
+            return URL(fileURLWithPath: arguments[3])
+        }
+        if arguments.count == 8,
+           arguments[1] == "synthetic-move",
+           arguments[7].hasPrefix("/")
+        {
+            return URL(fileURLWithPath: arguments[7])
+        }
+        return nil
     }
 
     private static func requestAccessibility() {

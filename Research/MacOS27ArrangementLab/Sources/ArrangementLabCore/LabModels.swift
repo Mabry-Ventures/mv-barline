@@ -204,6 +204,66 @@ public enum SyntheticMoveDisposition: Codable, Equatable, Sendable {
     case restorationFailed
 }
 
+public enum SyntheticMovePlacement: String, Codable, CaseIterable, Sendable {
+    case before
+    case after
+}
+
+public struct SyntheticMoveReport: Codable, Equatable, Sendable {
+    public let schema: Int
+    public let sourceToken: String
+    public let destinationToken: String
+    public let placement: SyntheticMovePlacement
+    public let stages: [SyntheticMoveStage]
+    public let disposition: String
+    public let reason: String?
+    public let beforeOrder: [String]
+    public let afterOrder: [String]
+    public let mouseDownConstructed: Bool
+    public let mouseDownPosted: Bool
+    public let mouseUpConstructed: Bool
+    public let mouseUpPosted: Bool
+    public let buttonCleanupVerified: Bool
+    public let unrelatedOrderPreserved: Bool
+    public let activationDelta: Int?
+
+    public init(
+        schema: Int = 1,
+        sourceToken: String,
+        destinationToken: String,
+        placement: SyntheticMovePlacement,
+        stages: [SyntheticMoveStage],
+        disposition: String,
+        reason: String? = nil,
+        beforeOrder: [String],
+        afterOrder: [String],
+        mouseDownConstructed: Bool,
+        mouseDownPosted: Bool,
+        mouseUpConstructed: Bool,
+        mouseUpPosted: Bool,
+        buttonCleanupVerified: Bool,
+        unrelatedOrderPreserved: Bool,
+        activationDelta: Int?
+    ) {
+        self.schema = schema
+        self.sourceToken = sourceToken
+        self.destinationToken = destinationToken
+        self.placement = placement
+        self.stages = stages
+        self.disposition = disposition
+        self.reason = reason
+        self.beforeOrder = beforeOrder
+        self.afterOrder = afterOrder
+        self.mouseDownConstructed = mouseDownConstructed
+        self.mouseDownPosted = mouseDownPosted
+        self.mouseUpConstructed = mouseUpConstructed
+        self.mouseUpPosted = mouseUpPosted
+        self.buttonCleanupVerified = buttonCleanupVerified
+        self.unrelatedOrderPreserved = unrelatedOrderPreserved
+        self.activationDelta = activationDelta
+    }
+}
+
 public enum FixtureOrderVerifier {
     public static func tokensByScreenPosition(_ items: [ObservedFixtureItem]) -> [String] {
         items.sorted {
@@ -220,5 +280,20 @@ public enum FixtureOrderVerifier {
         excluding movedToken: String
     ) -> Bool {
         before.filter { $0 != movedToken } == after.filter { $0 != movedToken }
+    }
+
+    public static func satisfiesPlacement(
+        order: [String],
+        source: String,
+        destination: String,
+        placement: SyntheticMovePlacement
+    ) -> Bool {
+        guard let sourceIndex = order.firstIndex(of: source),
+              let destinationIndex = order.firstIndex(of: destination)
+        else { return false }
+        switch placement {
+        case .before: return sourceIndex + 1 == destinationIndex
+        case .after: return destinationIndex + 1 == sourceIndex
+        }
     }
 }

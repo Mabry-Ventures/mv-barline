@@ -27,6 +27,28 @@ struct LabModelsTests {
         ))
     }
 
+    @Test("placement requires adjacency")
+    func placement() {
+        #expect(FixtureOrderVerifier.satisfiesPlacement(
+            order: ["alpha", "beta", "gamma"],
+            source: "alpha",
+            destination: "beta",
+            placement: .before
+        ))
+        #expect(FixtureOrderVerifier.satisfiesPlacement(
+            order: ["alpha", "beta", "gamma"],
+            source: "gamma",
+            destination: "beta",
+            placement: .after
+        ))
+        #expect(!FixtureOrderVerifier.satisfiesPlacement(
+            order: ["alpha", "beta", "gamma"],
+            source: "alpha",
+            destination: "gamma",
+            placement: .before
+        ))
+    }
+
     @Test("frame matching is bounded")
     func frameMatching() {
         let reference = LabRect(x: 10, y: 20, width: 30, height: 24)
