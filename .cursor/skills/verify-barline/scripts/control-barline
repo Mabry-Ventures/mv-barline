@@ -1,0 +1,671 @@
+#!/usr/bin/env bash
+# control-barline — verification helper for Barline.
+# Wraps documented repo scripts. Does not invent a second build system.
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SKILL_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+repo_root() {
+    if git -C "$SCRIPT_DIR" rev-parse --show-toplevel >/dev/null 2>&1; then
+        git -C "$SCRIPT_DIR" rev-parse --show-toplevel
+        return
+    fi
+    cd "$SKILL_DIR/../../.." && pwd
+}
+
+ROOT="$(repo_root)"
+cd "$ROOT"
+
+# shellcheck source=script/lib/common.sh
+source "$ROOT/script/lib/common.sh"
+# shellcheck source=script/lib/installed-app.sh
+source "$ROOT/script/lib/installed-app.sh"
+
+usage() {
+    cat <<'EOF'
+usage: control-barline <command> [options]
+
+Commands:
+  help              Show this help
+  host              Print host classification (linux|macos-arm64|unsupported)
+  doctor            Read-only instance / gate check
+  launch            Build and launch unsigned Debug Barline (macOS arm64 only)
+  linux-gates       Run Darwin-free documented gates (hygiene, firewall, site, …)
+  hygiene           Run ./script/ci/repo_hygiene.sh
+  firewall          Run ./script/ci/architecture_firewall.sh
+  click             Click a Barline AX control (--name, optional --role/--identifier)
+  fill              Set a text field (--name or --identifier, --value)
+  snapshot          Dump System Events contents of Barline windows (--path)
+  screenshot        Capture the Barline settings window (--path)
+  cleanup           Stop this run's processes; restore paused installed app
+  evidence-dir      Print the evidence directory for this run
+
+Environment:
+  VERIFY_BARLINE_RUN_ID     Stable id for this verification run (required for launch)
+  VERIFY_BARLINE_EVIDENCE   Override evidence directory
+EOF
+}
+
+gated() {
+    printf 'GATED: %s\n' "$*" >&2
+    exit 2
+}
+
+die() {
+    printf 'error: %s\n' "$*" >&2
+    exit 1
+}
+
+host_class() {
+    local sys mach
+    sys="$(uname -s)"
+    mach="$(uname -m)"
+    if [[ "$sys" == Linux ]]; then
+        printf 'linux\n'
+    elif [[ "$sys" == Darwin && "$mach" == arm64 ]]; then
+        printf 'macos-arm64\n'
+    else
+        printf 'unsupported\n'
+    fi
+}
+
+run_id() {
+    if [[ -n "${VERIFY_BARLINE_RUN_ID:-}" ]]; then
+        printf '%s\n' "$VERIFY_BARLINE_RUN_ID"
+        return
+    fi
+    if [[ -f "$ROOT/.artifacts/verify-barline/current-run" ]]; then
+        cat "$ROOT/.artifacts/verify-barline/current-run"
+        return
+    fi
+    printf 'no-run-id\n'
+}
+
+evidence_dir() {
+    if [[ -n "${VERIFY_BARLINE_EVIDENCE:-}" ]]; then
+        printf '%s\n' "$VERIFY_BARLINE_EVIDENCE"
+        return
+    fi
+    printf '%s\n' "$ROOT/.artifacts/verify-barline/$(run_id)"
+}
+
+ensure_evidence_dir() {
+    local dir
+    dir="$(evidence_dir)"
+    mkdir -p "$dir"
+    printf '%s\n' "$dir"
+}
+
+instance_file() {
+    printf '%s/instance.env\n' "$(evidence_dir)"
+}
+
+require_macos() {
+    [[ "$(host_class)" == macos-arm64 ]] || gated "launch/drive of Barline requires Apple Silicon macOS 26+; this host is $(uname -s)/$(uname -m)"
+}
+
+macos_major() {
+    sw_vers -productVersion 2>/dev/null | awk -F. '{print $1}'
+}
+
+append_log() {
+    local dir
+    dir="$(ensure_evidence_dir)"
+    mkdir -p "$dir"
+    printf '%s\t%s\n' "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" "$*" >>"$dir/commands.log"
+}
+
+cmd_host() {
+    local class version
+    class="$(host_class)"
+    printf 'host_class=%s\n' "$class"
+    printf 'uname=%s %s\n' "$(uname -s)" "$(uname -m)"
+    case "$class" in
+        macos-arm64)
+            version="$(sw_vers -productVersion 2>/dev/null || printf unknown)"
+            printf 'macos=%s (%s)\n' "$version" "$(sw_vers -buildVersion 2>/dev/null || printf unknown)"
+            if [[ "$(macos_major)" -lt 26 ]]; then
+                printf 'macos_lane=unsupported (<26)\n'
+            else
+                printf 'macos_lane=supported\n'
+            fi
+            ;;
+        linux)
+            printf 'ui=gated\n'
+            printf 'linux_lane=hygiene\n'
+            ;;
+        *)
+            printf 'ui=gated\n'
+            ;;
+    esac
+}
+
+hygiene_tool_status() {
+    local missing=()
+    local cmd
+    for cmd in ruby actionlint shellcheck node rg git; do
+        command -v "$cmd" >/dev/null 2>&1 || missing+=("$cmd")
+    done
+    if ((${#missing[@]})); then
+        printf 'missing:%s' "${missing[*]}"
+        return 1
+    fi
+    if ! node --input-type=module -e 'if (Number(process.versions.node.split(".")[0]) < 22) throw new Error("node")' >/dev/null 2>&1; then
+        printf 'missing:node22'
+        return 1
+    fi
+    printf 'ready'
+}
+
+cmd_doctor() {
+    local class dir instance ui hygiene_status
+    class="$(host_class)"
+    dir="$(ensure_evidence_dir)"
+    instance="$(instance_file)"
+    hygiene_status="$(hygiene_tool_status || true)"
+    {
+        printf 'skill=verify-barline\n'
+        printf 'run_id=%s\n' "$(run_id)"
+        printf 'evidence_dir=%s\n' "$dir"
+        printf 'host_class=%s\n' "$class"
+        printf 'hygiene=%s\n' "$hygiene_status"
+        printf 'repo=%s\n' "$ROOT"
+        printf 'head_sha=%s\n' "$(git rev-parse HEAD)"
+        if [[ -n "$(git status --porcelain=v1)" ]]; then
+            printf 'worktree=dirty\n'
+        else
+            printf 'worktree=clean\n'
+        fi
+    } | tee "$dir/doctor.txt"
+
+    case "$class" in
+        linux)
+            printf 'ui=gated\n' | tee -a "$dir/doctor.txt"
+            printf 'reason=Linux Cursor VM cannot launch or drive the macOS menu-bar app\n' | tee -a "$dir/doctor.txt"
+            printf 'full_launch_drive_proof=requires Apple Silicon macOS 26+ with host Accessibility; Barline Accessibility for arrangement; Screen Recording optional\n' | tee -a "$dir/doctor.txt"
+            if [[ "$hygiene_status" == ready ]]; then
+                printf 'linux_gates=ready\n' | tee -a "$dir/doctor.txt"
+                return 0
+            fi
+            printf 'linux_gates=missing-tools (%s)\n' "$hygiene_status" | tee -a "$dir/doctor.txt"
+            return 0
+            ;;
+        unsupported)
+            printf 'ui=gated\n' | tee -a "$dir/doctor.txt"
+            printf 'reason=Barline is Apple Silicon macOS 26+ only\n' | tee -a "$dir/doctor.txt"
+            return 0
+            ;;
+    esac
+
+    require_macos
+    local xcode="/Applications/Xcode.app/Contents/Developer"
+    if [[ ! -x "$xcode/usr/bin/xcodebuild" ]]; then
+        printf 'ui=gated\n' | tee -a "$dir/doctor.txt"
+        printf 'reason=xcodebuild missing under %s\n' "$xcode" | tee -a "$dir/doctor.txt"
+        return 0
+    fi
+    printf 'xcodebuild=present\n' | tee -a "$dir/doctor.txt"
+    printf 'macos=%s\n' "$(sw_vers -productVersion)" | tee -a "$dir/doctor.txt"
+    if [[ "$(macos_major)" -lt 26 ]]; then
+        printf 'ui=gated\n' | tee -a "$dir/doctor.txt"
+        printf 'reason=macOS 26 or later required\n' | tee -a "$dir/doctor.txt"
+        return 0
+    fi
+
+    if [[ ! -f "$instance" ]]; then
+        printf 'instance=missing\n' | tee -a "$dir/doctor.txt"
+        printf 'ui=gated\n' | tee -a "$dir/doctor.txt"
+        printf 'reason=no instance.env; run control-barline launch\n' | tee -a "$dir/doctor.txt"
+        return 0
+    fi
+    # shellcheck disable=SC1090
+    source "$instance"
+    printf 'run_root=%s\n' "${BARLINE_RUN_ROOT:-}" | tee -a "$dir/doctor.txt"
+    printf 'app_bundle=%s\n' "${BARLINE_APP_BUNDLE:-}" | tee -a "$dir/doctor.txt"
+
+    local app_pid="${BARLINE_APP_PID:-}"
+    if [[ -z "$app_pid" ]] || ! kill -0 "$app_pid" >/dev/null 2>&1; then
+        printf 'instance=dead\n' | tee -a "$dir/doctor.txt"
+        printf 'ui=gated\n' | tee -a "$dir/doctor.txt"
+        printf 'reason=recorded Barline pid is not running\n' | tee -a "$dir/doctor.txt"
+        return 0
+    fi
+
+    local exe
+    exe="$(ps -p "$app_pid" -o comm= 2>/dev/null || true)"
+    printf 'app_pid_recorded=yes\n' | tee -a "$dir/doctor.txt"
+    if [[ "$exe" != *Barline ]]; then
+        printf 'ui=gated\n' | tee -a "$dir/doctor.txt"
+        printf 'reason=recorded pid is not a Barline executable path\n' | tee -a "$dir/doctor.txt"
+        return 0
+    fi
+
+    if [[ -n "${BARLINE_APP_BUNDLE:-}" && -x "${BARLINE_APP_BUNDLE}/Contents/MacOS/Barline" ]]; then
+        /usr/bin/codesign --verify --deep --strict "$BARLINE_APP_BUNDLE" || {
+            printf 'ui=gated\n' | tee -a "$dir/doctor.txt"
+            printf 'reason=codesign verify failed\n' | tee -a "$dir/doctor.txt"
+            return 0
+        }
+        local arch
+        arch="$(/usr/bin/lipo -archs "${BARLINE_APP_BUNDLE}/Contents/MacOS/Barline")"
+        printf 'architecture=%s\n' "$arch" | tee -a "$dir/doctor.txt"
+        [[ "$arch" == arm64 ]] || {
+            printf 'ui=gated\n' | tee -a "$dir/doctor.txt"
+            printf 'reason=expected arm64\n' | tee -a "$dir/doctor.txt"
+            return 0
+        }
+    fi
+
+    ui="ready"
+    if ! osascript >/dev/null 2>"$dir/host-ax.err" <<'APPLESCRIPT'
+tell application "System Events"
+    if not (exists process "Barline") then error "Barline process not in System Events"
+end tell
+APPLESCRIPT
+    then
+        printf 'host_accessibility=missing\n' | tee -a "$dir/doctor.txt"
+        printf 'ui=gated\n' | tee -a "$dir/doctor.txt"
+        printf 'reason=host Accessibility is required to drive Barline windows; System Events cannot see process Barline\n' | tee -a "$dir/doctor.txt"
+        return 0
+    fi
+    printf 'host_accessibility=granted\n' | tee -a "$dir/doctor.txt"
+
+    local snapshot
+    snapshot="$(osascript <<'APPLESCRIPT'
+tell application "System Events"
+    tell process "Barline"
+        set names to ""
+        repeat with w in windows
+            set names to names & (name of w as text) & ","
+        end repeat
+        return names
+    end tell
+end tell
+APPLESCRIPT
+    )" || snapshot=""
+    printf 'windows=%s\n' "$snapshot" | tee -a "$dir/doctor.txt"
+    if [[ "$snapshot" == *"Barline"* ]]; then
+        if osascript <<'APPLESCRIPT' >/dev/null 2>&1
+tell application "System Events"
+    tell process "Barline"
+        set found to false
+        set uiElems to entire contents of window "Barline"
+        repeat with e in uiElems
+            try
+                if (value of attribute "AXIdentifier" of e) is "degraded-mode-banner" then
+                    set found to true
+                end if
+            end try
+        end repeat
+        if found then
+            error "degraded"
+        end if
+    end tell
+end tell
+APPLESCRIPT
+        then
+            ui="ready"
+            printf 'barline_accessibility=granted_or_banner_absent\n' | tee -a "$dir/doctor.txt"
+        else
+            ui="degraded"
+            printf 'barline_accessibility=missing (degraded-mode-banner present)\n' | tee -a "$dir/doctor.txt"
+        fi
+    else
+        printf 'settings_window=not_visible\n' | tee -a "$dir/doctor.txt"
+        ui="degraded"
+    fi
+    printf 'ui=%s\n' "$ui" | tee -a "$dir/doctor.txt"
+}
+
+cmd_launch() {
+    require_macos
+    command -v xcodebuild >/dev/null 2>&1 || die "xcodebuild missing; install Xcode 26.6"
+    [[ "$(macos_major)" -ge 26 ]] || gated "macOS 26 or later required"
+    [[ "${VERIFY_BARLINE_RUN_ID:-}" != "" && "${VERIFY_BARLINE_RUN_ID}" != "no-run-id" ]] \
+        || die "set VERIFY_BARLINE_RUN_ID before launch"
+
+    local dir instance
+    dir="$(ensure_evidence_dir)"
+    instance="$(instance_file)"
+    mkdir -p "$ROOT/.artifacts/verify-barline"
+    printf '%s\n' "$VERIFY_BARLINE_RUN_ID" >"$ROOT/.artifacts/verify-barline/current-run"
+
+    if [[ -f "$instance" ]]; then
+        # shellcheck disable=SC1090
+        source "$instance"
+        if [[ -n "${BARLINE_APP_PID:-}" ]] && kill -0 "${BARLINE_APP_PID}" >/dev/null 2>&1; then
+            die "verification instance already running (pid recorded in $instance); cleanup first"
+        fi
+    fi
+
+    append_log "launch"
+    export BARLINE_RUN_ROOT="/private/tmp/barline-verify-$(id -u)-${VERIFY_BARLINE_RUN_ID}"
+    mkdir -p "$BARLINE_RUN_ROOT"
+
+    barline_pause_installed_app
+    local paused="$BARLINE_INSTALLED_APP_PAUSED"
+
+    ./script/build_and_run.sh --verify | tee "$dir/launch.log"
+
+    local app_bundle
+    app_bundle="$BARLINE_RUN_ROOT/DerivedData/Build/Products/Debug/Barline.app"
+    [[ -x "$app_bundle/Contents/MacOS/Barline" ]] || die "expected unsigned app at $app_bundle"
+
+    local app_pid="" helper_pid=""
+    local pid path
+    while IFS=$'\t' read -r pid path; do
+        [[ -n "$pid" ]] || continue
+        if [[ "$path" == "$app_bundle/Contents/MacOS/Barline" ]]; then
+            app_pid="$pid"
+        elif [[ "$path" == "$app_bundle/Contents/XPCServices/"*"/BarlineMenuService" ]]; then
+            helper_pid="$pid"
+        fi
+    done < <(barline_list_barline_processes)
+
+    [[ -n "$app_pid" ]] || die "launched Barline pid not found under $app_bundle"
+
+    cat >"$instance" <<EOF
+BARLINE_RUN_ROOT=$BARLINE_RUN_ROOT
+BARLINE_APP_BUNDLE=$app_bundle
+BARLINE_APP_PID=$app_pid
+BARLINE_HELPER_PID=$helper_pid
+BARLINE_INSTALLED_APP_PAUSED=$paused
+VERIFY_BARLINE_RUN_ID=$VERIFY_BARLINE_RUN_ID
+EOF
+    printf 'launched unsigned Debug Barline from %s\n' "$app_bundle"
+    printf 'instance=%s\n' "$instance"
+}
+
+cmd_hygiene() {
+    append_log "hygiene ./script/ci/repo_hygiene.sh"
+    ./script/ci/repo_hygiene.sh
+}
+
+cmd_firewall() {
+    append_log "firewall ./script/ci/architecture_firewall.sh"
+    ./script/ci/architecture_firewall.sh
+}
+
+run_named_gate() {
+    local name="$1"
+    shift
+    local dir log status
+    dir="$(ensure_evidence_dir)"
+    mkdir -p "$dir/logs"
+    log="$dir/logs/${name}.log"
+    append_log "$*"
+    printf '\n==> %s\n' "$name"
+    set +e
+    "$@" > >(tee "$log") 2>&1
+    status=$?
+    set -e
+    if ((status != 0)); then
+        printf 'FAIL %s (exit %d)\n' "$name" "$status" >&2
+        return "$status"
+    fi
+    printf 'PASS %s\n' "$name"
+}
+
+cmd_linux_gates() {
+    local dir failures=0
+    dir="$(ensure_evidence_dir)"
+    mkdir -p "$dir/logs"
+    append_log "linux-gates"
+    {
+        printf 'host=%s %s\n' "$(uname -s)" "$(uname -m)"
+        printf 'run_id=%s\n' "$(run_id)"
+        printf 'ui=gated\n'
+    } | tee "$dir/linux-gates.log"
+
+    run_named_gate repo-hygiene ./script/ci/repo_hygiene.sh || failures=$((failures + 1))
+    run_named_gate architecture-firewall ./script/ci/architecture_firewall.sh || failures=$((failures + 1))
+    run_named_gate platform-lane ./script/test-platform-lane.sh || failures=$((failures + 1))
+    run_named_gate app-intents-topology ruby ./script/test-app-intents-topology.rb || failures=$((failures + 1))
+    run_named_gate installed-evidence ./script/test-installed-evidence.sh || failures=$((failures + 1))
+    run_named_gate evidence-writer ./script/test-evidence-writer.sh || failures=$((failures + 1))
+    run_named_gate installed-app-pause ./script/test-installed-app-pause.sh || failures=$((failures + 1))
+    run_named_gate release-notes ./script/test-release-notes.sh || failures=$((failures + 1))
+    run_named_gate release-evidence-privacy ./script/test-release-evidence-privacy.sh || failures=$((failures + 1))
+    run_named_gate site-tests node --test site/tests/*.test.mjs || failures=$((failures + 1))
+
+    printf '\nlinux-gates failures=%d\n' "$failures" | tee -a "$dir/linux-gates.log"
+    printf 'ui remains gated: these checks do not launch Barline or prove the menu bar.\n' | tee -a "$dir/linux-gates.log"
+    if ((failures)); then
+        printf 'linux-gates failed\n' >&2
+        exit 1
+    fi
+    printf 'linux-gates passed\n'
+}
+
+require_host_ax() {
+    require_macos
+    osascript >/dev/null 2>&1 <<'APPLESCRIPT' || gated "host Accessibility missing: System Events cannot see process Barline"
+tell application "System Events"
+    if not (exists process "Barline") then error "missing"
+end tell
+APPLESCRIPT
+}
+
+escape_as() {
+    printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'
+}
+
+cmd_snapshot() {
+    local path=""
+    while (($#)); do
+        case "$1" in
+            --path) path="$2"; shift 2 ;;
+            *) die "unknown snapshot option: $1" ;;
+        esac
+    done
+    [[ -n "$path" ]] || die "snapshot requires --path"
+    require_host_ax
+    mkdir -p "$(dirname "$path")"
+    append_log "snapshot $path"
+    osascript >"$path" <<'APPLESCRIPT'
+tell application "System Events"
+    tell process "Barline"
+        set report to ""
+        repeat with w in windows
+            set report to report & "WINDOW " & (name of w as text) & linefeed
+            try
+                set report to report & (entire contents of w as text) & linefeed
+            on error errMsg
+                set report to report & "error: " & errMsg & linefeed
+            end try
+        end repeat
+        return report
+    end tell
+end tell
+APPLESCRIPT
+    printf 'wrote %s\n' "$path"
+}
+
+cmd_screenshot() {
+    local path=""
+    while (($#)); do
+        case "$1" in
+            --path) path="$2"; shift 2 ;;
+            *) die "unknown screenshot option: $1" ;;
+        esac
+    done
+    [[ -n "$path" ]] || die "screenshot requires --path"
+    require_macos
+    mkdir -p "$(dirname "$path")"
+    append_log "screenshot $path"
+    # Window-id capture still needs host Screen Recording on recent macOS.
+    if ! /usr/sbin/screencapture -l "$(osascript -e 'tell application "System Events" to tell process "Barline" to get id of window "Barline"')" "$path" 2>/dev/null; then
+        gated "screenshot needs host Screen Recording and a visible window titled Barline"
+    fi
+    printf 'wrote %s\n' "$path"
+}
+
+cmd_click() {
+    local name="" role="" identifier=""
+    while (($#)); do
+        case "$1" in
+            --name) name="$2"; shift 2 ;;
+            --role) role="$2"; shift 2 ;;
+            --identifier) identifier="$2"; shift 2 ;;
+            *) die "unknown click option: $1" ;;
+        esac
+    done
+    [[ -n "$name" || -n "$identifier" ]] || die "click requires --name or --identifier"
+    require_host_ax
+    append_log "click role=${role:-} name=${name:-} identifier=${identifier:-}"
+    local name_esc ident_esc
+    name_esc="$(escape_as "$name")"
+    ident_esc="$(escape_as "$identifier")"
+    if [[ "$role" == status-item ]]; then
+        local want="${identifier:-$name}"
+        local want_esc
+        want_esc="$(escape_as "$want")"
+        osascript <<APPLESCRIPT
+tell application "System Events"
+    tell process "Barline"
+        set extras to missing value
+        try
+            set extras to value of attribute "AXExtrasMenuBar"
+        end try
+        if extras is missing value then error "Barline extras menu bar is unavailable"
+        set matched to false
+        repeat with child in UI elements of extras
+            try
+                if (value of attribute "AXIdentifier" of child) is "${want_esc}" then
+                    click child
+                    set matched to true
+                    exit repeat
+                end if
+            end try
+        end repeat
+        if not matched then error "status item not found"
+    end tell
+end tell
+APPLESCRIPT
+        return
+    fi
+    if [[ "$role" == menu-item ]]; then
+        osascript <<APPLESCRIPT
+tell application "System Events"
+    tell process "Barline"
+        click menu item "${name_esc}" of menu 1 of menu bar item 1 of extras menu bar 1
+    end tell
+end tell
+APPLESCRIPT
+        return
+    fi
+    osascript <<APPLESCRIPT
+tell application "System Events"
+    tell process "Barline"
+        set frontmost to true
+        if "${ident_esc}" is not "" then
+            set uiElems to entire contents of window 1
+            repeat with e in uiElems
+                try
+                    if (value of attribute "AXIdentifier" of e) is "${ident_esc}" then
+                        click e
+                        return
+                    end if
+                end try
+            end repeat
+            error "AXIdentifier not found"
+        end if
+        click UI element "${name_esc}" of window 1
+    end tell
+end tell
+APPLESCRIPT
+}
+
+cmd_fill() {
+    local name="" identifier="" value=""
+    while (($#)); do
+        case "$1" in
+            --name) name="$2"; shift 2 ;;
+            --identifier) identifier="$2"; shift 2 ;;
+            --value) value="$2"; shift 2 ;;
+            *) die "unknown fill option: $1" ;;
+        esac
+    done
+    [[ -n "$value" ]] || die "fill requires --value"
+    [[ -n "$name" || -n "$identifier" ]] || die "fill requires --name or --identifier"
+    require_host_ax
+    append_log "fill name=${name:-} identifier=${identifier:-}"
+    local name_esc ident_esc value_esc
+    name_esc="$(escape_as "$name")"
+    ident_esc="$(escape_as "$identifier")"
+    value_esc="$(escape_as "$value")"
+    osascript <<APPLESCRIPT
+tell application "System Events"
+    tell process "Barline"
+        set frontmost to true
+        if "${ident_esc}" is not "" then
+            set uiElems to entire contents of window 1
+            repeat with e in uiElems
+                try
+                    if (value of attribute "AXIdentifier" of e) is "${ident_esc}" then
+                        set value of e to "${value_esc}"
+                        return
+                    end if
+                end try
+            end repeat
+            error "AXIdentifier not found"
+        end if
+        set value of text field "${name_esc}" of window 1 to "${value_esc}"
+    end tell
+end tell
+APPLESCRIPT
+}
+
+cmd_cleanup() {
+    local instance dir
+    dir="$(evidence_dir)"
+    instance="$(instance_file)"
+    append_log "cleanup"
+    if [[ -f "$instance" ]]; then
+        # shellcheck disable=SC1090
+        source "$instance"
+        local pids=()
+        [[ -n "${BARLINE_APP_PID:-}" ]] && pids+=("$BARLINE_APP_PID")
+        [[ -n "${BARLINE_HELPER_PID:-}" ]] && pids+=("$BARLINE_HELPER_PID")
+        if ((${#pids[@]})); then
+            barline_terminate_pids "${pids[@]}"
+        fi
+        if [[ -n "${BARLINE_RUN_ROOT:-}" && "$BARLINE_RUN_ROOT" == /private/tmp/barline-verify-* ]]; then
+            rm -rf "$BARLINE_RUN_ROOT"
+        fi
+        if [[ "${BARLINE_INSTALLED_APP_PAUSED:-false}" == true ]]; then
+            BARLINE_INSTALLED_APP_PAUSED=true
+            barline_restore_installed_app
+        fi
+        rm -f "$instance"
+    fi
+    printf 'cleanup complete; evidence retained at %s\n' "$dir"
+}
+
+cmd_evidence_dir() {
+    ensure_evidence_dir
+}
+
+main() {
+    local cmd="${1:-help}"
+    shift || true
+    case "$cmd" in
+        help|-h|--help) usage ;;
+        host) cmd_host ;;
+        doctor) cmd_doctor ;;
+        launch) cmd_launch ;;
+        linux-gates) cmd_linux_gates ;;
+        hygiene) cmd_hygiene ;;
+        firewall) cmd_firewall ;;
+        click) cmd_click "$@" ;;
+        fill) cmd_fill "$@" ;;
+        snapshot) cmd_snapshot "$@" ;;
+        screenshot) cmd_screenshot "$@" ;;
+        cleanup) cmd_cleanup ;;
+        evidence-dir) cmd_evidence_dir ;;
+        *) usage >&2; die "unknown command: $cmd" ;;
+    esac
+}
+
+main "$@"
