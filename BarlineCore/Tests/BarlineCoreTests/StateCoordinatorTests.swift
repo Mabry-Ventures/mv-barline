@@ -157,6 +157,90 @@ struct StateCoordinatorTests {
         }.map(\.id) == [firstUnrelated, secondUnrelated])
     }
 
+    @Test("macOS 27 rebinds duplicate application aliases after visibility assignment")
+    func acceptsGoldenGateApplicationGroupAliasRebinding() async throws {
+        let display = MenuBarDisplayID("test-display")
+        let first = MenuBarItemID(
+            bundleIdentifier: "com.example.multi-item",
+            title: "Metric",
+            alias: "occurrence-1"
+        )
+        let second = MenuBarItemID(
+            bundleIdentifier: "com.example.multi-item",
+            title: "Metric",
+            alias: "occurrence-2"
+        )
+        let reboundFirst = MenuBarItemID(
+            bundleIdentifier: "com.example.multi-item",
+            title: "Metric",
+            alias: "occurrence-3"
+        )
+        let reboundSecond = MenuBarItemID(
+            bundleIdentifier: "com.example.multi-item",
+            title: "Metric",
+            alias: "occurrence-4"
+        )
+        let unrelated = MenuBarItemID(
+            bundleIdentifier: "com.example.unrelated",
+            accessibilityIdentifier: "only"
+        )
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: Date(),
+            items: [
+                MenuBarItemDescriptor(id: unrelated, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: first, section: .hidden, order: 1, displayID: display),
+                MenuBarItemDescriptor(id: second, section: .hidden, order: 2, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let after = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: before.capturedAt,
+            items: [
+                MenuBarItemDescriptor(id: reboundFirst, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: reboundSecond, section: .visible, order: 1, displayID: display),
+                MenuBarItemDescriptor(id: unrelated, section: .visible, order: 2, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
+            snapshots: [before, after],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: false,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
+            )
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+
+        let result = try await coordinator.perform(
+            .move(MenuBarMoveOperation(
+                itemID: first,
+                section: .visible,
+                index: 0,
+                destinationDisplayID: display
+            )),
+            now: before.capturedAt
+        )
+
+        #expect(result.items.filter {
+            $0.id.bundleIdentifier == "com.example.multi-item"
+        }.allSatisfy { $0.section == .visible })
+        #expect(result.items.first(where: { $0.id == unrelated })?.section == .visible)
+    }
+
     @Test("macOS 27 rejects unrelated within-section reordering during visibility assignment")
     func rejectsGoldenGateUnrelatedNativeReordering() async throws {
         let display = MenuBarDisplayID("test-display")
@@ -285,6 +369,96 @@ struct StateCoordinatorTests {
                 now: before.capturedAt
             )
         }
+    }
+
+    @Test("macOS 27 waits for a coherent grouped visibility inventory")
+    func waitsForCoherentGoldenGateAssignmentInventory() async throws {
+        let display = MenuBarDisplayID("test-display")
+        let first = MenuBarItemID(
+            bundleIdentifier: "com.example.grouped",
+            accessibilityIdentifier: "first"
+        )
+        let second = MenuBarItemID(
+            bundleIdentifier: "com.example.grouped",
+            accessibilityIdentifier: "second"
+        )
+        let unrelated = MenuBarItemID(
+            bundleIdentifier: "com.example.unrelated",
+            accessibilityIdentifier: "only"
+        )
+        let before = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: Date(),
+            items: [
+                MenuBarItemDescriptor(id: first, section: .visible, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: second, section: .visible, order: 1, displayID: display),
+                MenuBarItemDescriptor(id: unrelated, section: .visible, order: 2, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let transitional = MenuBarSnapshot(
+            generation: 2,
+            capturedAt: before.capturedAt,
+            items: [
+                MenuBarItemDescriptor(id: first, section: .hidden, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: unrelated, section: .visible, order: 1, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let settled = MenuBarSnapshot(
+            generation: 3,
+            capturedAt: before.capturedAt,
+            items: [
+                MenuBarItemDescriptor(id: first, section: .hidden, order: 0, displayID: display),
+                MenuBarItemDescriptor(id: second, section: .hidden, order: 1, displayID: display),
+                MenuBarItemDescriptor(id: unrelated, section: .visible, order: 2, displayID: display),
+            ],
+            displayIDs: [display],
+            activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
+            snapshots: [before, transitional, settled],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true,
+                canMove: true,
+                canReveal: false,
+                canActivate: true,
+                canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true,
+                    canApplySavedNativeOrder: false
+                )
+            )
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(
+                maximumAttempts: 2,
+                baseDelay: .zero,
+                maximumDelay: .zero,
+                maximumJitterPermille: 0
+            )
+        )
+
+        let result = try await coordinator.perform(
+            .move(MenuBarMoveOperation(
+                itemID: first,
+                section: .hidden,
+                index: 0,
+                destinationDisplayID: display
+            )),
+            now: before.capturedAt
+        )
+
+        #expect(result == settled)
+        #expect(await backend.snapshotCallCount == 3)
+        #expect(await backend.moveOperations.count == 1)
+        #expect(await coordinator.lastRejection == nil)
     }
 
     @Test("macOS 27 profile activation preserves native visible order")

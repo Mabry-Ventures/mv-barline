@@ -504,36 +504,85 @@ public struct MenuBarMovePlanner: Sendable {
         from previousSnapshot: MenuBarSnapshot,
         visibilityAssignmentGranularity: MenuBarVisibilityAssignmentGranularity?
     ) -> Bool {
-        guard let previousItem = previousSnapshot.items.first(where: { $0.id == operation.itemID }),
-              let item = snapshot.items.first(where: { $0.id == operation.itemID }),
+        guard let previousItem = previousSnapshot.items.first(where: {
+            $0.id == operation.itemID
+        }) else { return false }
+
+        if visibilityAssignmentGranularity == .applicationGroupAndKnownSystemItem,
+           !previousItem.id.bundleIdentifier.lowercased().hasPrefix("com.apple.")
+        {
+            let bundleIdentifier = previousItem.id.bundleIdentifier
+            let previousGroup = previousSnapshot.items.filter {
+                $0.id.bundleIdentifier == bundleIdentifier
+            }
+            let currentGroup = snapshot.items.filter {
+                $0.id.bundleIdentifier == bundleIdentifier
+            }
+            guard !currentGroup.isEmpty,
+                  semanticIdentityCounts(in: previousGroup) == semanticIdentityCounts(in: currentGroup),
+                  currentGroup.allSatisfy({ $0.section == operation.section }),
+                  operation.destinationDisplayID.map({ displayID in
+                      currentGroup.allSatisfy { $0.displayID == displayID }
+                  }) != false
+            else {
+                return false
+            }
+            return unchangedLogicalItemsMatch(
+                previousSnapshot,
+                snapshot,
+                excludingPrevious: Set(previousGroup.map(\.id)),
+                excludingCurrent: Set(currentGroup.map(\.id))
+            )
+        }
+
+        guard let item = snapshot.items.first(where: { $0.id == operation.itemID }),
               item.section == operation.section,
               operation.destinationDisplayID.map({ item.displayID == $0 }) != false
         else {
             return false
         }
+        return unchangedLogicalItemsMatch(
+            previousSnapshot,
+            snapshot,
+            excludingPrevious: [operation.itemID],
+            excludingCurrent: [operation.itemID]
+        )
+    }
 
+    private struct LogicalSemanticIdentity: Hashable {
+        let bundleIdentifier: String
+        let accessibilityIdentifier: String?
+        let title: String?
+        let fallbackFingerprint: String?
+
+        init(_ id: MenuBarItemID) {
+            bundleIdentifier = id.bundleIdentifier
+            accessibilityIdentifier = id.accessibilityIdentifier
+            title = id.title
+            fallbackFingerprint = id.fallbackFingerprint
+        }
+    }
+
+    private func semanticIdentityCounts(
+        in items: [MenuBarItemDescriptor]
+    ) -> [LogicalSemanticIdentity: Int] {
+        Dictionary(grouping: items, by: { LogicalSemanticIdentity($0.id) })
+            .mapValues(\.count)
+    }
+
+    private func unchangedLogicalItemsMatch(
+        _ previousSnapshot: MenuBarSnapshot,
+        _ snapshot: MenuBarSnapshot,
+        excludingPrevious previousExcludedIDs: Set<MenuBarItemID>,
+        excludingCurrent currentExcludedIDs: Set<MenuBarItemID>
+    ) -> Bool {
         let previousByID = Dictionary(uniqueKeysWithValues: previousSnapshot.items.map { ($0.id, $0) })
         let currentByID = Dictionary(uniqueKeysWithValues: snapshot.items.map { ($0.id, $0) })
-        let sharedIDs = Set(previousByID.keys).intersection(currentByID.keys)
-
-        let allowedChangedIDs: Set<MenuBarItemID>
-        if visibilityAssignmentGranularity == .applicationGroupAndKnownSystemItem,
-           !previousItem.id.bundleIdentifier.lowercased().hasPrefix("com.apple.")
-        {
-            allowedChangedIDs = Set(previousSnapshot.items.lazy
-                .filter { $0.id.bundleIdentifier == previousItem.id.bundleIdentifier }
-                .map(\.id))
-        } else {
-            allowedChangedIDs = [operation.itemID]
-        }
-
-        guard allowedChangedIDs.allSatisfy({ id in
-            currentByID[id]?.section == operation.section
-        }), sharedIDs.allSatisfy({ id in
-            if allowedChangedIDs.contains(id) {
-                return currentByID[id]?.section == operation.section
-            }
-            return previousByID[id]?.section == currentByID[id]?.section
+        let sharedIDs = Set(previousByID.keys)
+            .subtracting(previousExcludedIDs)
+            .intersection(Set(currentByID.keys).subtracting(currentExcludedIDs))
+        guard sharedIDs.allSatisfy({ id in
+            previousByID[id]?.section == currentByID[id]?.section
         }) else {
             return false
         }
@@ -543,13 +592,12 @@ public struct MenuBarMovePlanner: Sendable {
         // in the flattened AX inventory. Verify that it did not reorder any
         // unaffected peers within their existing section instead of requiring
         // the entire cross-section inventory to remain byte-for-byte ordered.
-        let unaffectedIDs = sharedIDs.subtracting(allowedChangedIDs)
         return MenuBarSection.allCases.allSatisfy { section in
             let previousOrder = previousSnapshot.items.lazy
-                .filter { unaffectedIDs.contains($0.id) && $0.section == section }
+                .filter { sharedIDs.contains($0.id) && $0.section == section }
                 .map(\.id)
             let currentOrder = snapshot.items.lazy
-                .filter { unaffectedIDs.contains($0.id) && $0.section == section }
+                .filter { sharedIDs.contains($0.id) && $0.section == section }
                 .map(\.id)
             return Array(previousOrder) == Array(currentOrder)
         }

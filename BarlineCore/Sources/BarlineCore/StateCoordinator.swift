@@ -559,53 +559,26 @@ public actor MenuBarStateCoordinator {
         do {
             try await apply(mutation, restoreTarget: restoreTarget)
             try Task.checkCancellation()
-            let candidate = try await normalizedBackendSnapshot()
-            switch validator.validate(candidate, previous: before, now: now ?? Date()) {
-            case let .success(snapshot):
-                guard generation == mutationGeneration else {
-                    throw CancellationError()
-                }
-                if let operation = mutation.moveOperation,
-                   !MenuBarMovePlanner().resultMatches(
-                       operation,
-                       in: snapshot,
-                       from: before,
-                       destinationSupport: moveDestinationSupport,
-                       visibilityAssignmentGranularity: visibilityAssignmentGranularity
-                   )
-                {
-                    throw MenuBarBackendError.operationFailed(
-                        "menu bar move did not reach requested section"
-                    )
-                }
-                if case let .reveal(itemID) = mutation {
-                    guard let beforeItem = before.items.first(where: { $0.id == itemID }),
-                          let revealedItem = snapshot.items.first(where: { $0.id == itemID }),
-                          revealedItem.section == .visible,
-                          revealedItem.isOnScreen,
-                          revealedItem.displayID == beforeItem.displayID
-                    else {
-                        throw MenuBarBackendError.operationFailed(
-                            "menu bar reveal did not produce a visible item on the requested display"
-                        )
-                    }
-                }
-                if let restoreTarget {
-                    try validateHistoryResult(snapshot, matches: restoreTarget)
-                }
-                currentSnapshot = snapshot
-                lastKnownGoodSnapshot = snapshot
-                lastRejection = nil
-                if mutation.recordsLayoutHistory {
-                    recordUndoCheckpoint(before, activeProfileID: activeProfileID)
-                    activeProfileID = restoreTarget == nil ? nil : restoreProfileID
-                }
-                lastKnownGoodProfileID = activeProfileID
-                return snapshot
-            case let .failure(reason):
-                lastRejection = reason
-                throw MenuBarBackendError.invalidSnapshot(reason)
+            let snapshot = try await verifiedPostMutationSnapshot(
+                for: mutation,
+                from: before,
+                restoreTarget: restoreTarget,
+                moveDestinationSupport: moveDestinationSupport,
+                visibilityAssignmentGranularity: visibilityAssignmentGranularity,
+                now: now ?? Date()
+            )
+            guard generation == mutationGeneration else {
+                throw CancellationError()
             }
+            currentSnapshot = snapshot
+            lastKnownGoodSnapshot = snapshot
+            lastRejection = nil
+            if mutation.recordsLayoutHistory {
+                recordUndoCheckpoint(before, activeProfileID: activeProfileID)
+                activeProfileID = restoreTarget == nil ? nil : restoreProfileID
+            }
+            lastKnownGoodProfileID = activeProfileID
+            return snapshot
         } catch {
             let mutationError = error
             if Self.mutationDidNotStart(mutationError) {
@@ -667,6 +640,84 @@ public actor MenuBarStateCoordinator {
             }
             throw mutationError
         }
+    }
+
+    /// macOS 27 publishes visibility changes through several cooperating
+    /// processes. Immediately after a successful native assignment, its AX
+    /// inventory can briefly omit one member of an application group before
+    /// reaching the committed state. Observe that convergence without
+    /// replaying the mutation; every attempt remains subject to structural
+    /// validation and the complete logical postcondition.
+    private func verifiedPostMutationSnapshot(
+        for mutation: MenuBarMutation,
+        from before: MenuBarSnapshot,
+        restoreTarget: MenuBarSnapshot?,
+        moveDestinationSupport: MenuBarMoveDestinationSupport?,
+        visibilityAssignmentGranularity: MenuBarVisibilityAssignmentGranularity?,
+        now: Date
+    ) async throws -> MenuBarSnapshot {
+        let retriesEventuallyConsistentVisibility = mutation.moveOperation != nil &&
+            visibilityAssignmentGranularity == .applicationGroupAndKnownSystemItem
+        let attemptCount = retriesEventuallyConsistentVisibility
+            ? max(1, retryPolicy.maximumAttempts)
+            : 1
+        var mostRecentError: (any Error)?
+
+        for attempt in 0 ..< attemptCount {
+            try Task.checkCancellation()
+            do {
+                let candidate = try await normalizedBackendSnapshot()
+                let snapshot: MenuBarSnapshot
+                switch validator.validate(candidate, previous: before, now: now) {
+                case let .success(validated):
+                    lastRejection = nil
+                    snapshot = validated
+                case let .failure(reason):
+                    lastRejection = reason
+                    throw MenuBarBackendError.invalidSnapshot(reason)
+                }
+
+                if let operation = mutation.moveOperation,
+                   !MenuBarMovePlanner().resultMatches(
+                       operation,
+                       in: snapshot,
+                       from: before,
+                       destinationSupport: moveDestinationSupport,
+                       visibilityAssignmentGranularity: visibilityAssignmentGranularity
+                   )
+                {
+                    throw MenuBarBackendError.operationFailed(
+                        "menu bar move did not reach requested section"
+                    )
+                }
+                if case let .reveal(itemID) = mutation {
+                    guard let beforeItem = before.items.first(where: { $0.id == itemID }),
+                          let revealedItem = snapshot.items.first(where: { $0.id == itemID }),
+                          revealedItem.section == .visible,
+                          revealedItem.isOnScreen,
+                          revealedItem.displayID == beforeItem.displayID
+                    else {
+                        throw MenuBarBackendError.operationFailed(
+                            "menu bar reveal did not produce a visible item on the requested display"
+                        )
+                    }
+                }
+                if let restoreTarget {
+                    try validateHistoryResult(snapshot, matches: restoreTarget)
+                }
+                return snapshot
+            } catch {
+                mostRecentError = error
+            }
+
+            if attempt + 1 < attemptCount {
+                try await Task.sleep(for: retryPolicy.delay(forAttempt: attempt))
+            }
+        }
+
+        throw mostRecentError ?? MenuBarBackendError.operationFailed(
+            "menu bar mutation postcondition was unavailable"
+        )
     }
 
     private func validateProfileResult(

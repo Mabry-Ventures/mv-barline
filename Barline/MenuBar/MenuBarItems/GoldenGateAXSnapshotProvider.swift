@@ -295,7 +295,22 @@ actor GoldenGateAXSnapshotProvider {
            now >= cachedAt,
            now - cachedAt < GoldenGateTiming.snapshotCacheLifetimeNanoseconds
         {
-            return cachedSnapshot
+            // A cache hit is still a new backend observation. Reusing the
+            // prior generation violates the coordinator's monotonic snapshot
+            // contract and can turn an otherwise successful assignment into
+            // a stale-generation failure during its immediate UI refresh.
+            generation &+= 1
+            let observed = MenuBarSnapshot(
+                generation: generation,
+                capturedAt: cachedSnapshot.capturedAt,
+                items: cachedSnapshot.items,
+                displayIDs: cachedSnapshot.displayIDs,
+                displayIdentities: cachedSnapshot.displayIdentities,
+                activeSpaceIsValid: cachedSnapshot.activeSpaceIsValid,
+                menuTrackingIsActive: cachedSnapshot.menuTrackingIsActive
+            )
+            self.cachedSnapshot = observed
+            return observed
         }
 
         guard AXHelpers.isProcessTrusted() else {
