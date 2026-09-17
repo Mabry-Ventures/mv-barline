@@ -542,7 +542,10 @@ public actor MenuBarStateCoordinator {
             throw MenuBarBackendError.operationFailed("no last-known-good snapshot")
         }
         let before = try await validatedStartingSnapshot(now: now)
-        let moveDestinationSupport = await backend.capabilities.moveDestinationSupport
+        let backendCapabilities = await backend.capabilities
+        let moveDestinationSupport = backendCapabilities.moveDestinationSupport
+        let visibilityAssignmentGranularity = backendCapabilities.arrangement?
+            .visibilityAssignmentGranularity
         guard !before.menuTrackingIsActive else {
             throw MenuBarBackendError.unsafeMenuTracking
         }
@@ -567,7 +570,8 @@ public actor MenuBarStateCoordinator {
                        operation,
                        in: snapshot,
                        from: before,
-                       destinationSupport: moveDestinationSupport
+                       destinationSupport: moveDestinationSupport,
+                       visibilityAssignmentGranularity: visibilityAssignmentGranularity
                    )
                 {
                     throw MenuBarBackendError.operationFailed(

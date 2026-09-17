@@ -447,13 +447,15 @@ public struct MenuBarMovePlanner: Sendable {
         _ operation: MenuBarMoveOperation,
         in snapshot: MenuBarSnapshot,
         from previousSnapshot: MenuBarSnapshot,
-        destinationSupport: MenuBarMoveDestinationSupport? = nil
+        destinationSupport: MenuBarMoveDestinationSupport? = nil,
+        visibilityAssignmentGranularity: MenuBarVisibilityAssignmentGranularity? = nil
     ) -> Bool {
         if destinationSupport == .logicalSectionsPreserveNativeOrder {
             return logicalSectionResultMatches(
                 operation,
                 in: snapshot,
-                from: previousSnapshot
+                from: previousSnapshot,
+                visibilityAssignmentGranularity: visibilityAssignmentGranularity
             )
         }
         let candidates = snapshot.items.filter { $0.section == operation.section }
@@ -499,9 +501,11 @@ public struct MenuBarMovePlanner: Sendable {
     private func logicalSectionResultMatches(
         _ operation: MenuBarMoveOperation,
         in snapshot: MenuBarSnapshot,
-        from previousSnapshot: MenuBarSnapshot
+        from previousSnapshot: MenuBarSnapshot,
+        visibilityAssignmentGranularity: MenuBarVisibilityAssignmentGranularity?
     ) -> Bool {
-        guard let item = snapshot.items.first(where: { $0.id == operation.itemID }),
+        guard let previousItem = previousSnapshot.items.first(where: { $0.id == operation.itemID }),
+              let item = snapshot.items.first(where: { $0.id == operation.itemID }),
               item.section == operation.section,
               operation.destinationDisplayID.map({ item.displayID == $0 }) != false
         else {
@@ -515,8 +519,22 @@ public struct MenuBarMovePlanner: Sendable {
         let currentOrder = snapshot.items.map(\.id).filter(sharedIDs.contains)
         guard previousOrder == currentOrder else { return false }
 
+        let allowedChangedIDs: Set<MenuBarItemID>
+        if visibilityAssignmentGranularity == .applicationGroupAndKnownSystemItem,
+           !previousItem.id.bundleIdentifier.lowercased().hasPrefix("com.apple.")
+        {
+            allowedChangedIDs = Set(previousSnapshot.items.lazy
+                .filter { $0.id.bundleIdentifier == previousItem.id.bundleIdentifier }
+                .map(\.id))
+        } else {
+            allowedChangedIDs = [operation.itemID]
+        }
+
         return sharedIDs.allSatisfy { id in
-            id == operation.itemID || previousByID[id]?.section == currentByID[id]?.section
+            if allowedChangedIDs.contains(id) {
+                return currentByID[id]?.section == operation.section
+            }
+            return previousByID[id]?.section == currentByID[id]?.section
         }
     }
 
