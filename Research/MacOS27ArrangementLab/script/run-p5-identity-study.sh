@@ -136,8 +136,9 @@ report="$3"
 
 capture_table() {
     local case_name="$1"
+    local phase="$2"
     local receipt="$EVIDENCE_ROOT/$case_name/receipt.json"
-    local output="$EVIDENCE_ROOT/$case_name/table.json"
+    local output="$EVIDENCE_ROOT/$case_name/table-$phase.json"
     remote_exec /usr/bin/python3 -c '
 import hashlib
 import hmac
@@ -145,7 +146,7 @@ import json
 import plistlib
 import sys
 
-receipt_path, output_path, alias_key, case_name = sys.argv[1:]
+receipt_path, output_path, alias_key, case_name, phase = sys.argv[1:]
 receipt = json.load(open(receipt_path))
 plist_path = (
     __import__("pathlib").Path.home()
@@ -189,9 +190,14 @@ matched_keys = {
 document = {
     "schema": 1,
     "case": case_name,
+    "phase": phase,
     "receiptSequence": receipt["sequence"],
     "fixtureRecordCount": len(current_records),
     "historicalFixtureRecordCount": len(fixture_records) - len(current_records),
+    "allFixtureRecords": [
+        {"recordAlias": alias(key), "position": value}
+        for key, value in sorted(fixture_records.items())
+    ],
     "allExpectedMappedExactlyOnce": all(
         item["exactAutosaveSuffixMatchCount"] == 1 for item in mappings
     ),
@@ -204,7 +210,7 @@ document = {
 with open(output_path, "w") as handle:
     json.dump(document, handle, indent=2, sort_keys=True)
     handle.write("\n")
-' "$receipt" "$output" "$ALIAS_KEY" "$case_name"
+' "$receipt" "$output" "$ALIAS_KEY" "$case_name" "$phase"
 }
 
 run_case() {
@@ -216,10 +222,11 @@ run_case() {
     stop_fixture
     launch_case "$case_name" "$revision" "$identifier_mode" "$title_mode" "$creation_order"
     observe_case "$case_name"
+    capture_table "$case_name" before
     move_case "$case_name"
     stop_fixture
     /bin/sleep 0.5
-    capture_table "$case_name"
+    capture_table "$case_name" after
 }
 
 remote_exec /bin/mkdir -p "$EVIDENCE_ROOT"
@@ -242,10 +249,11 @@ DistributedNotificationCenter.default().post(
 Thread.sleep(forTimeInterval: 0.8)
 '
 observe_case lifecycle-recreated
+capture_table lifecycle-recreated before
 move_case lifecycle-recreated
 stop_fixture
 /bin/sleep 0.5
-capture_table lifecycle-recreated
+capture_table lifecycle-recreated after
 
 run_case autosave-changed "${AUTOSAVE_REVISION}b" normal normal normal
 stop_fixture
@@ -256,41 +264,48 @@ import sys
 from pathlib import Path
 
 root = Path(sys.argv[1])
-same_cases = [
-    "identifier-changed", "identifier-absent", "title-changed",
+cases = [
+    "baseline", "identifier-changed", "identifier-absent", "title-changed",
     "title-duplicate", "title-absent", "creation-reversed", "lifecycle-recreated",
+    "autosave-changed",
 ]
 
-def aliases(case):
-    value = json.load(open(root / case / "table.json"))
-    assert value["fixtureRecordCount"] == 3, value
-    return value["fixtureRecordAliases"]
+def load(case, phase):
+    return json.load(open(root / case / f"table-{phase}.json"))
 
-baseline = aliases("baseline")
-stable = {case: aliases(case) == baseline for case in same_cases}
-autosave = json.load(open(root / "autosave-changed" / "table.json"))
-assert autosave["fixtureRecordCount"] in (0, 3), autosave
-autosave_changed_records = (
-    autosave["fixtureRecordCount"] == 3
-    and autosave["fixtureRecordAliases"] != baseline
-)
+def positions(case, phase):
+    return {
+        value["recordAlias"]: value["position"]
+        for value in load(case, phase)["allFixtureRecords"]
+    }
+
+def delta(case):
+    before = positions(case, "before")
+    after = positions(case, "after")
+    aliases = sorted(
+        alias for alias in before.keys() | after.keys()
+        if before.get(alias) != after.get(alias)
+    )
+    report = json.load(open(root / case / "native-move.json"))
+    assert report["disposition"] == "movePlacementVerified", report
+    return aliases
+
+deltas = {case: delta(case) for case in cases}
 document = {
     "schema": 1,
-    "stableWhenAXIdentifierChanges": stable["identifier-changed"],
-    "stableWhenAXIdentifierIsAbsent": stable["identifier-absent"],
-    "stableWhenTitleChanges": stable["title-changed"],
-    "stableWhenTitlesDuplicate": stable["title-duplicate"],
-    "stableWhenTitleIsAbsent": stable["title-absent"],
-    "stableWhenCreationOrderReverses": stable["creation-reversed"],
-    "stableWhenItemIsRecreated": stable["lifecycle-recreated"],
-    "changesWhenAutosaveNameChanges": autosave_changed_records,
-    "autosaveChangedExactRecordCount": autosave["fixtureRecordCount"],
-    "classification": (
-        "autosave-name-influenced-but-not-generally-resolvable-from-ax"
-        if autosave_changed_records
-        else "opaque-publisher-history-not-generally-resolvable-from-ax"
-    ),
-    "verified": all(stable.values()) and autosave["fixtureRecordCount"] in (0, 3),
+    "nativeMoveVerifiedByCase": {case: True for case in cases},
+    "positionTableChangedByCase": {
+        case: bool(aliases) for case, aliases in deltas.items()
+    },
+    "currentAutosaveMappedExactlyInBaseline": load("baseline", "after")[
+        "allExpectedMappedExactlyOnce"
+    ],
+    "currentAutosaveMappedExactlyAfterChange": load("autosave-changed", "after")[
+        "allExpectedMappedExactlyOnce"
+    ],
+    "changedRecordAliasesByCase": deltas,
+    "classification": "contradicted-native-position-table-does-not-track-verified-moves",
+    "verified": len(deltas) == len(cases),
 }
 with open(root / "summary.json", "w") as handle:
     json.dump(document, handle, indent=2, sort_keys=True)
@@ -298,4 +313,4 @@ with open(root / "summary.json", "w") as handle:
 assert document["verified"], document
 ' "$EVIDENCE_ROOT"
 
-/usr/bin/printf 'P5_IDENTITY_VERIFIED classification=not-generally-resolvable-from-ax\n'
+/usr/bin/printf 'P5_IDENTITY_VERIFIED classification=position-table-contradicted\n'
