@@ -213,6 +213,43 @@ with open(output_path, "w") as handle:
 ' "$receipt" "$output" "$ALIAS_KEY" "$case_name" "$phase"
 }
 
+wait_for_table_quiescence() {
+    remote_exec /usr/bin/python3 -c '
+import json
+import plistlib
+import time
+from pathlib import Path
+
+plist_path = (
+    Path.home()
+    / "Library/Group Containers/com.apple.MenuBar/Library/Preferences/com.apple.MenuBar.plist"
+)
+
+def snapshot():
+    with plist_path.open("rb") as handle:
+        positions = plistlib.load(handle).get("TrailingItemPreferredPositions", {})
+    return json.dumps(
+        sorted(
+            (key, value) for key, value in positions.items()
+            if "BarlineIdentityFixture::" in key
+        ),
+        separators=(",", ":"),
+    )
+
+started = time.monotonic()
+previous = snapshot()
+stable_samples = 0
+for _ in range(80):
+    time.sleep(0.1)
+    current = snapshot()
+    stable_samples = stable_samples + 1 if current == previous else 0
+    previous = current
+    if time.monotonic() - started >= 2.0 and stable_samples >= 10:
+        raise SystemExit(0)
+raise SystemExit(1)
+'
+}
+
 run_case() {
     local case_name="$1"
     local revision="$2"
@@ -225,7 +262,7 @@ run_case() {
     capture_table "$case_name" before
     move_case "$case_name"
     stop_fixture
-    /bin/sleep 0.5
+    wait_for_table_quiescence
     capture_table "$case_name" after
 }
 
@@ -252,7 +289,7 @@ observe_case lifecycle-recreated
 capture_table lifecycle-recreated before
 move_case lifecycle-recreated
 stop_fixture
-/bin/sleep 0.5
+wait_for_table_quiescence
 capture_table lifecycle-recreated after
 
 run_case autosave-changed "${AUTOSAVE_REVISION}b" normal normal normal
@@ -291,12 +328,27 @@ def delta(case):
     return aliases
 
 deltas = {case: delta(case) for case in cases}
+baseline_delta = deltas["baseline"]
+stable_delta = all(deltas[case] == baseline_delta for case in cases[1:])
+complete_mapping = (
+    load("baseline", "after")["allExpectedMappedExactlyOnce"]
+    and load("autosave-changed", "after")["allExpectedMappedExactlyOnce"]
+)
+classification = (
+    "supported-durable-publisher-identity"
+    if stable_delta and complete_mapping and baseline_delta
+    else "contradicted-no-durable-native-record-correlation"
+)
 document = {
     "schema": 1,
     "nativeMoveVerifiedByCase": {case: True for case in cases},
     "positionTableChangedByCase": {
         case: bool(aliases) for case, aliases in deltas.items()
     },
+    "stableChangedRecordSetAcrossCases": stable_delta,
+    "emptyPositionDeltaCases": [
+        case for case, aliases in deltas.items() if not aliases
+    ],
     "currentAutosaveMappedExactlyInBaseline": load("baseline", "after")[
         "allExpectedMappedExactlyOnce"
     ],
@@ -304,7 +356,7 @@ document = {
         "allExpectedMappedExactlyOnce"
     ],
     "changedRecordAliasesByCase": deltas,
-    "classification": "contradicted-native-position-table-does-not-track-verified-moves",
+    "classification": classification,
     "verified": len(deltas) == len(cases),
 }
 with open(root / "summary.json", "w") as handle:
@@ -313,4 +365,7 @@ with open(root / "summary.json", "w") as handle:
 assert document["verified"], document
 ' "$EVIDENCE_ROOT"
 
-/usr/bin/printf 'P5_IDENTITY_VERIFIED classification=position-table-contradicted\n'
+CLASSIFICATION="$(
+    remote_exec /usr/bin/plutil -extract classification raw "$EVIDENCE_ROOT/summary.json"
+)"
+/usr/bin/printf 'P5_IDENTITY_VERIFIED classification=%s\n' "$CLASSIFICATION"
