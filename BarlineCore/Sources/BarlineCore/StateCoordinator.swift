@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import OSLog
 
 public enum MenuBarAuthorityRefreshError: Error, Equatable, Sendable {
     case staleGeneration(expected: UInt64, actual: UInt64?)
@@ -185,6 +186,10 @@ public struct RetryPolicy: Sendable {
 }
 
 public actor MenuBarStateCoordinator {
+    private static let logger = Logger(
+        subsystem: "com.mabryventures.Barline",
+        category: "StateCoordinator"
+    )
     private struct HistoryCheckpoint: Sendable {
         let snapshot: MenuBarSnapshot
         let activeProfileID: UUID?
@@ -728,6 +733,9 @@ public actor MenuBarStateCoordinator {
                 return snapshot
             } catch let error as MenuBarBackendError {
                 mostRecentError = error
+                Self.logger.notice(
+                    "Visibility verification attempt \(attempt + 1, privacy: .public)/\(attemptCount, privacy: .public) rejected: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+                )
                 if case .operationFailed("menu bar visibility observation has not settled") = error {
                     // Preserve the first valid observation so only an identical
                     // consecutive observation can commit the mutation.
@@ -736,6 +744,9 @@ public actor MenuBarStateCoordinator {
                 }
             } catch {
                 mostRecentError = error
+                Self.logger.notice(
+                    "Visibility verification attempt \(attempt + 1, privacy: .public)/\(attemptCount, privacy: .public) rejected: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+                )
                 previousSuccessfulVisibilitySignature = nil
             }
 
