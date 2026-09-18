@@ -255,14 +255,13 @@ final class BarlineShelfPanel: NSPanel {
 
             switch barlineShelfLocation {
             case .dynamic:
-                return CGPoint(
-                    x: ShelfPlacementPolicy.centeredOriginX(
-                        screenMinX: screen.frame.minX,
-                        screenMaxX: screen.frame.maxX,
-                        shelfWidth: frame.width
-                    ),
-                    y: originY
-                )
+                if appState.hidEventManager.isMouseInsideEmptyMenuBarSpace(
+                    appState: appState,
+                    screen: screen
+                ) {
+                    return getOrigin(for: .mousePointer)
+                }
+                return barlineIconOrigin(centersWhenEdgeClamped: false) ?? originForRightOfScreen
             case .mousePointer:
                 guard let location = MouseHelpers.locationAppKit else {
                     return getOrigin(for: .barlineIcon)

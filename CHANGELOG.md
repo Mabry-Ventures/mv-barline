@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.42 (build 119) — September 18, 2026
+
+- Anchor Dynamic shelf placement beneath Barline's clicked menu-bar control
+  instead of forcing the shelf to the center of the display.
+
 ## 1.0.41 (build 118) — September 17, 2026
 
 - Keep the shelf visible when a macOS 27 Mac is operated through Screen

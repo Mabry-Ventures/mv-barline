@@ -3,8 +3,8 @@ import Testing
 
 @Suite("Shelf placement")
 struct ShelfPlacementPolicyTests {
-    @Test("Dynamic placement is centered even when a right-side anchor fits")
-    func dynamicPlacementIsCentered() {
+    @Test("Centered placement remains available for explicit centered surfaces")
+    func centeredPlacement() {
         #expect(ShelfPlacementPolicy.centeredOriginX(
             screenMinX: 0,
             screenMaxX: 1440,
@@ -21,19 +21,19 @@ struct ShelfPlacementPolicyTests {
         ) == -920)
     }
 
-    @Test("Dynamic placement centers instead of sticking to the right edge")
-    func dynamicRightEdgeFallback() {
-        #expect(origin(anchor: 1420, dynamic: true) == 520)
+    @Test("Status-item placement clamps beneath a right-edge anchor")
+    func rightEdgeAnchor() {
+        #expect(origin(anchor: 1420, dynamic: false) == 1040)
     }
 
-    @Test("Dynamic placement centers instead of sticking to the left edge")
-    func dynamicLeftEdgeFallback() {
-        #expect(origin(anchor: 20, dynamic: true) == 520)
+    @Test("Status-item placement clamps beneath a left-edge anchor")
+    func leftEdgeAnchor() {
+        #expect(origin(anchor: 20, dynamic: false) == 0)
     }
 
-    @Test("Dynamic placement keeps an anchor that fits without clamping")
-    func dynamicAnchorFits() {
-        #expect(origin(anchor: 900, dynamic: true) == 700)
+    @Test("Status-item placement centers beneath an anchor when it fits")
+    func anchorFits() {
+        #expect(origin(anchor: 900, dynamic: false) == 700)
     }
 
     @Test("Explicit icon placement retains edge clamping")
