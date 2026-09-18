@@ -8,11 +8,11 @@ No account, subscription, advertising, or paid feature tier.
 
 ## Download
 
-[Download Barline 1.0.31](https://github.com/Mabry-Ventures/mv-barline/releases/download/v1.0.31/Barline-1.0.31.dmg)
+[Download Barline 1.0.43](https://github.com/Mabry-Ventures/mv-barline/releases/download/v1.0.43/Barline-1.0.43.dmg)
 for Apple Silicon Macs running macOS 26 or later. Open the disk image and drag
 Barline onto the Applications shortcut. The app is signed with Developer ID,
 notarized by Apple, and updates itself through Sparkle. The
-[release page](https://github.com/Mabry-Ventures/mv-barline/releases/tag/v1.0.31)
+[release page](https://github.com/Mabry-Ventures/mv-barline/releases/tag/v1.0.43)
 has the release notes, `SHA256SUMS` checksums, and the complete corresponding
 source.
 
