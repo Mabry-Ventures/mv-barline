@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.40 (build 117) — September 17, 2026
+
+- Force the nonactivating shelf panel to composite on macOS 27 when Barline is
+  an inactive accessory app, avoiding a false successful open with no visible
+  shelf.
+
 ## 1.0.39 (build 116) — September 17, 2026
 
 - Preserve an unchanged, successfully committed macOS 27 concealment assertion

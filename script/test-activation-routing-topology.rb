@@ -104,6 +104,10 @@ unless concealment.match?(/if appliedResolution == resolved \{\s*return\s*\}/m)
   abort('Golden Gate concealment must preserve an unchanged committed assertion')
 end
 
+unless shelf.match?(/if #available\(macOS 27\.0, \*\) \{\s*orderFrontRegardless\(\)\s*\} else \{\s*orderFront\(nil\)\s*\}/m)
+  abort('macOS 27 shelf presentation must force accessory-panel compositing')
+end
+
 unless concealment.include?('AsyncExclusiveOperationGate()') &&
        concealment.include?('TemporaryRevealLedger()') &&
        concealment.match?(/candidateLedger = temporaryRevealLedger\.beginning\(item\).*?applyCurrentState\(temporaryRevealLedger: candidateLedger\).*?temporaryRevealLedger = candidateLedger/m) &&

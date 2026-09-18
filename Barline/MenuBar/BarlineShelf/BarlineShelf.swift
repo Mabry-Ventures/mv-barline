@@ -455,11 +455,17 @@ final class BarlineShelfPanel: NSPanel {
             // turn, so update synchronously before the first visible frame.
             colorManager.updateAllProperties(with: frame, screen: screen)
 
-            // Use AppKit's normal nonactivating ordering path so the panel is
-            // also published through the application's Accessibility window
-            // list. `orderFrontRegardless()` can create a WindowServer surface
-            // for a cold accessory process without registering that root.
-            orderFront(nil)
+            // macOS 27 can acknowledge `orderFront(nil)` for an inactive
+            // accessory app without actually compositing the nonactivating
+            // panel. Force the already-owned panel to the front there; the
+            // explicit Accessibility publication below keeps the shelf
+            // discoverable to assistive clients. Older systems retain the
+            // normal nonactivating ordering path.
+            if #available(macOS 27.0, *) {
+                orderFrontRegardless()
+            } else {
+                orderFront(nil)
+            }
             displayIfNeeded()
             logger.notice(
                 "Shelf ordered generation=\(request.generation, privacy: .public) attempt=\(attempt, privacy: .public)"
