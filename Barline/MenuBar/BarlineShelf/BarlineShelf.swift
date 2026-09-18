@@ -238,15 +238,27 @@ final class BarlineShelfPanel: NSPanel {
             }
 
             func barlineIconOrigin(centersWhenEdgeClamped: Bool) -> CGPoint? {
-                guard let controlItem = appState.itemManager.itemCache.managedItems.first(
+                // The accessibility snapshot uses Core Graphics display
+                // coordinates on macOS 27, which can diverge from AppKit's
+                // global window coordinates on notched and multi-display
+                // configurations. Prefer the frame of Barline's own status
+                // item window because it is already expressed in the same
+                // coordinate space as this panel.
+                let liveControlFrame = appState.menuBarManager
+                    .controlItem(withName: .visible)?
+                    .onScreenFrame
+                let observedControlFrame = appState.itemManager.itemCache.managedItems.first(
                     matching: .visibleControlItem
-                ) else { return nil }
+                )?.bounds
+                guard let controlFrame = liveControlFrame ?? observedControlFrame else {
+                    return nil
+                }
                 return CGPoint(
                     x: ShelfPlacementPolicy.originX(
                         screenMinX: screen.frame.minX,
                         screenMaxX: screen.frame.maxX,
                         shelfWidth: frame.width,
-                        anchorMidX: controlItem.bounds.midX,
+                        anchorMidX: controlFrame.midX,
                         centersWhenEdgeClamped: centersWhenEdgeClamped
                     ),
                     y: originY

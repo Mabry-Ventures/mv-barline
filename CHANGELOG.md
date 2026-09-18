@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.43 (build 120) — September 18, 2026
+
+- Anchor the shelf with Barline's live AppKit status-item frame so macOS 27
+  display-coordinate differences cannot push it to the opposite screen edge.
+
 ## 1.0.42 (build 119) — September 18, 2026
 
 - Anchor Dynamic shelf placement beneath Barline's clicked menu-bar control
