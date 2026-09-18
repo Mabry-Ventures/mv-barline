@@ -36,6 +36,35 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
         }
     }
 
+    @Test("An ambiguous divider overlap preserves the rest of the inventory")
+    func ambiguousDividerOverlapIsVisibleAndNonHideable() throws {
+        let snapshot = try build([
+            observation(bundle: "com.example.hidden", title: "Hidden", x: 1480),
+            observation(
+                bundle: "com.example.ambiguous",
+                title: "Ambiguous",
+                x: 1538,
+                width: 20
+            ),
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 1550),
+            observation(bundle: "com.example.visible", title: "Visible", x: 1600),
+        ])
+
+        #expect(snapshot.items.count == 4)
+        let ambiguous = snapshot.items.first {
+            $0.id.bundleIdentifier == "com.example.ambiguous"
+        }
+        #expect(ambiguous?.section == .visible)
+        #expect(ambiguous?.isMovable == false)
+        #expect(ambiguous?.canBeHidden == false)
+        #expect(snapshot.items.first {
+            $0.id.bundleIdentifier == "com.example.hidden"
+        }?.section == .hidden)
+        #expect(snapshot.items.first {
+            $0.id.bundleIdentifier == "com.example.visible"
+        }?.section == .visible)
+    }
+
     @Test("Creates stable occurrence aliases for duplicate semantic items")
     func duplicateAliases() throws {
         let snapshot = try build([
@@ -191,6 +220,7 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
         bundle: String,
         title: String,
         x: Double,
+        width: Double = 30,
         localizedApplicationName: String? = nil
     ) -> GoldenGateMenuBarObservation {
         GoldenGateMenuBarObservation(
@@ -200,7 +230,7 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
             displayTitle: title,
             stableTitle: title,
             fallbackFingerprint: "fingerprint-\(bundle)-\(title)",
-            bounds: MenuBarRect(x: x, y: 3, width: 30, height: 24),
+            bounds: MenuBarRect(x: x, y: 3, width: width, height: 24),
             ownerProcessIdentifier: 42
         )
     }

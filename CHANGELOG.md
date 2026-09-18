@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.34 (build 111) — September 17, 2026
+
+- Keep a macOS 27 item with ambiguous divider-overlap geometry visible,
+  immovable, and non-hideable instead of rejecting the entire otherwise valid
+  menu-bar inventory.
+
 ## 1.0.33 (build 110) — September 17, 2026
 
 - Distinguish active-display resolution, missing Barline divider controls, and

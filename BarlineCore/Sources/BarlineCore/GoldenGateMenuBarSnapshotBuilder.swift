@@ -122,7 +122,7 @@ public enum GoldenGateMenuBarSnapshotBuilder {
         let alwaysHiddenControl = preliminary.first {
             $0.isBarlineControlItem && $0.title == "Barline.ControlItem.AlwaysHidden"
         }
-        let descriptors = try preliminary.map { descriptor in
+        let descriptors = preliminary.map { descriptor in
             let section: MenuBarSection
             if descriptor.isBarlineControlItem {
                 section = switch descriptor.title {
@@ -142,8 +142,15 @@ public enum GoldenGateMenuBarSnapshotBuilder {
                     hiddenControlBounds: hiddenControl.bounds,
                     alwaysHiddenControlBounds: alwaysHiddenControl?.bounds
                 ) else {
-                    throw MenuBarBackendError.unavailableCapability(
-                        "unambiguous Barline section geometry"
+                    // A third-party status item can publish a frame that spans
+                    // Barline's divider attachment seam. Fail closed for that
+                    // item without discarding the rest of a valid inventory:
+                    // keep it visible and prohibit concealment until macOS
+                    // reports unambiguous geometry on a later refresh.
+                    return descriptor.replacing(
+                        section: .visible,
+                        isMovable: false,
+                        canBeHidden: false
                     )
                 }
                 section = classified
