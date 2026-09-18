@@ -233,12 +233,31 @@ final class BarlineShelfPanel: NSPanel {
                 CGPoint(x: screen.frame.maxX - frame.width, y: originY)
             }
 
+            func barlineIconOrigin(centersWhenEdgeClamped: Bool) -> CGPoint? {
+                guard let controlItem = appState.itemManager.itemCache.managedItems.first(
+                    matching: .visibleControlItem
+                ) else { return nil }
+                return CGPoint(
+                    x: ShelfPlacementPolicy.originX(
+                        screenMinX: screen.frame.minX,
+                        screenMaxX: screen.frame.maxX,
+                        shelfWidth: frame.width,
+                        anchorMidX: controlItem.bounds.midX,
+                        centersWhenEdgeClamped: centersWhenEdgeClamped
+                    ),
+                    y: originY
+                )
+            }
+
             switch barlineShelfLocation {
             case .dynamic:
                 if appState.hidEventManager.isMouseInsideEmptyMenuBarSpace(appState: appState, screen: screen) {
                     return getOrigin(for: .mousePointer)
                 }
-                return getOrigin(for: .barlineIcon)
+                return barlineIconOrigin(centersWhenEdgeClamped: true) ?? CGPoint(
+                    x: screen.frame.midX - frame.width / 2,
+                    y: originY
+                )
             case .mousePointer:
                 guard let location = MouseHelpers.locationAppKit else {
                     return getOrigin(for: .barlineIcon)
@@ -253,18 +272,7 @@ final class BarlineShelfPanel: NSPanel {
 
                 return CGPoint(x: (location.x - frame.width / 2).clamped(to: lowerBound ... upperBound), y: originY)
             case .barlineIcon:
-                let lowerBound = screen.frame.minX
-                let upperBound = screen.frame.maxX - frame.width
-
-                guard
-                    lowerBound <= upperBound,
-                    let controlItem = appState.itemManager.itemCache.managedItems.first(matching: .visibleControlItem)
-                else {
-                    return originForRightOfScreen
-                }
-                let itemBounds = controlItem.bounds
-
-                return CGPoint(x: (itemBounds.midX - frame.width / 2).clamped(to: lowerBound ... upperBound), y: originY)
+                return barlineIconOrigin(centersWhenEdgeClamped: false) ?? originForRightOfScreen
             }
         }
 

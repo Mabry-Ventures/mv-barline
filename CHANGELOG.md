@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.35 (build 112) — September 17, 2026
+
+- Center the shelf within its display when Dynamic placement would otherwise
+  clamp it flush against the left or right edge, while preserving explicit
+  Barline-icon placement for users who select it.
+
 ## 1.0.34 (build 111) — September 17, 2026
 
 - Keep a macOS 27 item with ambiguous divider-overlap geometry visible,
