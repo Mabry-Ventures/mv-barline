@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.41 (build 118) — September 17, 2026
+
+- Keep the shelf visible when a macOS 27 Mac is operated through Screen
+  Sharing instead of allowing WindowServer to classify it as unshareable.
+
 ## 1.0.40 (build 117) — September 17, 2026
 
 - Force the nonactivating shelf panel to composite on macOS 27 when Barline is

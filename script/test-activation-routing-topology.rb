@@ -108,6 +108,10 @@ unless shelf.match?(/if #available\(macOS 27\.0, \*\) \{\s*orderFrontRegardless\
   abort('macOS 27 shelf presentation must force accessory-panel compositing')
 end
 
+unless shelf.include?('sharingType = .readOnly')
+  abort('the shelf must remain visible through Screen Sharing')
+end
+
 unless concealment.include?('AsyncExclusiveOperationGate()') &&
        concealment.include?('TemporaryRevealLedger()') &&
        concealment.match?(/candidateLedger = temporaryRevealLedger\.beginning\(item\).*?applyCurrentState\(temporaryRevealLedger: candidateLedger\).*?temporaryRevealLedger = candidateLedger/m) &&

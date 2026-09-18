@@ -128,6 +128,10 @@ final class BarlineShelfPanel: NSPanel {
         isFloatingPanel = true
         hidesOnDeactivate = false
         canHide = false
+        // macOS 27 defaults some accessory-app panels to an unshareable
+        // WindowServer surface. The shelf is ordinary user interface and must
+        // remain visible when the Mac is operated through Screen Sharing.
+        sharingType = .readOnly
         ignoresMouseEvents = false
         animationBehavior = .none
         backgroundColor = .clear
