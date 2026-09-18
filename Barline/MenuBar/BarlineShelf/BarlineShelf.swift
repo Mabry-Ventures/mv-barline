@@ -339,10 +339,12 @@ final class BarlineShelfPanel: NSPanel {
         // setup finishes. On macOS 27, do not render a saved shelf while its
         // native copies are still visible: first reconcile the current
         // concealment transaction, then revalidate this presentation request.
-        await appState.waitForMenuBarItemSetup()
-        guard await appState.itemManager.prepareForShelfPresentation() else {
-            logger.error("Shelf presentation rejected: concealment was not ready")
-            return false
+        if #available(macOS 27.0, *) {
+            await appState.waitForMenuBarItemSetup()
+            guard await appState.itemManager.prepareForShelfPresentation() else {
+                logger.error("Shelf presentation rejected: concealment was not ready")
+                return false
+            }
         }
         guard request.generation == presentationGeneration,
               currentSection == request.section,

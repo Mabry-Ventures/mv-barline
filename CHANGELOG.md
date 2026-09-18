@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.38 (build 115) — September 17, 2026
+
+- Load macOS 27's dyld-cache-only MenuBarClientCore framework lazily, matching
+  the runtime contract used by working Golden Gate menu-bar implementations.
+- Record a bounded local diagnostic when the framework or required assessment
+  classes cannot be resolved, replacing the previous silent shelf no-op.
+- Keep the native-concealment readiness wait confined to macOS 27 so macOS 26
+  cold-launch shelf clicks remain immediate.
+
 ## 1.0.37 (build 114) — September 17, 2026
 
 - Recover macOS 27 native concealment when the menu service's first private-

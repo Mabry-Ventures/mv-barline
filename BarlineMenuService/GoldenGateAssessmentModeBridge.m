@@ -46,10 +46,22 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
 #endif
         if (confirmedAvailable) return YES;
         if (!frameworkHandle) {
+            // MenuBarClientCore is delivered from the dyld shared cache on
+            // macOS 27; its framework directory contains no standalone Mach-O
+            // image. Resolve it lazily, matching dyld's supported platform-
+            // binary path. RTLD_NOW can reject the cache image while eagerly
+            // resolving implementation-only dependencies that Barline never
+            // calls, leaving the Objective-C classes unavailable even though
+            // the assessment API itself is present.
             frameworkHandle = dlopen(
                 "/System/Library/PrivateFrameworks/MenuBarClientCore.framework/MenuBarClientCore",
-                RTLD_NOW | RTLD_LOCAL
+                RTLD_LAZY | RTLD_LOCAL
             );
+            if (!frameworkHandle) {
+                const char *error = dlerror();
+                NSLog(@"[BarlineAssessment] MenuBarClientCore load failed: %s",
+                      error ?: "unknown dyld error");
+            }
         }
         Class configurationClass = NSClassFromString(@"MBAssessmentModeConfiguration");
         Class assertionClass = NSClassFromString(@"MBAssessmentModeAssertion");
@@ -65,6 +77,10 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
                 @"activateWithConfiguration:completionHandler:"
             )] &&
             [assertionClass instancesRespondToSelector:NSSelectorFromString(@"invalidate")];
+        if (!confirmedAvailable && frameworkAvailable) {
+            NSLog(@"[BarlineAssessment] runtime surface unavailable config=%d assertion=%d",
+                  configurationClass != Nil, assertionClass != Nil);
+        }
         return confirmedAvailable;
     }
 }
