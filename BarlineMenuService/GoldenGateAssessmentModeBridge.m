@@ -21,18 +21,43 @@
 
 @implementation BLNGoldenGateAssessmentController
 
+#if defined(BARLINE_BRIDGE_TESTING)
+static NSUInteger BLNGoldenGateForcedRuntimeMisses;
+
+void BLNGoldenGateAssessmentForceRuntimeMisses(NSUInteger count) {
+    BLNGoldenGateForcedRuntimeMisses = count;
+}
+#endif
+
 static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
     static void *frameworkHandle;
-    static BOOL runtimeAvailable;
-    static dispatch_once_t onceToken;
-    dispatch_once(&onceToken, ^{
-        frameworkHandle = dlopen(
-            "/System/Library/PrivateFrameworks/MenuBarClientCore.framework/MenuBarClientCore",
-            RTLD_NOW | RTLD_LOCAL
-        );
+    static BOOL confirmedAvailable;
+
+    // The helper can be asked for capabilities while launch services are still
+    // bringing its private runtime into the process. A negative result at that
+    // boundary is not authoritative for the lifetime of the helper. Cache only
+    // a confirmed positive result and allow later user-driven probes to recover.
+    @synchronized (BLNGoldenGateAssessmentController.class) {
+#if defined(BARLINE_BRIDGE_TESTING)
+        if (BLNGoldenGateForcedRuntimeMisses > 0) {
+            BLNGoldenGateForcedRuntimeMisses -= 1;
+            return NO;
+        }
+#endif
+        if (confirmedAvailable) return YES;
+        if (!frameworkHandle) {
+            frameworkHandle = dlopen(
+                "/System/Library/PrivateFrameworks/MenuBarClientCore.framework/MenuBarClientCore",
+                RTLD_NOW | RTLD_LOCAL
+            );
+        }
         Class configurationClass = NSClassFromString(@"MBAssessmentModeConfiguration");
         Class assertionClass = NSClassFromString(@"MBAssessmentModeAssertion");
-        runtimeAvailable = frameworkHandle && configurationClass && assertionClass &&
+        BOOL frameworkAvailable = frameworkHandle != NULL;
+#if defined(BARLINE_BRIDGE_TESTING)
+        frameworkAvailable = YES;
+#endif
+        confirmedAvailable = frameworkAvailable && configurationClass && assertionClass &&
             [configurationClass instancesRespondToSelector:NSSelectorFromString(
                 @"initWithAllowedSystemItems:allowedBundleIdentifiers:"
             )] &&
@@ -40,8 +65,8 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
                 @"activateWithConfiguration:completionHandler:"
             )] &&
             [assertionClass instancesRespondToSelector:NSSelectorFromString(@"invalidate")];
-    });
-    return runtimeAvailable;
+        return confirmedAvailable;
+    }
 }
 
 - (uint64_t)beginConcealedBundleIdentifiers:(NSArray<NSString *> *)concealedBundleIdentifiers

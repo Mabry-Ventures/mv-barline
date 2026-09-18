@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.37 (build 114) — September 17, 2026
+
+- Recover macOS 27 native concealment when the menu service's first private-
+  runtime probe occurs too early during launch, so clicking Barline opens the
+  shelf without briefly duplicating its hidden items in the system menu bar.
+
 ## 1.0.36 (build 113) — September 17, 2026
 
 - Center Dynamic shelf placement consistently instead of retaining a

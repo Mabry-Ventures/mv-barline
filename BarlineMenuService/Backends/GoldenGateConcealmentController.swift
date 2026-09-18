@@ -6,7 +6,8 @@ import OSLog
 final class GoldenGateConcealmentController: @unchecked Sendable {
     private let logger = Logger(category: "GoldenGateConcealmentController")
     private let transactionGate = AsyncExclusiveOperationGate()
-    private let opaqueController: UnsafeMutableRawPointer?
+    private let controllerLock = NSLock()
+    private var opaqueController: UnsafeMutableRawPointer?
     private var desiredConfiguration = MenuBarConcealmentConfiguration(
         visibleItemIDs: [], concealedItemIDs: []
     )
@@ -18,14 +19,18 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     }
 
     deinit {
-        if let opaqueController {
-            BLNGoldenGateAssessmentInvalidate(opaqueController)
-            BLNGoldenGateAssessmentDestroy(opaqueController)
+        controllerLock.lock()
+        let controller = opaqueController
+        opaqueController = nil
+        controllerLock.unlock()
+        if let controller {
+            BLNGoldenGateAssessmentInvalidate(controller)
+            BLNGoldenGateAssessmentDestroy(controller)
         }
     }
 
     var isAvailable: Bool {
-        opaqueController != nil
+        controller() != nil
     }
 
     func configure(_ configuration: MenuBarConcealmentConfiguration) async throws {
@@ -66,8 +71,8 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         // caller's cancellation state.
         await Task.detached { [self] in
             try? await transactionGate.withLock { [self] in
-                if let opaqueController {
-                    BLNGoldenGateAssessmentInvalidate(opaqueController)
+                if let controller = controller(createIfNeeded: false) {
+                    BLNGoldenGateAssessmentInvalidate(controller)
                 }
                 temporaryRevealLedger = TemporaryRevealLedger()
                 appliedResolution = nil
@@ -78,7 +83,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     private func applyCurrentState(
         temporaryRevealLedger: TemporaryRevealLedger? = nil
     ) async throws {
-        guard let opaqueController else {
+        guard let opaqueController = controller() else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
         }
         let temporarilyVisible = (temporaryRevealLedger ?? self.temporaryRevealLedger).visibleItemIDs
@@ -132,5 +137,17 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             logger.error("Golden Gate assertion transaction aborted before commit")
             throw error
         }
+    }
+
+    /// Returns the retained bridge controller, retrying creation after a
+    /// transient launch-time runtime miss. Access is synchronous because the
+    /// backend capability probe is synchronous and may run outside the actor.
+    private func controller(createIfNeeded: Bool = true) -> UnsafeMutableRawPointer? {
+        controllerLock.lock()
+        defer { controllerLock.unlock() }
+        if opaqueController == nil, createIfNeeded {
+            opaqueController = BLNGoldenGateAssessmentCreate()
+        }
+        return opaqueController
     }
 }

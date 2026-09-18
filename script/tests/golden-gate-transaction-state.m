@@ -1,4 +1,33 @@
 #import <AppKit/AppKit.h>
+#define BARLINE_BRIDGE_TESTING 1
+
+@interface MBAssessmentModeConfiguration : NSObject
+- (instancetype)initWithAllowedSystemItems:(NSArray<NSNumber *> *)items
+                  allowedBundleIdentifiers:(NSArray<NSString *> *)identifiers;
+@end
+
+@implementation MBAssessmentModeConfiguration
+- (instancetype)initWithAllowedSystemItems:(__unused NSArray<NSNumber *> *)items
+                  allowedBundleIdentifiers:(__unused NSArray<NSString *> *)identifiers {
+    return [super init];
+}
+@end
+
+
+@interface MBAssessmentModeAssertion : NSObject
+- (void)activateWithConfiguration:(id)configuration
+                completionHandler:(void (^)(NSError * _Nullable error))completion;
+- (void)invalidate;
+@end
+
+@implementation MBAssessmentModeAssertion
+- (void)activateWithConfiguration:(__unused id)configuration
+                completionHandler:(void (^)(NSError * _Nullable error))completion {
+    completion(nil);
+}
+- (void)invalidate {}
+@end
+
 #import "../../BarlineMenuService/GoldenGateAssessmentModeBridge.m"
 
 @interface BLNTestAssertion : NSObject
@@ -18,6 +47,14 @@ static void BLNRequire(BOOL condition, NSString *message) {
 
 int main(void) {
     @autoreleasepool {
+        BLNGoldenGateAssessmentForceRuntimeMisses(1);
+        BLNRequire(BLNGoldenGateAssessmentCreate() == NULL,
+                   @"transient runtime miss rejects the first acquisition");
+        void *recoveredController = BLNGoldenGateAssessmentCreate();
+        BLNRequire(recoveredController != NULL,
+                   @"runtime acquisition recovers after a transient miss");
+        BLNGoldenGateAssessmentDestroy(recoveredController);
+
         BLNGoldenGateAssessmentController *controller = [BLNGoldenGateAssessmentController new];
         BLNTestAssertion *accepted = [BLNTestAssertion new];
         BLNTestAssertion *aborted = [BLNTestAssertion new];
