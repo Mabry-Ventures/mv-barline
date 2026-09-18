@@ -123,6 +123,7 @@ barline_resolve_core_build_products() {
         fi
     fi
 
-    ((${#BARLINE_CORE_OBJECTS[@]})) && [[ -n "$BARLINE_CORE_MODULE_PATH" ]] ||
+    if ((${#BARLINE_CORE_OBJECTS[@]} == 0)) || [[ -z "$BARLINE_CORE_MODULE_PATH" ]]; then
         barline_die "BarlineCore build products are unavailable for a standalone probe"
+    fi
 }
