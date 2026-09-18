@@ -20,6 +20,9 @@ public enum PrivacySafeDiagnostics {
             case .sideEffectRecoveryFailed: return "workspace_recovery_failed"
             }
         }
+        if error is MenuBarAuthorityRefreshError {
+            return "stale_generation"
+        }
         if error is MenuBarInputIdleTimeoutError {
             return "input_idle_timeout"
         }

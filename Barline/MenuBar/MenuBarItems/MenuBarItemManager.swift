@@ -1124,53 +1124,16 @@ extension MenuBarItemManager {
               appState.permissions.accessibility.hasPermission
         else { throw EventError.cannotComplete }
 
+        // A background refresh (app launch/quit, control-item move) can bump
+        // the authority generation between our refresh and the mutation.
+        // Nothing was written in that case, so retry once on a fresh snapshot.
         do {
-            let snapshot = try await appState.compatibilityCoordinator.refresh()
-            guard let resolvedID = GoldenGateMenuBarIdentityResolver.resolve(
-                itemID,
-                among: snapshot.items.map(\.id)
-            ),
-                let descriptor = snapshot.items.first(where: { $0.id == resolvedID }),
-                descriptor.isMovable
-            else { throw MenuBarBackendError.staleItem(itemID) }
-
-            let destinationSection: BarlineCore.MenuBarSection = switch section {
-            case .visible: .visible
-            case .hidden: .hidden
-            case .alwaysHidden: .alwaysHidden
+            do {
+                try await assignOnce(itemID: itemID, to: section, index: index, appState: appState)
+            } catch MenuBarAuthorityRefreshError.staleGeneration {
+                logger.notice("Golden Gate layout assignment retrying after stale generation")
+                try await assignOnce(itemID: itemID, to: section, index: index, appState: appState)
             }
-            if descriptor.section == destinationSection {
-                let sectionItems = snapshot.items.filter {
-                    $0.section == destinationSection && !$0.isBarlineControlItem
-                }
-                guard let sourceIndex = sectionItems.firstIndex(where: {
-                    $0.id == resolvedID
-                }) else { return }
-                var destinationIndex = min(max(index, 0), sectionItems.count)
-                if sourceIndex < destinationIndex {
-                    destinationIndex -= 1
-                }
-                guard sourceIndex != destinationIndex else { return }
-                if destinationSection == .visible {
-                    throw MenuBarBackendError.unavailableCapability(
-                        "macOS 27 native menu bar reorder"
-                    )
-                }
-            }
-            let priorProfileID = await appState.compatibilityCoordinator.activeProfileID
-            _ = try await appState.compatibilityCoordinator.perform(
-                .move(MenuBarMoveOperation(
-                    itemID: resolvedID,
-                    section: destinationSection,
-                    index: index,
-                    destinationDisplayID: descriptor.displayID
-                )),
-                expectedGeneration: snapshot.generation
-            )
-            await appState.profileManager.clearActiveProfileAuthority(
-                ifMatches: priorProfileID
-            )
-            await cacheItemsRegardless()
         } catch {
             logger.error(
                 "Golden Gate layout assignment failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
@@ -1179,6 +1142,61 @@ extension MenuBarItemManager {
             // an unknown native state that requires user review.
             throw error
         }
+    }
+
+    @available(macOS 27.0, *)
+    private func assignOnce(
+        itemID: MenuBarItemID,
+        to section: MenuBarSection.Name,
+        index: Int,
+        appState: AppState
+    ) async throws {
+        let snapshot = try await appState.compatibilityCoordinator.refresh()
+        guard let resolvedID = GoldenGateMenuBarIdentityResolver.resolve(
+            itemID,
+            among: snapshot.items.map(\.id)
+        ),
+            let descriptor = snapshot.items.first(where: { $0.id == resolvedID }),
+            descriptor.isMovable
+        else { throw MenuBarBackendError.staleItem(itemID) }
+
+        let destinationSection: BarlineCore.MenuBarSection = switch section {
+        case .visible: .visible
+        case .hidden: .hidden
+        case .alwaysHidden: .alwaysHidden
+        }
+        if descriptor.section == destinationSection {
+            let sectionItems = snapshot.items.filter {
+                $0.section == destinationSection && !$0.isBarlineControlItem
+            }
+            guard let sourceIndex = sectionItems.firstIndex(where: {
+                $0.id == resolvedID
+            }) else { return }
+            var destinationIndex = min(max(index, 0), sectionItems.count)
+            if sourceIndex < destinationIndex {
+                destinationIndex -= 1
+            }
+            guard sourceIndex != destinationIndex else { return }
+            if destinationSection == .visible {
+                throw MenuBarBackendError.unavailableCapability(
+                    "macOS 27 native menu bar reorder"
+                )
+            }
+        }
+        let priorProfileID = await appState.compatibilityCoordinator.activeProfileID
+        _ = try await appState.compatibilityCoordinator.perform(
+            .move(MenuBarMoveOperation(
+                itemID: resolvedID,
+                section: destinationSection,
+                index: index,
+                destinationDisplayID: descriptor.displayID
+            )),
+            expectedGeneration: snapshot.generation
+        )
+        await appState.profileManager.clearActiveProfileAuthority(
+            ifMatches: priorProfileID
+        )
+        await cacheItemsRegardless()
     }
 
     func click(

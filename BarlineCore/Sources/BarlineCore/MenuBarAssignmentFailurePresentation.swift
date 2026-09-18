@@ -9,6 +9,9 @@ public enum MenuBarAssignmentFailurePresentation {
         if case MenuBarBackendError.mutationRecoveryFailed = error {
             return "Barline could not verify that the previous layout was restored. Open Menu Bar Layout to review the current state before trying again."
         }
-        return "Your existing menu bar layout is unchanged. Please try again."
+        // The privacy-safe code lets a screenshot of this alert identify the
+        // failing stage without a support bundle.
+        let code = PrivacySafeDiagnostics.errorCode(error)
+        return "Your existing menu bar layout is unchanged. Please try again. (Reference: \(code))"
     }
 }

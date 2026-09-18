@@ -77,6 +77,10 @@ final class MenuBarSearchPanel: NSPanel {
         isFloatingPanel = true
         level = .floating
         collectionBehavior = [.fullScreenAuxiliary, .ignoresCycle, .moveToActiveSpace]
+        // Match the shelf: macOS 27 can hide or refuse to composite
+        // nonactivating accessory panels unless these are set explicitly.
+        hidesOnDeactivate = false
+        sharingType = .readOnly
     }
 
     /// Performs the initial setup of the panel.
@@ -148,7 +152,15 @@ final class MenuBarSearchPanel: NSPanel {
             )
 
             cascadeTopLeft(from: topLeft)
-            makeKeyAndOrderFront(nil)
+            // macOS 27 can acknowledge ordering for an inactive accessory app
+            // without compositing the nonactivating panel (see BarlineShelf).
+            if #available(macOS 27.0, *) {
+                orderFrontRegardless()
+                makeKey()
+            } else {
+                makeKeyAndOrderFront(nil)
+            }
+            displayIfNeeded()
 
             mouseDownMonitor.start()
             keyDownMonitor.start()
