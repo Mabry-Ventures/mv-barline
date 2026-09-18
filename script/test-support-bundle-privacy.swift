@@ -76,7 +76,13 @@ struct SupportBundlePrivacyTests {
                 extrasMenuBarCount: 2,
                 rawChildCount: 5,
                 acceptedEntryCount: 4,
-                terminalCode: "inventory_available"
+                terminalCode: "inventory_available",
+                activeDisplayCount: 1,
+                activeScreenAvailable: true,
+                activeScreenInDisplayList: true,
+                hiddenControlCount: 1,
+                alwaysHiddenControlCount: 1,
+                snapshotTerminalCode: "snapshot_available"
             ),
             lastSnapshotAt: Date(timeIntervalSince1970: 90),
             lastSnapshotRejectionCode: "snapshot.stale",
@@ -95,9 +101,9 @@ struct SupportBundlePrivacyTests {
         }
         guard
             let object = try JSONSerialization.jsonObject(with: preview.data) as? [String: Any],
-            object["schemaVersion"] as? Int == 3,
+            object["schemaVersion"] as? Int == 4,
             object["itemDiscovery"] as? [String: Any] != nil,
-            object["goldenGateAXInventory"] as? [String: Any] != nil,
+            (object["goldenGateAXInventory"] as? [String: Any])?["snapshotTerminalCode"] as? String == "snapshot_available",
             (object["recentErrorCodes"] as? [String])?.count == 25,
             preview.data.count < 64 * 1024
         else {

@@ -23,6 +23,32 @@ actor GoldenGateAXSnapshotProvider {
         diagnosticLock.withLock { latestDiagnostic }
     }
 
+    private nonisolated static func updateSnapshotDiagnostic(
+        activeDisplayCount: Int,
+        activeScreenAvailable: Bool,
+        activeScreenInDisplayList: Bool,
+        snapshotTerminalCode: String
+    ) {
+        diagnosticLock.withLock {
+            guard let current = latestDiagnostic else { return }
+            latestDiagnostic = .init(
+                runningApplicationCount: current.runningApplicationCount,
+                applicationElementCount: current.applicationElementCount,
+                extrasMenuBarReadCounts: current.extrasMenuBarReadCounts,
+                extrasMenuBarCount: current.extrasMenuBarCount,
+                rawChildCount: current.rawChildCount,
+                acceptedEntryCount: current.acceptedEntryCount,
+                terminalCode: current.terminalCode,
+                activeDisplayCount: activeDisplayCount,
+                activeScreenAvailable: activeScreenAvailable,
+                activeScreenInDisplayList: activeScreenInDisplayList,
+                hiddenControlCount: current.hiddenControlCount,
+                alwaysHiddenControlCount: current.alwaysHiddenControlCount,
+                snapshotTerminalCode: snapshotTerminalCode
+            )
+        }
+    }
+
     private struct ExplicitLayout: Codable {
         let version: Int
         let assignments: [GoldenGateLogicalAssignment]
@@ -334,9 +360,17 @@ actor GoldenGateAXSnapshotProvider {
                 hardwareFingerprint: hardwareFingerprint(for: displayID)
             )
         }
-        guard let activeScreen = NSScreen.screenWithActiveMenuBar,
-              activeDisplays.contains(activeScreen.displayID)
-        else {
+        let activeScreen = NSScreen.screenWithActiveMenuBar
+        let activeScreenInDisplayList = activeScreen.map {
+            activeDisplays.contains($0.displayID)
+        } ?? false
+        guard let activeScreen, activeScreenInDisplayList else {
+            Self.updateSnapshotDiagnostic(
+                activeDisplayCount: activeDisplays.count,
+                activeScreenAvailable: activeScreen != nil,
+                activeScreenInDisplayList: activeScreenInDisplayList,
+                snapshotTerminalCode: "active_menu_bar_display_unavailable"
+            )
             throw MenuBarBackendError.unavailableCapability("active menu bar display")
         }
         generation &+= 1
@@ -357,21 +391,35 @@ actor GoldenGateAXSnapshotProvider {
             verificationAssignments ?? [:],
             uniquingKeysWith: { _, proposed in proposed }
         )
-        let built = try GoldenGateMenuBarSnapshotBuilder.build(
-            observations: observations,
-            displayIdentities: displayIdentities,
-            activeDisplayID: stableDisplayID(activeScreen.displayID),
-            activeDisplayBounds: MenuBarRect(
-                x: activeBounds.minX,
-                y: activeBounds.minY,
-                width: activeBounds.width,
-                height: activeBounds.height
-            ),
-            appSigningIdentifier: signingIdentifier,
-            rememberedSections: hiddenControlUsesLiveGeometry ? [:] : rememberedSections,
-            assignedSections: effectiveAssignments.mapValues(\.section),
-            generation: generation
-        )
+        let built: MenuBarSnapshot
+        do {
+            built = try GoldenGateMenuBarSnapshotBuilder.build(
+                observations: observations,
+                displayIdentities: displayIdentities,
+                activeDisplayID: stableDisplayID(activeScreen.displayID),
+                activeDisplayBounds: MenuBarRect(
+                    x: activeBounds.minX,
+                    y: activeBounds.minY,
+                    width: activeBounds.width,
+                    height: activeBounds.height
+                ),
+                appSigningIdentifier: signingIdentifier,
+                rememberedSections: hiddenControlUsesLiveGeometry ? [:] : rememberedSections,
+                assignedSections: effectiveAssignments.mapValues(\.section),
+                generation: generation
+            )
+        } catch {
+            Self.updateSnapshotDiagnostic(
+                activeDisplayCount: activeDisplays.count,
+                activeScreenAvailable: true,
+                activeScreenInDisplayList: true,
+                snapshotTerminalCode: observations.contains {
+                    $0.bundleIdentifier.caseInsensitiveCompare(signingIdentifier) == .orderedSame &&
+                        $0.stableTitle == "Barline.ControlItem.Hidden"
+                } ? "snapshot_builder_rejected_geometry" : "missing_hidden_control"
+            )
+            throw error
+        }
         var result = GoldenGateRetainedInventoryPolicy.merging(
             live: built,
             retainedDescriptors: retainedDescriptors,
@@ -419,6 +467,12 @@ actor GoldenGateAXSnapshotProvider {
         }
         cachedAt = now
         cachedSnapshot = result
+        Self.updateSnapshotDiagnostic(
+            activeDisplayCount: activeDisplays.count,
+            activeScreenAvailable: true,
+            activeScreenInDisplayList: true,
+            snapshotTerminalCode: "snapshot_available"
+        )
         logger.info(
             "Main-process Golden Gate inventory completed: items=\(result.items.count, privacy: .public), controls=\(result.items.count(where: \.isBarlineControlItem), privacy: .public)"
         )
@@ -1720,7 +1774,21 @@ actor GoldenGateAXSnapshotProvider {
             extrasMenuBarCount: extrasMenuBarCount,
             rawChildCount: rawChildCount,
             acceptedEntryCount: accepted.count,
-            terminalCode: terminalCode
+            terminalCode: terminalCode,
+            activeDisplayCount: 0,
+            activeScreenAvailable: false,
+            activeScreenInDisplayList: false,
+            hiddenControlCount: accepted.count {
+                $0.observation.bundleIdentifier.caseInsensitiveCompare(
+                    Bundle.main.bundleIdentifier ?? "com.mabryventures.Barline"
+                ) == .orderedSame && $0.observation.stableTitle == "Barline.ControlItem.Hidden"
+            },
+            alwaysHiddenControlCount: accepted.count {
+                $0.observation.bundleIdentifier.caseInsensitiveCompare(
+                    Bundle.main.bundleIdentifier ?? "com.mabryventures.Barline"
+                ) == .orderedSame && $0.observation.stableTitle == "Barline.ControlItem.AlwaysHidden"
+            },
+            snapshotTerminalCode: "inventory_collected"
         )
         Self.diagnosticLock.withLock {
             Self.latestDiagnostic = diagnostic

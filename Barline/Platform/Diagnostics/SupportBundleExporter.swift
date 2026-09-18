@@ -19,6 +19,12 @@ struct DiagnosticBundle: Codable, Sendable {
         let rawChildCount: Int
         let acceptedEntryCount: Int
         let terminalCode: String
+        let activeDisplayCount: Int
+        let activeScreenAvailable: Bool
+        let activeScreenInDisplayList: Bool
+        let hiddenControlCount: Int
+        let alwaysHiddenControlCount: Int
+        let snapshotTerminalCode: String
     }
 
     struct Application: Codable, Sendable {
@@ -101,7 +107,7 @@ actor SupportBundleExporter {
             return value
         }
         let bundle = DiagnosticBundle(
-            schemaVersion: 3,
+            schemaVersion: 4,
             generatedAt: now,
             application: .init(
                 version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",

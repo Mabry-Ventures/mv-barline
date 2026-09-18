@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.33 (build 110) — September 17, 2026
+
+- Distinguish active-display resolution, missing Barline divider controls, and
+  section-geometry rejection after a successful macOS 27 Accessibility
+  inventory, using only bounded counts and fixed diagnostic codes.
+
 ## 1.0.32 (build 109) — September 17, 2026
 
 - Preserve privacy-safe macOS 27 Accessibility result categories and bounded
