@@ -213,6 +213,7 @@ struct AdvancedSettingsPane: View {
                     compatibility: health,
                     capabilities: capabilities,
                     itemDiscovery: appState.itemManager.itemDiscoveryDiagnostics,
+                    goldenGateAXInventory: GoldenGateAXSnapshotProvider.diagnosticSnapshot(),
                     lastSnapshotAt: snapshot?.capturedAt,
                     lastSnapshotRejectionCode: nil,
                     searchAvailabilityCode: Self.searchAvailabilityCode(),

@@ -49,6 +49,7 @@ struct SupportBundlePrivacyTests {
                 compatibility: .init(backendName: "Tahoe", state: .degraded),
                 capabilities: capabilities,
                 itemDiscovery: .init(),
+                goldenGateAXInventory: nil,
                 lastSnapshotAt: nil,
                 lastSnapshotRejectionCode: nil,
                 searchAvailabilityCode: "fallback",
@@ -68,6 +69,15 @@ struct SupportBundlePrivacyTests {
             ),
             capabilities: capabilities,
             itemDiscovery: .init(),
+            goldenGateAXInventory: .init(
+                runningApplicationCount: 12,
+                applicationElementCount: 12,
+                extrasMenuBarReadCounts: ["success": 2, "cannot_complete": 1],
+                extrasMenuBarCount: 2,
+                rawChildCount: 5,
+                acceptedEntryCount: 4,
+                terminalCode: "inventory_available"
+            ),
             lastSnapshotAt: Date(timeIntervalSince1970: 90),
             lastSnapshotRejectionCode: "snapshot.stale",
             searchAvailabilityCode: "fallback",
@@ -85,8 +95,9 @@ struct SupportBundlePrivacyTests {
         }
         guard
             let object = try JSONSerialization.jsonObject(with: preview.data) as? [String: Any],
-            object["schemaVersion"] as? Int == 2,
+            object["schemaVersion"] as? Int == 3,
             object["itemDiscovery"] as? [String: Any] != nil,
+            object["goldenGateAXInventory"] as? [String: Any] != nil,
             (object["recentErrorCodes"] as? [String])?.count == 25,
             preview.data.count < 64 * 1024
         else {

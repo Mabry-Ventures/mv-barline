@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.32 (build 109) — September 17, 2026
+
+- Preserve privacy-safe macOS 27 Accessibility result categories and bounded
+  inventory counts in support bundles so a clean-machine discovery failure can
+  be distinguished from missing permissions, empty menu bars, and invalid
+  geometry without recording app names, item names, process IDs, or paths.
+- Report the terminal inventory stage instead of collapsing every
+  `AXExtrasMenuBar` failure into the same empty snapshot.
+
 ## 1.0.31 (build 108) — September 17, 2026
 
 - Keep the shared macOS 27 assignment session alive for the full app process,

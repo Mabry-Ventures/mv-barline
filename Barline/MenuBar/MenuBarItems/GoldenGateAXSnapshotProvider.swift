@@ -16,6 +16,13 @@ import Security
 /// embedded XPC service. Keep public AX inventory here in the trusted app and
 /// leave all private WindowServer access isolated in BarlineMenuService.
 actor GoldenGateAXSnapshotProvider {
+    private nonisolated(unsafe) static var latestDiagnostic: DiagnosticBundle.GoldenGateAXInventory?
+    private nonisolated static let diagnosticLock = NSLock()
+
+    nonisolated static func diagnosticSnapshot() -> DiagnosticBundle.GoldenGateAXInventory? {
+        diagnosticLock.withLock { latestDiagnostic }
+    }
+
     private struct ExplicitLayout: Codable {
         let version: Int
         let assignments: [GoldenGateLogicalAssignment]
@@ -1573,20 +1580,33 @@ actor GoldenGateAXSnapshotProvider {
 
     private func collectEntries() -> [Entry] {
         var entries = [Entry]()
-        for runningApplication in NSWorkspace.shared.runningApplications
-            where !runningApplication.isTerminated
-        {
-            guard
-                let application = AXHelpers.application(for: runningApplication),
-                let extrasMenuBar = AXHelpers.extrasMenuBar(for: application)
-            else {
+        let runningApplications = NSWorkspace.shared.runningApplications.filter {
+            !$0.isTerminated
+        }
+        var applicationElementCount = 0
+        var extrasMenuBarCount = 0
+        var rawChildCount = 0
+        var readCounts = Dictionary(
+            uniqueKeysWithValues: AXHelpers.ElementAttributeReadDisposition.allCases.map {
+                ($0.rawValue, 0)
+            }
+        )
+        for runningApplication in runningApplications {
+            guard let application = AXHelpers.application(for: runningApplication) else {
                 continue
             }
+            applicationElementCount += 1
+            let read = AXHelpers.extrasMenuBarResult(for: application)
+            readCounts[read.disposition.rawValue, default: 0] += 1
+            guard let extrasMenuBar = read.element else { continue }
+            extrasMenuBarCount += 1
 
             let bundleIdentifier = runningApplication.bundleIdentifier
                 ?? "barline.unknown-menu-owner"
             var unnamedIndex = 0
-            for child in AXHelpers.children(for: extrasMenuBar) {
+            let children = AXHelpers.children(for: extrasMenuBar)
+            rawChildCount += children.count
+            for child in children {
                 guard let bounds = AXHelpers.frame(for: child),
                       bounds.height > 0,
                       bounds.height <= Self.maximumItemHeight,
@@ -1676,12 +1696,36 @@ actor GoldenGateAXSnapshotProvider {
                 )
             }
         }
-        return deduplicatingMenuBarAgentRevends(entries).sorted {
+        let accepted = deduplicatingMenuBarAgentRevends(entries).sorted {
             if abs($0.observation.bounds.y - $1.observation.bounds.y) > Self.duplicateTolerance {
                 return $0.observation.bounds.y < $1.observation.bounds.y
             }
             return $0.observation.bounds.x < $1.observation.bounds.x
         }
+        let terminalCode = if runningApplications.isEmpty {
+            "no_running_applications"
+        } else if extrasMenuBarCount == 0 {
+            "no_extras_menu_bars"
+        } else if rawChildCount == 0 {
+            "no_extras_menu_bar_children"
+        } else if accepted.isEmpty {
+            "no_geometrically_valid_entries"
+        } else {
+            "inventory_available"
+        }
+        let diagnostic = DiagnosticBundle.GoldenGateAXInventory(
+            runningApplicationCount: runningApplications.count,
+            applicationElementCount: applicationElementCount,
+            extrasMenuBarReadCounts: readCounts,
+            extrasMenuBarCount: extrasMenuBarCount,
+            rawChildCount: rawChildCount,
+            acceptedEntryCount: accepted.count,
+            terminalCode: terminalCode
+        )
+        Self.diagnosticLock.withLock {
+            Self.latestDiagnostic = diagnostic
+        }
+        return accepted
     }
 
     /// Resolve process signing teams only while an explicit native mutation is

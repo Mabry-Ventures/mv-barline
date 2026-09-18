@@ -11,6 +11,16 @@ import Foundation
 /// It contains no screen content, item/profile names, process inventories,
 /// paths, environment values, credentials, or unbounded unified logs.
 struct DiagnosticBundle: Codable, Sendable {
+    struct GoldenGateAXInventory: Codable, Equatable, Sendable {
+        let runningApplicationCount: Int
+        let applicationElementCount: Int
+        let extrasMenuBarReadCounts: [String: Int]
+        let extrasMenuBarCount: Int
+        let rawChildCount: Int
+        let acceptedEntryCount: Int
+        let terminalCode: String
+    }
+
     struct Application: Codable, Sendable {
         let version: String
         let build: String
@@ -39,6 +49,7 @@ struct DiagnosticBundle: Codable, Sendable {
     let compatibility: Compatibility
     let capabilityFlags: MenuBarCapabilities
     let itemDiscovery: MenuBarItemDiscoveryDiagnostics
+    let goldenGateAXInventory: GoldenGateAXInventory?
     let lastSnapshotAgeSeconds: Int?
     let lastSnapshotRejectionCode: String?
     let searchAvailabilityCode: String
@@ -73,6 +84,7 @@ actor SupportBundleExporter {
         compatibility: MenuBarBackendHealth,
         capabilities: MenuBarCapabilities,
         itemDiscovery: MenuBarItemDiscoveryDiagnostics,
+        goldenGateAXInventory: DiagnosticBundle.GoldenGateAXInventory? = nil,
         lastSnapshotAt: Date?,
         lastSnapshotRejectionCode: String?,
         searchAvailabilityCode: String,
@@ -89,7 +101,7 @@ actor SupportBundleExporter {
             return value
         }
         let bundle = DiagnosticBundle(
-            schemaVersion: 2,
+            schemaVersion: 3,
             generatedAt: now,
             application: .init(
                 version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "unknown",
@@ -103,6 +115,7 @@ actor SupportBundleExporter {
             compatibility: .init(backendCode: backendCode, state: compatibility.state),
             capabilityFlags: capabilities,
             itemDiscovery: itemDiscovery,
+            goldenGateAXInventory: goldenGateAXInventory,
             lastSnapshotAgeSeconds: lastSnapshotAt.map {
                 max(0, Int(now.timeIntervalSince($0).rounded()))
             },

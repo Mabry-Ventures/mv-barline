@@ -7,6 +7,17 @@
 import Cocoa
 
 enum AXHelpers {
+    enum ElementAttributeReadDisposition: String, CaseIterable, Codable, Sendable {
+        case success
+        case noValue = "no_value"
+        case unsupported
+        case cannotComplete = "cannot_complete"
+        case invalidElement = "invalid_element"
+        case apiDisabled = "api_disabled"
+        case wrongType = "wrong_type"
+        case otherError = "other_error"
+    }
+
     /// A privacy-safe result category for a single AX string attribute read.
     /// Callers must never log the underlying value.
     enum StringAttributeReadDisposition: String, CaseIterable {
@@ -57,6 +68,40 @@ enum AXHelpers {
 
     static func extrasMenuBar(for app: Application) -> UIElement? {
         queue.sync { try? app.attribute(.extrasMenuBar) }
+    }
+
+    /// Reads the extras-menu-bar attribute without erasing the AX error. The
+    /// disposition contains no application, item, path, or process metadata.
+    static func extrasMenuBarResult(
+        for app: Application
+    ) -> (element: UIElement?, disposition: ElementAttributeReadDisposition) {
+        queue.sync {
+            var value: AnyObject?
+            let error = AXUIElementCopyAttributeValue(
+                app.element,
+                kAXExtrasMenuBarAttribute as CFString,
+                &value
+            )
+            switch error {
+            case .success:
+                guard let raw = value as! AXUIElement? else {
+                    return (nil, .wrongType)
+                }
+                return (UIElement(raw), .success)
+            case .noValue:
+                return (nil, .noValue)
+            case .attributeUnsupported:
+                return (nil, .unsupported)
+            case .cannotComplete:
+                return (nil, .cannotComplete)
+            case .invalidUIElement:
+                return (nil, .invalidElement)
+            case .apiDisabled:
+                return (nil, .apiDisabled)
+            default:
+                return (nil, .otherError)
+            }
+        }
     }
 
     static func children(for element: UIElement) -> [UIElement] {
