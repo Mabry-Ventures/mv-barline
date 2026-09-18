@@ -3,6 +3,24 @@ import Testing
 
 @Suite("Shelf placement")
 struct ShelfPlacementPolicyTests {
+    @Test("Dynamic placement is centered even when a right-side anchor fits")
+    func dynamicPlacementIsCentered() {
+        #expect(ShelfPlacementPolicy.centeredOriginX(
+            screenMinX: 0,
+            screenMaxX: 1440,
+            shelfWidth: 400
+        ) == 520)
+    }
+
+    @Test("Centered placement respects displays with negative global coordinates")
+    func centeredPlacementOnNegativeDisplay() {
+        #expect(ShelfPlacementPolicy.centeredOriginX(
+            screenMinX: -1440,
+            screenMaxX: 0,
+            shelfWidth: 400
+        ) == -920)
+    }
+
     @Test("Dynamic placement centers instead of sticking to the right edge")
     func dynamicRightEdgeFallback() {
         #expect(origin(anchor: 1420, dynamic: true) == 520)

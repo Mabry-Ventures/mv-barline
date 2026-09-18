@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.36 (build 113) — September 17, 2026
+
+- Center Dynamic shelf placement consistently instead of retaining a
+  technically valid but visually off-center menu-bar anchor.
+- Reconcile macOS 27 native concealment before the first shelf frame so saved
+  hidden items cannot appear in both the system menu bar and Barline's shelf
+  during cold-launch setup.
+
 ## 1.0.35 (build 112) — September 17, 2026
 
 - Center the shelf within its display when Dynamic placement would otherwise

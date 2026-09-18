@@ -2,6 +2,23 @@ import Foundation
 
 /// Deterministic horizontal placement for Barline's transient shelf panel.
 public enum ShelfPlacementPolicy {
+    public static func centeredOriginX(
+        screenMinX: Double,
+        screenMaxX: Double,
+        shelfWidth: Double
+    ) -> Double {
+        guard screenMinX.isFinite,
+              screenMaxX.isFinite,
+              shelfWidth.isFinite,
+              screenMaxX >= screenMinX,
+              shelfWidth > 0
+        else { return screenMinX }
+
+        let availableWidth = screenMaxX - screenMinX
+        guard shelfWidth <= availableWidth else { return screenMinX }
+        return screenMinX + (availableWidth - shelfWidth) / 2
+    }
+
     public static func originX(
         screenMinX: Double,
         screenMaxX: Double,

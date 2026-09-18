@@ -101,6 +101,7 @@ final class MenuBarItemManager: ObservableObject {
             activationNotice = "Item recovery records could not be read. Existing records have been preserved."
         }
         await cacheItemsRegardless()
+        _ = await prepareForShelfPresentation()
         configureCancellables(with: appState)
     }
 
@@ -579,33 +580,9 @@ extension MenuBarItemManager {
     func scheduleGoldenGateConcealmentSync() {
         guard #available(macOS 27.0, *) else { return }
         goldenGateConcealmentSyncDebouncer.schedule { [weak self] in
-            guard let self, let appState else { return }
-
-            var concealedSections = [BarlineCore.MenuBarSection]()
-            for sectionName in MenuBarSection.Name.allCases {
-                let shelfOwnsPresentation = MenuBarPresentationPolicy.usesShelf(
-                    requestedShelf: appState.settings.general.useBarlineShelf,
-                    systemAutoHideEnabled: appState.menuBarManager.isMenuBarHiddenBySystemUserDefaults
-                )
-                // The shelf is a separate presentation surface. Opening it
-                // must never reveal a second native copy in the system bar.
-                let shouldConceal = sectionName != .visible && (
-                    shelfOwnsPresentation ||
-                        appState.menuBarManager.section(withName: sectionName)?.isHidden == true
-                )
-                if shouldConceal {
-                    let section: BarlineCore.MenuBarSection = switch sectionName {
-                    case .visible: .visible
-                    case .hidden: .hidden
-                    case .alwaysHidden: .alwaysHidden
-                    }
-                    concealedSections.append(section)
-                }
-            }
+            guard let self else { return }
             do {
-                try await appState.compatibilityCoordinator.synchronizeConcealment(
-                    concealedSections: concealedSections
-                )
+                try await synchronizeGoldenGateConcealmentNow()
             } catch is CancellationError {
                 logger.debug("Golden Gate concealment sync was superseded")
             } catch {
@@ -614,6 +591,69 @@ extension MenuBarItemManager {
                 )
             }
         }
+    }
+
+    /// Ensures the native menu bar matches Barline's logical shelf before a
+    /// shelf frame is committed. This closes the cold-launch interval where a
+    /// saved shelf and its native items could otherwise be visible together.
+    func prepareForShelfPresentation() async -> Bool {
+        guard #available(macOS 27.0, *) else { return true }
+        await goldenGateConcealmentSyncDebouncer.cancelAndWait()
+
+        let retryPolicy = RetryPolicy(
+            maximumAttempts: 3,
+            baseDelay: .milliseconds(100),
+            maximumDelay: .milliseconds(300),
+            maximumJitterPermille: 0
+        )
+        for attempt in 0 ..< retryPolicy.maximumAttempts {
+            if attempt > 0 {
+                do {
+                    try await Task.sleep(for: retryPolicy.delay(forAttempt: attempt - 1))
+                } catch {
+                    return false
+                }
+            }
+            do {
+                try await synchronizeGoldenGateConcealmentNow()
+                return true
+            } catch is CancellationError {
+                return false
+            } catch {
+                logger.warning(
+                    "Golden Gate shelf readiness attempt failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+                )
+            }
+        }
+
+        activationNotice = "Barline could not prepare the hidden items. Please try again."
+        return false
+    }
+
+    private func synchronizeGoldenGateConcealmentNow() async throws {
+        guard let appState else {
+            throw MenuBarBackendError.operationFailed("menu bar item manager is not ready")
+        }
+
+        let shelfOwnsPresentation = MenuBarPresentationPolicy.usesShelf(
+            requestedShelf: appState.settings.general.useBarlineShelf,
+            systemAutoHideEnabled: appState.menuBarManager.isMenuBarHiddenBySystemUserDefaults
+        )
+        let concealedSections = MenuBarSection.Name.allCases.compactMap { sectionName -> BarlineCore.MenuBarSection? in
+            let shouldConceal = sectionName != .visible && (
+                shelfOwnsPresentation ||
+                    appState.menuBarManager.section(withName: sectionName)?.isHidden == true
+            )
+            guard shouldConceal else { return nil }
+            return switch sectionName {
+            case .visible: .visible
+            case .hidden: .hidden
+            case .alwaysHidden: .alwaysHidden
+            }
+        }
+        try await appState.compatibilityCoordinator.synchronizeConcealment(
+            concealedSections: concealedSections
+        )
     }
 
     /// Caches the current menu bar items, regardless of whether the

@@ -89,6 +89,12 @@ final class AppState: ObservableObject {
     private var menuBarAgentSetupReady = false
     private var menuBarAgentSetupWaiters = [CheckedContinuation<Void, Never>]()
 
+    /// The menu-bar inventory and its initial macOS 27 concealment transaction
+    /// are ready for shelf presentation. Keep this boundary narrower than the
+    /// complete app setup so profile and notification work cannot delay clicks.
+    private var menuBarItemSetupReady = false
+    private var menuBarItemSetupWaiters = [CheckedContinuation<Void, Never>]()
+
     /// Async setup actions, run once on first access.
     private lazy var setupTask = Task { @MainActor in
         settings.performSetup(with: self)
@@ -119,6 +125,7 @@ final class AppState: ObservableObject {
         )
         reconciledAccessibilityPermission = initialAccessibilityPermission
         await itemManager.performSetup(with: self)
+        markMenuBarItemSetupReady()
         imageCache.performSetup(with: self)
         updatesManager.performSetup(with: self)
         userNotificationManager.performSetup(with: self)
@@ -153,11 +160,26 @@ final class AppState: ObservableObject {
         }
     }
 
+    func waitForMenuBarItemSetup() async {
+        guard !menuBarItemSetupReady else { return }
+        await withCheckedContinuation { continuation in
+            menuBarItemSetupWaiters.append(continuation)
+        }
+    }
+
     private func markMenuBarAgentSetupReady() {
         guard !menuBarAgentSetupReady else { return }
         menuBarAgentSetupReady = true
         let waiters = menuBarAgentSetupWaiters
         menuBarAgentSetupWaiters.removeAll()
+        waiters.forEach { $0.resume() }
+    }
+
+    private func markMenuBarItemSetupReady() {
+        guard !menuBarItemSetupReady else { return }
+        menuBarItemSetupReady = true
+        let waiters = menuBarItemSetupWaiters
+        menuBarItemSetupWaiters.removeAll()
         waiters.forEach { $0.resume() }
     }
 

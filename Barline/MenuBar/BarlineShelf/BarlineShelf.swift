@@ -251,11 +251,12 @@ final class BarlineShelfPanel: NSPanel {
 
             switch barlineShelfLocation {
             case .dynamic:
-                if appState.hidEventManager.isMouseInsideEmptyMenuBarSpace(appState: appState, screen: screen) {
-                    return getOrigin(for: .mousePointer)
-                }
-                return barlineIconOrigin(centersWhenEdgeClamped: true) ?? CGPoint(
-                    x: screen.frame.midX - frame.width / 2,
+                return CGPoint(
+                    x: ShelfPlacementPolicy.centeredOriginX(
+                        screenMinX: screen.frame.minX,
+                        screenMaxX: screen.frame.maxX,
+                        shelfWidth: frame.width
+                    ),
                     y: originY
                 )
             case .mousePointer:
@@ -331,6 +332,23 @@ final class BarlineShelfPanel: NSPanel {
         }
         guard appState.navigationState.isBarlineShelfPresented else {
             logger.notice("Shelf presentation rejected: navigation state closed")
+            return false
+        }
+
+        // A status item becomes clickable before the slower compatibility
+        // setup finishes. On macOS 27, do not render a saved shelf while its
+        // native copies are still visible: first reconcile the current
+        // concealment transaction, then revalidate this presentation request.
+        await appState.waitForMenuBarItemSetup()
+        guard await appState.itemManager.prepareForShelfPresentation() else {
+            logger.error("Shelf presentation rejected: concealment was not ready")
+            return false
+        }
+        guard request.generation == presentationGeneration,
+              currentSection == request.section,
+              appState.navigationState.isBarlineShelfPresented
+        else {
+            logger.notice("Shelf presentation rejected: ownership changed during readiness")
             return false
         }
 
