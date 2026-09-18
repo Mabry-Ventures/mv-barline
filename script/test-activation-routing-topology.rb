@@ -100,6 +100,10 @@ unless concealment.include?('BLNGoldenGateAssessmentCreate()') &&
   abort('Golden Gate concealment bridge is not compile-time linked')
 end
 
+unless concealment.match?(/if appliedResolution == resolved \{\s*return\s*\}/m)
+  abort('Golden Gate concealment must preserve an unchanged committed assertion')
+end
+
 unless concealment.include?('AsyncExclusiveOperationGate()') &&
        concealment.include?('TemporaryRevealLedger()') &&
        concealment.match?(/candidateLedger = temporaryRevealLedger\.beginning\(item\).*?applyCurrentState\(temporaryRevealLedger: candidateLedger\).*?temporaryRevealLedger = candidateLedger/m) &&

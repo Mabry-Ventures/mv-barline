@@ -97,6 +97,15 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             configuration,
             barlineBundleIdentifier: "com.mabryventures.Barline"
         )
+        // Assessment-mode assertions are stateful. Replacing a healthy
+        // assertion with an identical one on every shelf click can be rejected
+        // by macOS 27 and turns an otherwise-ready shelf into a silent no-op.
+        // Keep the committed assertion when the effective allowlists have not
+        // changed; real visibility changes still flow through the transactional
+        // activate-then-commit path below.
+        if appliedResolution == resolved {
+            return
+        }
         let bundles = resolved.concealedBundleIdentifiers.sorted() as CFArray
         let systemItems = resolved.allowedSystemItemIdentifiers.sorted().map(NSNumber.init) as CFArray
         let transaction = BLNGoldenGateAssessmentBegin(opaqueController, bundles, systemItems)

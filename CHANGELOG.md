@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.39 (build 116) — September 17, 2026
+
+- Preserve an unchanged, successfully committed macOS 27 concealment assertion
+  when opening the shelf instead of replacing it with a duplicate transaction
+  that the OS can reject.
+
 ## 1.0.38 (build 115) — September 17, 2026
 
 - Load macOS 27's dyld-cache-only MenuBarClientCore framework lazily, matching
