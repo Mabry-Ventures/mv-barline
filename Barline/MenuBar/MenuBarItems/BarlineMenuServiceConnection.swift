@@ -364,6 +364,29 @@ extension BarlineMenuService {
             oldSession?.cancel(reason: reason)
         }
 
+        /// Reads leave no native state behind when they run out of time.
+        private static func isReadOnly(_ request: Request) -> Bool {
+            switch request {
+            case .capabilities, .snapshot, .health, .shelfPresentationObservation:
+                true
+            default:
+                false
+            }
+        }
+
+        /// Privacy-safe request label for diagnostics.
+        private static func requestCode(_ request: Request) -> String {
+            switch request {
+            case .start: "start"
+            case .capabilities: "capabilities"
+            case .snapshot: "snapshot"
+            case .health: "health"
+            case .restart: "restart"
+            case .shelfPresentationObservation: "shelf_presentation_observation"
+            default: "mutation"
+            }
+        }
+
         func send(request: Request) -> Response? {
             let semaphore = DispatchSemaphore(value: 0)
             let result = OSAllocatedUnfairLock<Response?>(initialState: nil)
@@ -372,17 +395,30 @@ extension BarlineMenuService {
                 result.withLock { $0 = response }
                 semaphore.signal()
             }
+            // A Mac with many menu bar items spends over a second building
+            // one Accessibility inventory, so the reads that carry it cannot
+            // share the one-second budget of the cheap lifecycle requests.
+            // Under-waiting here reports the helper as incapable and cancels
+            // concealment work that was about to succeed.
             let timeout: TimeInterval = switch request {
-            case .start, .capabilities, .snapshot, .health, .restart:
+            case .start, .health, .restart:
                 1
+            case .capabilities, .snapshot:
+                5
             case .shelfPresentationObservation:
                 0.1
             default:
                 5
             }
             guard semaphore.wait(timeout: .now() + timeout) == .success else {
-                logger.error("Compatibility request timed out")
-                if case .shelfPresentationObservation = request {
+                logger.error(
+                    "Compatibility request timed out: \(Self.requestCode(request), privacy: .public)"
+                )
+                // A read that ran out of time leaves no partial native state,
+                // so tearing down the session only interrupts unrelated work
+                // that is still in flight. Only a mutation whose outcome is
+                // unknown requires the session to be replaced.
+                if Self.isReadOnly(request) {
                     return nil
                 }
                 cancel(reason: "Request timed out")

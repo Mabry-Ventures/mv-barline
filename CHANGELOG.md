@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.45 (build 122) — September 20, 2026
+
+- Give the Accessibility inventory requests their own five-second budget. A
+  Mac with many menu bar items needs longer than a second to build one
+  inventory, so the previous budget reported the helper as incapable of
+  moving, revealing, or restoring anything.
+- Stop tearing down the helper session when a read runs out of time. A read
+  leaves no partial native state, and replacing the session cancelled
+  concealment work that was about to succeed.
+
 ## 1.0.44 (build 121) — September 19, 2026
 
 - Open the layout editor from the first-run walkthrough through the same
