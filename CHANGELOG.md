@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.44 (build 121) — September 19, 2026
+
+- Open the layout editor from the first-run walkthrough through the same
+  window path as every other caller, so the button no longer does nothing.
+- Force the macOS 27 search panel to composite for an inactive accessory app,
+  matching the shelf's ordering fix.
+- Retry a menu bar layout assignment once when a background refresh supersedes
+  the authority generation before any write, and identify the failing stage in
+  the assignment alert with a privacy-safe reference code.
+
 ## 1.0.43 (build 120) — September 18, 2026
 
 - Anchor the shelf with Barline's live AppKit status-item frame so macOS 27

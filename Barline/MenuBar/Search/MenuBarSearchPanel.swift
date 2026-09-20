@@ -77,6 +77,14 @@ final class MenuBarSearchPanel: NSPanel {
         isFloatingPanel = true
         level = .floating
         collectionBehavior = [.fullScreenAuxiliary, .ignoresCycle, .moveToActiveSpace]
+        // Match the shelf: macOS 27 refuses to composite a nonactivating
+        // accessory panel that hides on deactivation. Older systems keep the
+        // default so an unrelated activation still dismisses the panel; on
+        // macOS 27 the activation observer below takes that role.
+        if #available(macOS 27.0, *) {
+            hidesOnDeactivate = false
+            sharingType = .readOnly
+        }
     }
 
     /// Performs the initial setup of the panel.
@@ -105,6 +113,22 @@ final class MenuBarSearchPanel: NSPanel {
             self?.close()
         }
         .store(in: &c)
+
+        // Keyboard application switching moves focus without a mouse event, so
+        // neither mouse monitor fires. Dismiss the panel when another
+        // application activates, which macOS 27 no longer does for us.
+        NSWorkspace.shared.notificationCenter
+            .publisher(for: NSWorkspace.didActivateApplicationNotification)
+            .sink { [weak self] notification in
+                let activated = notification.userInfo?[
+                    NSWorkspace.applicationUserInfoKey
+                ] as? NSRunningApplication
+                guard activated?.processIdentifier != ProcessInfo.processInfo.processIdentifier else {
+                    return
+                }
+                self?.close()
+            }
+            .store(in: &c)
 
         cancellables = c
     }
@@ -148,7 +172,15 @@ final class MenuBarSearchPanel: NSPanel {
             )
 
             cascadeTopLeft(from: topLeft)
-            makeKeyAndOrderFront(nil)
+            // macOS 27 can acknowledge ordering for an inactive accessory app
+            // without compositing the nonactivating panel (see BarlineShelf).
+            if #available(macOS 27.0, *) {
+                orderFrontRegardless()
+                makeKey()
+            } else {
+                makeKeyAndOrderFront(nil)
+            }
+            displayIfNeeded()
 
             mouseDownMonitor.start()
             keyDownMonitor.start()

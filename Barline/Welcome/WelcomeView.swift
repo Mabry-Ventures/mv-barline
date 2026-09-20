@@ -241,7 +241,10 @@ struct WelcomeView: View {
 
     private func openLayoutEditor() {
         appState.navigationState.settingsNavigationIdentifier = .menuBarLayout
-        (NSApp.delegate as? AppDelegate)?.openSettingsWindow()
+        // `NSApp.delegate` is SwiftUI's adaptor proxy, not `AppDelegate`, so
+        // open Settings through the same path as every other entry point.
+        appState.activate(withPolicy: .regular)
+        appState.openWindow(.settings)
     }
 
     private func close() {
