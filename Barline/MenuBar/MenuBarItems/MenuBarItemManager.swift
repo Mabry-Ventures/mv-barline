@@ -1127,12 +1127,33 @@ extension MenuBarItemManager {
         // A background refresh (app launch/quit, control-item move) can bump
         // the authority generation between our refresh and the mutation.
         // Nothing was written in that case, so retry once on a fresh snapshot.
+        // A generation bump can also mean another mutation completed, whose
+        // result this drag intent must not overwrite, so the retry proceeds
+        // only while the item still sits where the first attempt saw it.
+        let origin = GoldenGateAssignmentOrigin()
         do {
             do {
-                try await assignOnce(itemID: itemID, to: section, index: index, appState: appState)
+                try await assignOnce(
+                    itemID: itemID,
+                    to: section,
+                    index: index,
+                    appState: appState,
+                    origin: origin,
+                    requiredOrigin: nil
+                )
             } catch MenuBarAuthorityRefreshError.staleGeneration {
+                guard let observedOrigin = origin.section else { throw
+                    MenuBarAuthorityRefreshError.staleGeneration(expected: 0, actual: nil)
+                }
                 logger.notice("Golden Gate layout assignment retrying after stale generation")
-                try await assignOnce(itemID: itemID, to: section, index: index, appState: appState)
+                try await assignOnce(
+                    itemID: itemID,
+                    to: section,
+                    index: index,
+                    appState: appState,
+                    origin: origin,
+                    requiredOrigin: observedOrigin
+                )
             }
         } catch {
             logger.error(
@@ -1149,7 +1170,9 @@ extension MenuBarItemManager {
         itemID: MenuBarItemID,
         to section: MenuBarSection.Name,
         index: Int,
-        appState: AppState
+        appState: AppState,
+        origin: GoldenGateAssignmentOrigin,
+        requiredOrigin: BarlineCore.MenuBarSection?
     ) async throws {
         let snapshot = try await appState.compatibilityCoordinator.refresh()
         guard let resolvedID = GoldenGateMenuBarIdentityResolver.resolve(
@@ -1159,6 +1182,16 @@ extension MenuBarItemManager {
             let descriptor = snapshot.items.first(where: { $0.id == resolvedID }),
             descriptor.isMovable
         else { throw MenuBarBackendError.staleItem(itemID) }
+
+        // Another completed mutation, not a refresh, moved this item while the
+        // first attempt was in flight. Its result stands.
+        if let requiredOrigin, descriptor.section != requiredOrigin {
+            throw MenuBarAuthorityRefreshError.staleGeneration(
+                expected: snapshot.generation,
+                actual: nil
+            )
+        }
+        origin.section = descriptor.section
 
         let destinationSection: BarlineCore.MenuBarSection = switch section {
         case .visible: .visible
@@ -1716,4 +1749,11 @@ extension MenuBarItemManager {
 private extension Logger {
     /// Logger for the menu bar item manager.
     static let menuBarItemManager = Logger(category: "MenuBarItemManager")
+}
+
+/// Records the section a macOS 27 assignment attempt was computed against so a
+/// retry can prove no other mutation moved the item in the meantime.
+@MainActor
+final class GoldenGateAssignmentOrigin {
+    var section: BarlineCore.MenuBarSection?
 }
