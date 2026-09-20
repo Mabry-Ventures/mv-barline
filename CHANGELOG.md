@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.0.46 (build 123) — September 20, 2026
+
+- Keep one identity for a menu bar item whose title shows a live reading.
+  Applications that display processor load, temperature, transfer rate, or
+  battery percentage rewrite their title every few seconds, which changed the
+  item's identity with it and left every saved assignment for that
+  application unresolvable.
+- Ignore an assignment for an item the menu bar no longer contains instead of
+  rejecting every other assignment alongside it. One absent item previously
+  made the whole layout unchangeable.
+
 ## 1.0.45 (build 122) — September 20, 2026
 
 - Give the Accessibility inventory requests their own five-second budget. A

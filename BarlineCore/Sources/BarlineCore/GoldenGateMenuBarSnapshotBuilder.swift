@@ -41,6 +41,41 @@ public struct GoldenGateMenuBarObservation: Equatable, Sendable {
 /// Converts app-process Accessibility observations into the same stable domain
 /// snapshot consumed by Barline on earlier macOS releases.
 public enum GoldenGateMenuBarSnapshotBuilder {
+    /// Collapses live readings so an item keeps one identity while its title
+    /// changes. A menu bar title that renders processor load, temperature,
+    /// transfer rate, or battery percentage is rewritten every few seconds;
+    /// identity derived from it changes with it, and every saved assignment
+    /// for that application stops resolving. Digit runs (with any decimal
+    /// separator inside them) become a placeholder, so "CPU 9%" and "CPU 43%"
+    /// share an identity while "Control Center" and "Clock" keep theirs.
+    public static func identityTitle(_ title: String) -> String {
+        var result = ""
+        var index = title.startIndex
+        var pendingNumber = false
+        while index < title.endIndex {
+            let character = title[index]
+            if character.isNumber {
+                if !pendingNumber {
+                    result.append("<n>")
+                    pendingNumber = true
+                }
+                index = title.index(after: index)
+                continue
+            }
+            if pendingNumber, character == "." || character == "," {
+                let next = title.index(after: index)
+                if next < title.endIndex, title[next].isNumber {
+                    index = next
+                    continue
+                }
+            }
+            pendingNumber = false
+            result.append(character)
+            index = title.index(after: index)
+        }
+        return result
+    }
+
     public static func identifiers(
         for observations: [GoldenGateMenuBarObservation]
     ) -> [MenuBarItemID] {
