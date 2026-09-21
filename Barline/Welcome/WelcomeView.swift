@@ -110,15 +110,19 @@ struct WelcomeView: View {
         }
     }
 
+    /// The walkthrough describes the menu bar model of the system it runs on.
+    private var platform: WelcomeMenuBarPlatform {
+        if #available(macOS 27.0, *) {
+            return .macOS27
+        }
+        return .macOS26
+    }
+
     private var screenRecordingStep: some View {
         WelcomeStepContent(
             title: "Allow Screen Recording",
             subtitle: "Optional",
-            message: """
-            Barline uses Screen Recording for the layout editor, which shows \
-            images of your menu bar items, and to match your menu bar’s \
-            appearance. You can still arrange items without it.
-            """
+            message: WelcomeCopy.screenRecordingMessage(for: platform)
         ) {
             WelcomePermissionControl(
                 permission: permissions.screenRecording,
@@ -141,7 +145,7 @@ struct WelcomeView: View {
                 WelcomeSectionRow(name: "Hidden", detail: "Tucked away until you click the Barline icon.")
                 WelcomeSectionRow(name: "Always-Hidden", detail: "Optional. Turn it on in Settings › Advanced.")
             }
-            Text("Hold ⌘ Command and drag an item in the menu bar to move it between sections.")
+            Text(WelcomeCopy.barSetupInstruction(for: platform))
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
             barSetupNotice
@@ -156,22 +160,17 @@ struct WelcomeView: View {
         switch WelcomeFlow.barSetupNotice(
             hasAccessibility: permissions.accessibility.hasPermission,
             menuBarAutoHides: appState.menuBarManager.isMenuBarHiddenBySystemUserDefaults,
-            hasScreenRecording: permissions.screenRecording.hasPermission
+            hasScreenRecording: permissions.screenRecording.hasPermission,
+            platform: platform
         ) {
         case .ready:
             EmptyView()
         case .needsAccessibility:
             WelcomeNotice("The layout editor needs Accessibility. You can allow it later in Settings.")
         case .menuBarAutoHides:
-            WelcomeNotice("""
-            Your menu bar hides automatically, so the layout editor can’t show it. \
-            ⌘ Command-dragging items in the menu bar still works.
-            """)
+            WelcomeNotice(WelcomeCopy.menuBarAutoHidesNotice(for: platform))
         case .needsScreenRecording:
-            WelcomeNotice("""
-            The layout editor needs Screen Recording. ⌘ Command-dragging items in \
-            the menu bar works without it.
-            """)
+            WelcomeNotice(WelcomeCopy.needsScreenRecordingNotice)
         }
     }
 

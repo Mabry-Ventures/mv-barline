@@ -84,7 +84,8 @@ public enum WelcomeFlow {
     public static func barSetupNotice(
         hasAccessibility: Bool,
         menuBarAutoHides: Bool,
-        hasScreenRecording: Bool
+        hasScreenRecording: Bool,
+        platform: WelcomeMenuBarPlatform = .macOS26
     ) -> BarSetupNotice {
         if !hasAccessibility {
             return .needsAccessibility
@@ -92,9 +93,57 @@ public enum WelcomeFlow {
         if menuBarAutoHides {
             return .menuBarAutoHides
         }
-        if !hasScreenRecording {
+        // The macOS 27 layout editor works from the Accessibility inventory
+        // alone; only macOS 26 needs captured item images to show it.
+        if !hasScreenRecording, platform.layoutEditorNeedsScreenRecording {
             return .needsScreenRecording
         }
         return .ready
     }
+}
+
+/// The menu bar model the running system provides. macOS 27 replaced the
+/// per-item status windows Barline arranges on macOS 26, so how items move
+/// between sections, and what Screen Recording is for, differ between them.
+public enum WelcomeMenuBarPlatform: Sendable, CaseIterable {
+    case macOS26
+    case macOS27
+
+    public var layoutEditorNeedsScreenRecording: Bool {
+        self == .macOS26
+    }
+}
+
+/// Walkthrough copy that must describe the running system accurately.
+public enum WelcomeCopy {
+    public static func screenRecordingMessage(for platform: WelcomeMenuBarPlatform) -> String {
+        switch platform {
+        case .macOS26:
+            "Barline uses Screen Recording for the layout editor, which shows images of your menu bar items, and to match your menu bar’s appearance. You can still arrange items without it."
+        case .macOS27:
+            "Barline uses Screen Recording to match the Barline Bar to your menu bar’s appearance. Arranging items doesn’t need it."
+        }
+    }
+
+    public static func barSetupInstruction(for platform: WelcomeMenuBarPlatform) -> String {
+        switch platform {
+        case .macOS26:
+            "Hold ⌘ Command and drag an item in the menu bar to move it between sections."
+        case .macOS27:
+            "Open the layout editor and click an item to move it between sections. An app’s items move together. ⌘ Command-dragging in the menu bar only changes their order."
+        }
+    }
+
+    public static func menuBarAutoHidesNotice(for platform: WelcomeMenuBarPlatform) -> String {
+        switch platform {
+        case .macOS26:
+            "Your menu bar hides automatically, so the layout editor can’t show it. ⌘ Command-dragging items in the menu bar still works."
+        case .macOS27:
+            "Your menu bar hides automatically, so the layout editor can’t show it. Turn off automatic menu bar hiding in System Settings to arrange items."
+        }
+    }
+
+    /// Shown only on macOS 26, where the layout editor needs item images.
+    public static let needsScreenRecordingNotice =
+        "The layout editor needs Screen Recording. ⌘ Command-dragging items in the menu bar works without it."
 }

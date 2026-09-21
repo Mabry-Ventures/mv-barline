@@ -37,6 +37,11 @@ enum GoldenGateAXInventory {
     private static let cacheLifetimeNanoseconds: UInt64 = 100_000_000
     private static let menuBarAgentBundleIdentifier = "com.apple.MenuBarAgent"
     private static let logger = Logger(category: "GoldenGateAXInventory")
+    /// Limits each inventory to processes that own menu bar items; see
+    /// `MenuBarOwnerProbePolicy`.
+    private static let ownerProbePolicy = OSAllocatedUnfairLock(
+        initialState: MenuBarOwnerProbePolicy()
+    )
     private static let cache = OSAllocatedUnfairLock(
         initialState: (capturedAt: UInt64?.none, observations: [Observation]())
     )
@@ -66,6 +71,7 @@ enum GoldenGateAXInventory {
         cache.withLock { state in
             state = (capturedAt: nil, observations: [])
         }
+        ownerProbePolicy.withLock { $0.invalidate() }
     }
 
     static func identifiers(for observations: [Observation]) -> [MenuBarItemID] {
@@ -117,13 +123,34 @@ enum GoldenGateAXInventory {
         }
 
         var observations = [Observation]()
-        for runningApplication in NSWorkspace.shared.runningApplications where !runningApplication.isTerminated {
+        let running = NSWorkspace.shared.runningApplications.filter { !$0.isTerminated }
+        let runningProcesses = running.map(\.processIdentifier)
+        let now = Date()
+        let plan = ownerProbePolicy.withLock {
+            $0.processesToProbe(running: runningProcesses, now: now)
+        }
+        let probeSet = Set(plan.processes)
+        var owningProcesses = Set<Int32>()
+        defer {
+            let owners = owningProcesses
+            ownerProbePolicy.withLock {
+                $0.record(
+                    probed: plan.processes,
+                    owners: owners,
+                    running: runningProcesses,
+                    isFullScan: plan.isFullScan,
+                    now: now
+                )
+            }
+        }
+        for runningApplication in running where probeSet.contains(runningApplication.processIdentifier) {
             guard
                 let application = AXHelpers.application(for: runningApplication),
                 let extrasMenuBar = AXHelpers.extrasMenuBar(for: application)
             else {
                 continue
             }
+            owningProcesses.insert(runningApplication.processIdentifier)
 
             let bundleIdentifier = runningApplication.bundleIdentifier
                 ?? "barline.unknown-menu-owner"
@@ -158,7 +185,12 @@ enum GoldenGateAXInventory {
                 if title == nil, accessibilityDescription == nil, identifier == nil {
                     unnamedIndex += 1
                 }
-                let stableTitle = identifier ?? accessibilityDescription ?? displayTitle
+                // Must match the main process exactly: identity derived from a
+                // live reading would drift between inventories and stop
+                // resolving the item the application asked to act on.
+                let stableTitle = GoldenGateMenuBarSnapshotBuilder.identityTitle(
+                    identifier ?? accessibilityDescription ?? displayTitle
+                )
                 let semanticBounds = semanticBounds(
                     in: metadata,
                     identifier: identifier,

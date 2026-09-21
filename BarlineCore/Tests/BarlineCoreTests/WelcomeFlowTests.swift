@@ -138,3 +138,44 @@ struct WelcomeFlowTests {
         )
     }
 }
+
+@Suite("Walkthrough copy per macOS version")
+struct WelcomeCopyTests {
+    @Test("macOS 27 never claims the layout editor needs Screen Recording")
+    func macOS27SkipsScreenRecordingNotice() {
+        #expect(
+            WelcomeFlow.barSetupNotice(
+                hasAccessibility: true,
+                menuBarAutoHides: false,
+                hasScreenRecording: false,
+                platform: .macOS27
+            ) == .ready
+        )
+        #expect(!WelcomeCopy.screenRecordingMessage(for: .macOS27).contains("images of your menu bar items"))
+    }
+
+    @Test("macOS 26 still asks for Screen Recording before the editor can show items")
+    func macOS26KeepsScreenRecordingNotice() {
+        #expect(
+            WelcomeFlow.barSetupNotice(
+                hasAccessibility: true,
+                menuBarAutoHides: false,
+                hasScreenRecording: false,
+                platform: .macOS26
+            ) == .needsScreenRecording
+        )
+    }
+
+    @Test("Only macOS 26 tells people ⌘ Command-drag moves items between sections")
+    func commandDragInstructionMatchesPlatform() {
+        #expect(WelcomeCopy.barSetupInstruction(for: .macOS26).contains("move it between sections"))
+        #expect(WelcomeCopy.barSetupInstruction(for: .macOS27).contains("only changes their order"))
+        #expect(!WelcomeCopy.menuBarAutoHidesNotice(for: .macOS27).contains("Command-dragging items in the menu bar still works"))
+    }
+
+    @Test("Each platform has its own copy")
+    func copyDiffersByPlatform() {
+        #expect(WelcomeCopy.screenRecordingMessage(for: .macOS26) != WelcomeCopy.screenRecordingMessage(for: .macOS27))
+        #expect(WelcomeCopy.barSetupInstruction(for: .macOS26) != WelcomeCopy.barSetupInstruction(for: .macOS27))
+    }
+}

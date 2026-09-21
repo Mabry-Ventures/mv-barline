@@ -289,6 +289,9 @@ actor GoldenGateAXSnapshotProvider {
     private let logicalLayoutPlanner = GoldenGateLogicalLayoutPlanner()
     private let positionTableStore = GoldenGatePositionTableStore()
     private var didAttemptInterruptedTransactionRecovery = false
+    /// Limits each inventory to processes that own menu bar items; see
+    /// `MenuBarOwnerProbePolicy`.
+    private var ownerProbePolicy = MenuBarOwnerProbePolicy()
 
     var capabilities: MenuBarCapabilities {
         get async {
@@ -1634,8 +1637,25 @@ actor GoldenGateAXSnapshotProvider {
 
     private func collectEntries() -> [Entry] {
         var entries = [Entry]()
-        let runningApplications = NSWorkspace.shared.runningApplications.filter {
+        let allRunningApplications = NSWorkspace.shared.runningApplications.filter {
             !$0.isTerminated
+        }
+        let runningProcesses = allRunningApplications.map(\.processIdentifier)
+        let now = Date()
+        let plan = ownerProbePolicy.processesToProbe(running: runningProcesses, now: now)
+        let probeSet = Set(plan.processes)
+        let runningApplications = allRunningApplications.filter {
+            probeSet.contains($0.processIdentifier)
+        }
+        var owningProcesses = Set<Int32>()
+        defer {
+            ownerProbePolicy.record(
+                probed: plan.processes,
+                owners: owningProcesses,
+                running: runningProcesses,
+                isFullScan: plan.isFullScan,
+                now: now
+            )
         }
         var applicationElementCount = 0
         var extrasMenuBarCount = 0
@@ -1654,6 +1674,7 @@ actor GoldenGateAXSnapshotProvider {
             readCounts[read.disposition.rawValue, default: 0] += 1
             guard let extrasMenuBar = read.element else { continue }
             extrasMenuBarCount += 1
+            owningProcesses.insert(runningApplication.processIdentifier)
 
             let bundleIdentifier = runningApplication.bundleIdentifier
                 ?? "barline.unknown-menu-owner"
@@ -1763,7 +1784,7 @@ actor GoldenGateAXSnapshotProvider {
             }
             return $0.observation.bounds.x < $1.observation.bounds.x
         }
-        let terminalCode = if runningApplications.isEmpty {
+        let terminalCode = if allRunningApplications.isEmpty {
             "no_running_applications"
         } else if extrasMenuBarCount == 0 {
             "no_extras_menu_bars"
@@ -1775,7 +1796,7 @@ actor GoldenGateAXSnapshotProvider {
             "inventory_available"
         }
         let diagnostic = DiagnosticBundle.GoldenGateAXInventory(
-            runningApplicationCount: runningApplications.count,
+            runningApplicationCount: allRunningApplications.count,
             applicationElementCount: applicationElementCount,
             extrasMenuBarReadCounts: readCounts,
             extrasMenuBarCount: extrasMenuBarCount,
