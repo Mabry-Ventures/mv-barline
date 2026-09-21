@@ -1699,7 +1699,14 @@ actor GoldenGateAXSnapshotProvider {
                 if title == nil, accessibilityDescription == nil, identifier == nil {
                     unnamedIndex += 1
                 }
-                let stableTitle = identifier ?? accessibilityDescription ?? displayTitle
+                // A menu bar title that renders a live reading — processor
+                // load, temperature, transfer rate, battery percentage —
+                // changes every few seconds. Identity derived from it changes
+                // with it, so every saved assignment for that application
+                // stops resolving. Keep the wording, neutralise the reading.
+                let stableTitle = GoldenGateMenuBarSnapshotBuilder.identityTitle(
+                    identifier ?? accessibilityDescription ?? displayTitle
+                )
                 let semanticBounds = semanticBounds(
                     in: metadata,
                     identifier: identifier,

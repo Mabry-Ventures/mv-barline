@@ -77,9 +77,17 @@ actor XPCMenuBarBackend: MenuBarBackend {
             // and retain the complete inventory before the helper can remove
             // concealed items from the AX tree.
             let snapshot = try await goldenGateProvider.snapshot()
+            let liveItemIDs = snapshot.items.filter { !$0.isBarlineControlItem }.map(\.id)
+            // Applications that render live values in their menu bar title
+            // (processor load, transfer rates, battery state) change item
+            // identity between the snapshot this configuration was computed
+            // from and the one validating it. Such an item is simply not
+            // present to conceal, so drop it instead of rejecting every other
+            // assignment along with it.
+            let configuration = configuration.retainingOnly(Set(liveItemIDs))
             guard GoldenGateConcealmentPolicy.supports(
                 configuration,
-                allItems: snapshot.items.filter { !$0.isBarlineControlItem }.map(\.id),
+                allItems: liveItemIDs,
                 barlineBundleIdentifier: Bundle.main.bundleIdentifier
                     ?? "com.mabryventures.Barline"
             ) else {

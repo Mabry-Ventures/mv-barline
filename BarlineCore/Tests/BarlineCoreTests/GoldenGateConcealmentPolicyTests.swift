@@ -278,3 +278,81 @@ struct GoldenGateConcealmentPolicyTests {
         )
     }
 }
+
+@Suite("Concealment configuration pruning")
+struct MenuBarConcealmentConfigurationPruningTests {
+    @Test("An item that left the menu bar cannot invalidate the other assignments")
+    func retainingOnlyDropsAbsentReferences() {
+        // A live-value title (processor load, transfer rate) changes item
+        // identity between snapshots, which previously rejected everything.
+        let stable = MenuBarItemID(bundleIdentifier: "com.example.stable", title: "Stable")
+        let volatileBefore = MenuBarItemID(bundleIdentifier: "com.example.meter", title: "CPU 43°")
+        let volatileAfter = MenuBarItemID(bundleIdentifier: "com.example.meter", title: "CPU 44°")
+
+        let configuration = MenuBarConcealmentConfiguration(
+            visibleItemIDs: [stable],
+            concealedItemIDs: [volatileBefore]
+        )
+        let pruned = configuration.retainingOnly([stable, volatileAfter])
+
+        #expect(pruned.visibleItemIDs == [stable])
+        #expect(pruned.concealedItemIDs.isEmpty)
+    }
+
+    @Test("Pruning keeps every reference the menu bar still contains")
+    func retainingOnlyKeepsPresentReferences() {
+        let visible = MenuBarItemID(bundleIdentifier: "com.example.one", title: "One")
+        let concealed = MenuBarItemID(bundleIdentifier: "com.example.two", title: "Two")
+        let configuration = MenuBarConcealmentConfiguration(
+            visibleItemIDs: [visible],
+            concealedItemIDs: [concealed]
+        )
+
+        let pruned = configuration.retainingOnly([visible, concealed])
+
+        #expect(pruned == configuration)
+    }
+}
+
+@Suite("Menu bar identity titles")
+struct GoldenGateIdentityTitleTests {
+    @Test("A live reading does not change an item's identity")
+    func liveReadingsCollapse() {
+        let readings = ["CPU 9%", "CPU 43%", "CPU 7%"]
+        let identities = Set(readings.map(GoldenGateMenuBarSnapshotBuilder.identityTitle))
+
+        #expect(identities.count == 1)
+    }
+
+    @Test("Temperatures, transfer rates and decimals collapse too")
+    func otherReadingsCollapse() {
+        #expect(
+            GoldenGateMenuBarSnapshotBuilder.identityTitle("CPU 50°")
+                == GoldenGateMenuBarSnapshotBuilder.identityTitle("CPU 49°")
+        )
+        #expect(
+            GoldenGateMenuBarSnapshotBuilder.identityTitle("Upload 82 KB/s")
+                == GoldenGateMenuBarSnapshotBuilder.identityTitle("Upload 13 KB/s")
+        )
+        #expect(
+            GoldenGateMenuBarSnapshotBuilder.identityTitle("Disk 1.5 GB")
+                == GoldenGateMenuBarSnapshotBuilder.identityTitle("Disk 12.75 GB")
+        )
+    }
+
+    @Test("Distinct readings from one application stay distinct")
+    func differentMetricsStayDistinct() {
+        let cpu = GoldenGateMenuBarSnapshotBuilder.identityTitle("CPU 9%")
+        let memory = GoldenGateMenuBarSnapshotBuilder.identityTitle("Memory Pressure 15%")
+        let upload = GoldenGateMenuBarSnapshotBuilder.identityTitle("Upload 82 KB/s")
+
+        #expect(Set([cpu, memory, upload]).count == 3)
+    }
+
+    @Test("A title without a reading is left alone")
+    func stableTitlesAreUnchanged() {
+        for title in ["Control Center", "Clock", "Barline.ControlItem.Hidden", "Microsoft Teams"] {
+            #expect(GoldenGateMenuBarSnapshotBuilder.identityTitle(title) == title)
+        }
+    }
+}

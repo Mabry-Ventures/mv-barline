@@ -11,6 +11,16 @@ public struct MenuBarConcealmentConfiguration: Codable, Equatable, Sendable {
         self.visibleItemIDs = visibleItemIDs
         self.concealedItemIDs = concealedItemIDs
     }
+
+    /// Drops references the live menu bar no longer contains. An item that is
+    /// absent cannot be concealed or revealed, so keeping its reference only
+    /// invalidates every other assignment in the same configuration.
+    public func retainingOnly(_ liveItemIDs: Set<MenuBarItemID>) -> Self {
+        Self(
+            visibleItemIDs: visibleItemIDs.filter(liveItemIDs.contains),
+            concealedItemIDs: concealedItemIDs.filter(liveItemIDs.contains)
+        )
+    }
 }
 
 public struct GoldenGateResolvedConcealment: Equatable, Sendable {
@@ -119,7 +129,10 @@ public enum GoldenGateConcealmentPolicy {
         let concealed = Set(configuration.concealedItemIDs)
         guard visible.isDisjoint(with: concealed) else { return false }
         let requested = visible.union(concealed)
-        guard requested.isSubset(of: Set(allItems)) else { return false }
+        guard requested.isSubset(of: Set(allItems)) else {
+            let missing = requested.subtracting(Set(allItems))
+            return false
+        }
 
         for (normalizedBundleIdentifier, items) in Dictionary(
             grouping: allItems,
