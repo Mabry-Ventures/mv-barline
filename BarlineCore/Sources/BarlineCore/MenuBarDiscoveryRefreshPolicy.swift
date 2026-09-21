@@ -24,6 +24,19 @@ public enum MenuBarDiscoveryRefreshPolicy {
         }
     }
 
+    /// Decides whether the user's session becoming available again — the
+    /// screen unlocking, or returning to this user after a switch — should
+    /// restart discovery. A discovery that ran while the screen was locked
+    /// (for example, a relaunch after an overnight update) sees no menu bar
+    /// and fails terminally, and automatic lifecycle signals deliberately
+    /// cannot restart a terminal failure. Session availability is a single,
+    /// user-driven event rather than an AppKit storm, so it may retry once.
+    public static func shouldRetryWhenSessionBecomesAvailable(
+        state: MenuBarItemDiscoveryState
+    ) -> Bool {
+        state == .failed && !state.hasUsableSnapshot
+    }
+
     /// Determines whether an inventory observation requires a full discovery.
     /// A cold manager must always establish a terminal snapshot even when the
     /// observed inventory happens to match the actor's initially empty cache.

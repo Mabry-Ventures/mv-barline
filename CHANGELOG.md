@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.47 (build 124) — September 21, 2026
+
+- Retry menu bar discovery when the screen unlocks or the user returns to the
+  session. Barline launched while the screen was locked — for example, after
+  an overnight update — saw no menu bar, and the Menu Bar Layout page stayed
+  on "Menu bar items could not be loaded" until Try Again was pressed.
+
 ## 1.0.46 (build 123) — September 20, 2026
 
 - Keep one identity for a menu bar item whose title shows a live reading.
