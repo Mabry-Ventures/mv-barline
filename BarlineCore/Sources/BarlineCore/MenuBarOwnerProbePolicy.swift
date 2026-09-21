@@ -15,17 +15,29 @@ import Foundation
 /// time on processes that have nothing to report — about two seconds on one
 /// measured Mac, repeated for every inventory a single layout change takes.
 ///
-/// Between full scans only known owners, and processes launched since the
-/// last full scan, are asked. A process that adds its first item later
-/// without relaunching is found by the next full scan.
+/// Between full scans only known owners and recently launched processes are
+/// asked. Applications usually create their status item a moment after they
+/// launch, so a new process is asked on every pass for `launchGracePeriod`
+/// rather than once; asking only once would file it as having no items and
+/// miss them until the next full scan. A process that adds its first item
+/// later still is found by the next full scan.
 public struct MenuBarOwnerProbePolicy: Sendable {
     public let fullScanInterval: TimeInterval
+    public let launchGracePeriod: TimeInterval
     public private(set) var knownOwners: Set<Int32> = []
-    public private(set) var scannedProcesses: Set<Int32> = []
+    public private(set) var firstSeen: [Int32: Date] = [:]
     public private(set) var lastFullScan: Date?
+    /// Processes already running at Barline's first inventory have long since
+    /// created their items; only ones that appear afterwards get a grace period.
+    public private(set) var hasCompletedInitialScan = false
 
-    public init(fullScanInterval: TimeInterval = 15) {
+    public var scannedProcesses: Set<Int32> {
+        Set(firstSeen.keys)
+    }
+
+    public init(fullScanInterval: TimeInterval = 15, launchGracePeriod: TimeInterval = 30) {
         self.fullScanInterval = fullScanInterval
+        self.launchGracePeriod = launchGracePeriod
     }
 
     /// Returns the processes to ask, and whether this pass is a full scan.
@@ -38,8 +50,14 @@ public struct MenuBarOwnerProbePolicy: Sendable {
         else {
             return (running, true)
         }
-        let selected = running.filter {
-            knownOwners.contains($0) || !scannedProcesses.contains($0)
+        let selected = running.filter { process in
+            if knownOwners.contains(process) {
+                return true
+            }
+            guard let seen = firstSeen[process] else {
+                return true
+            }
+            return now.timeIntervalSince(seen) < launchGracePeriod
         }
         return (selected, false)
     }
@@ -59,9 +77,13 @@ public struct MenuBarOwnerProbePolicy: Sendable {
             .subtracting(probedSet)
             .union(owners)
             .intersection(runningSet)
-        scannedProcesses = scannedProcesses.union(probedSet).intersection(runningSet)
+        for process in probedSet where firstSeen[process] == nil {
+            firstSeen[process] = hasCompletedInitialScan ? now : .distantPast
+        }
+        firstSeen = firstSeen.filter { runningSet.contains($0.key) }
         if isFullScan {
             lastFullScan = now
+            hasCompletedInitialScan = true
         }
     }
 
