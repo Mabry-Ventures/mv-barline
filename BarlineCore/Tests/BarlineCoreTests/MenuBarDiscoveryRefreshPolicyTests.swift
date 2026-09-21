@@ -137,3 +137,22 @@ struct MenuBarDiscoveryRefreshPolicyTests {
         #expect(!gate.hasPendingAutomaticRefresh)
     }
 }
+
+@Suite("Discovery retry when the session becomes available")
+struct MenuBarDiscoverySessionRetryTests {
+    @Test("A terminal failure with no usable snapshot retries after unlock")
+    func terminalFailureRetries() {
+        #expect(
+            MenuBarDiscoveryRefreshPolicy.shouldRetryWhenSessionBecomesAvailable(state: .failed)
+        )
+    }
+
+    @Test("Healthy or in-progress discovery is left alone")
+    func otherStatesDoNotRetry() {
+        for state: MenuBarItemDiscoveryState in [.idle, .loading, .ready, .empty] {
+            #expect(
+                !MenuBarDiscoveryRefreshPolicy.shouldRetryWhenSessionBecomesAvailable(state: state)
+            )
+        }
+    }
+}

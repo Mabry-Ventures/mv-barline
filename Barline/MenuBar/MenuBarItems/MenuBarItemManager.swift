@@ -137,6 +137,34 @@ final class MenuBarItemManager: ObservableObject {
             }
             .store(in: &c)
 
+        // Automatic signals cannot restart a terminal discovery failure, so a
+        // discovery that ran against the lock screen would otherwise wait for
+        // the user to press Try Again. Unlocking or returning to the session
+        // retries it once.
+        Publishers.Merge(
+            DistributedNotificationCenter.default().publisher(
+                for: Notification.Name("com.apple.screenIsUnlocked")
+            ),
+            NSWorkspace.shared.notificationCenter.publisher(
+                for: NSWorkspace.sessionDidBecomeActiveNotification
+            )
+        )
+        .delay(for: 1, scheduler: DispatchQueue.main)
+        .sink { [weak self] _ in
+            guard let self,
+                  MenuBarDiscoveryRefreshPolicy.shouldRetryWhenSessionBecomesAvailable(
+                      state: itemDiscoveryState
+                  )
+            else {
+                return
+            }
+            logger.notice("Retrying menu bar discovery after the session became available")
+            Task {
+                await self.cacheItemsRegardless(intent: .authoritative)
+            }
+        }
+        .store(in: &c)
+
         appState.navigationState.$settingsNavigationIdentifier
             .sink { [weak self] identifier in
                 guard let self, identifier == .menuBarLayout else {
