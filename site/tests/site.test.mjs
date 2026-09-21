@@ -49,6 +49,7 @@ test('every local link and asset resolves, every local fragment exists', async (
   for (const path of pages) {
     const html = await readFile(join(output, path), 'utf8');
     for (const [, raw] of html.matchAll(/(?:href|src)="([^"]+)"/g)) {
+      if (raw === 'mailto:support@mabryventures.com') continue;
       const url = new URL(raw, `https://barline.invalid/${path}`);
       if (url.origin !== 'https://barline.invalid') {
         assert.equal(url.protocol, 'https:');
@@ -62,8 +63,8 @@ test('every local link and asset resolves, every local fragment exists', async (
 });
 test('production links the qualified release and presents the supported configuration', async () => {
   const html = await readFile(join(output, 'index.html'), 'utf8');
-  assert.match(html, /Download Barline 1\.0\.43/);
-  assert.match(html, /Barline 1\.0\.43 release notes/);
+  assert.match(html, /Download Barline 1\.0\.46/);
+  assert.match(html, /Barline 1\.0\.46 release notes/);
   assert.match(html, /Corresponding source/);
   assert.match(html, /Checksums/);
   assert.match(html, /Apple Silicon · macOS 26 and macOS 27/);

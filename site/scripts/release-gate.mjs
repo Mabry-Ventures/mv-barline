@@ -29,6 +29,7 @@ export function validateProduction({ release, pages, headers, robots }) {
     throw new Error('Unexpected release configuration field. Keep credentials and provider state out of site builds.');
   }
   const approvedExternal = new Set([
+    'mailto:support@mabryventures.com',
     ...Object.values(expected), canonical + '/', canonical + '/about/', canonical + '/privacy/', canonical + '/support/',
     repository, repository + '/issues', repository + '/issues/new/choose',
     ...['LICENSE', 'NOTICE.md', 'THIRD_PARTY_NOTICES.md', 'SECURITY.md', 'FREQUENT_ISSUES.md', 'docs/PROVENANCE.md']
