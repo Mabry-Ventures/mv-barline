@@ -87,12 +87,12 @@ test('current production source requires exact configuration and preserves sourc
   const before = await readFile(source, 'utf8');
   const outputDirectory = await mkdtemp(join(tmpdir(), 'barline-production-gate-'));
   const release = {
-    version: '1.0.46',
+    version: '1.0.48',
     canonicalOrigin: 'https://usebarline.com',
-    downloadURL: 'https://github.com/Mabry-Ventures/mv-barline/releases/download/v1.0.46/Barline-1.0.46.dmg',
-    sourceURL: 'https://github.com/Mabry-Ventures/mv-barline/releases/download/v1.0.46/Barline-1.0.46-source.tar.gz',
-    checksumsURL: 'https://github.com/Mabry-Ventures/mv-barline/releases/download/v1.0.46/SHA256SUMS',
-    releaseURL: 'https://github.com/Mabry-Ventures/mv-barline/releases/tag/v1.0.46',
+    downloadURL: 'https://github.com/Mabry-Ventures/mv-barline/releases/download/v1.0.48/Barline-1.0.48.dmg',
+    sourceURL: 'https://github.com/Mabry-Ventures/mv-barline/releases/download/v1.0.48/Barline-1.0.48-source.tar.gz',
+    checksumsURL: 'https://github.com/Mabry-Ventures/mv-barline/releases/download/v1.0.48/SHA256SUMS',
+    releaseURL: 'https://github.com/Mabry-Ventures/mv-barline/releases/tag/v1.0.48',
     contributionURL: 'https://buy.stripe.com/cNibJ1a370l33AVgnk1ck02',
   };
   try {
@@ -102,6 +102,6 @@ test('current production source requires exact configuration and preserves sourc
     await assert.rejects(build({ mode: 'typo', outputDirectory }), /Unknown/);
     await assert.rejects(build({ mode: 'preview', release, outputDirectory }), /explicit production/);
     assert.equal(await readFile(source, 'utf8'), before);
-    assert.match(await readFile(join(outputDirectory, 'index.html'), 'utf8'), /Download Barline 1\.0\.46/);
+    assert.match(await readFile(join(outputDirectory, 'index.html'), 'utf8'), /Download Barline 1\.0\.48/);
   } finally { await rm(outputDirectory, { recursive: true }); }
 });
