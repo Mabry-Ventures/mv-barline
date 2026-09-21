@@ -1,7 +1,24 @@
 # Changelog
 
-## 1.0.47 (build 124) — September 21, 2026
+## 1.0.48 (build 125) — September 21, 2026
 
+1.0.47 was built and qualified but never published; its change is included
+here.
+
+- Make layout changes and the Barline Bar fast on a busy Mac. Each macOS 27
+  menu bar inventory asked every running process for status items; on a Mac
+  with 154 processes, of which 14 own items, that took about two seconds and
+  a layout change ran it eight to ten times. Barline now asks only the known
+  owners, plus newly launched apps, with a full scan every 15 seconds. Moving
+  an item drops from 12–25 seconds to under 3, and the Barline Bar opens in
+  about half a second instead of 4.5–9.
+- Resolve a specific item in the helper using the same identity as the app, so
+  items whose titles show live readings can be activated from the Barline Bar
+  and search.
+- Describe the running macOS version in the first-run walkthrough and the
+  layout editor. On macOS 27, Screen Recording is not needed to arrange
+  items, ⌘ Command-drag only changes an item's position, and an item macOS
+  cannot conceal is described as staying visible.
 - Retry menu bar discovery when the screen unlocks or the user returns to the
   session. Barline launched while the screen was locked — for example, after
   an overnight update — saw no menu bar, and the Menu Bar Layout page stayed

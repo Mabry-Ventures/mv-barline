@@ -108,8 +108,11 @@ final class LayoutBarItemView: NSView {
     func provideAlertForDisabledItem() -> NSAlert {
         let alert = NSAlert()
         if #available(macOS 27.0, *) {
-            alert.messageText = "Arrange this item in the menu bar."
-            alert.informativeText = "Hold ⌘ Command and drag \"\(item.displayName)\" directly in the menu bar."
+            // macOS 27 decides which items can be concealed; ⌘ Command-drag
+            // only changes an item's position, so it must not be offered as
+            // a way to hide it.
+            alert.messageText = "macOS can’t hide this item on its own."
+            alert.informativeText = "\"\(item.displayName)\" stays visible. You can still ⌘ Command-drag it in the menu bar to change its position."
             return alert
         }
         alert.messageText = "Menu bar item is not movable."
