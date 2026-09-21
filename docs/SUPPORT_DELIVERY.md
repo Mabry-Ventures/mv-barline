@@ -2,6 +2,19 @@
 
 ## Public support
 
+Email support is `support@mabryventures.com`. Outbound Barline mail uses
+`Barline <hello@usebarline.com>` through Resend with Reply-To
+`support@mabryventures.com`. The static site has no automated sending or
+subscriber database. DNS verification does not create an inbound hello mailbox:
+`usebarline.com` publishes no MX record, so mail addressed to `hello@` is
+rejected rather than delivered. Public copy therefore names `hello@` only as
+the sending address and points people at the support address instead.
+
+Sender authentication is DKIM (`resend._domainkey.usebarline.com`) with SPF on
+the Resend bounce subdomain. `usebarline.com` publishes no DMARC record, unlike
+`mabryventures.com`; adding one, even `p=none` with a reporting address, is the
+outstanding step before any volume sending.
+
 [GitHub Issues](https://github.com/Mabry-Ventures/mv-barline/issues) is the public
 entry point for bug reports and feature suggestions. Read
 [troubleshooting](../FREQUENT_ISSUES.md) first. Share only reviewed, relevant
