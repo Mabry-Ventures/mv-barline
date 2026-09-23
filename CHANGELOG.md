@@ -1,6 +1,21 @@
 # Changelog
 
+## 1.0.50 (build 127) — candidate
+
+- Show a loading-only Barline Bar immediately on macOS 27 while native item
+  concealment is reconciled. Item icons remain withheld until that check
+  succeeds, preventing duplicate native and shelf copies without making the
+  first click appear unresponsive.
+- Show a clear preparation failure instead of leaving the loading state open,
+  and give an empty hidden section a readable placeholder rather than a tiny
+  blank panel.
+- Correct the installed macOS 27 performance probe to identify the unique
+  app-owned shelf surface when WindowServer omits its title. Repeated
+  Accessibility queries no longer inflate click timing.
+
 ## 1.0.49 (build 126) — candidate
+
+This candidate was staged but not published; 1.0.50 supersedes it.
 
 - Bound macOS 27 Accessibility requests on individual menu bar elements as
   well as their owning apps. A slow item can no longer inherit the longer

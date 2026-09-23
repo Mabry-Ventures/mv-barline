@@ -1,5 +1,15 @@
 # Barline execution plan
 
+## Barline 1.0.50 responsive shelf candidate — September 23, 2026
+
+Build 127 supersedes the unpublished 1.0.49 candidate. Installed macOS 27
+testing showed that concealment reconciliation can delay the first shelf
+surface beyond the 250 ms feedback budget. The shelf now commits a loading-only
+surface first and withholds all item icons until concealment is verified. A
+failed reconciliation shows an explicit message and never exposes the cached
+icons. Qualify the exact signed build on macOS 26 and macOS 27, including
+rapid retries and hidden-item interaction, before changing the public feed.
+
 ## Barline 1.0.49 performance candidate — September 23, 2026
 
 Build 126 is a staged, unpublished candidate. It bounds macOS 27 AX child

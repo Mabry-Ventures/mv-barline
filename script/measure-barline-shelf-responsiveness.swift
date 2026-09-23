@@ -406,13 +406,29 @@ private func barlineShelfSnapshot(snapshots: [WindowSnapshot]? = nil) -> WindowS
     let runtimeWindowNumber = runtimeSmokePanelWindowNumber(
         expectedProcessIdentifier: expectedProcessIdentifier
     )
-    return windows.first {
+    if let namedOrRuntimeShelf = windows.first(where: {
         let ownerMatches = expectedProcessIdentifier == nil ||
             $0.ownerProcessIdentifier == expectedProcessIdentifier
         let namedShelf = $0.ownerName == "Barline" && $0.windowName == "Barline Bar"
         let runtimeShelf = runtimeWindowNumber != nil && $0.windowNumber == runtimeWindowNumber
         return ownerMatches && (namedShelf || runtimeShelf)
+    }) {
+        return namedOrRuntimeShelf
     }
+    guard let expectedProcessIdentifier else { return nil }
+    // macOS 27 omits the title of Release accessory panels from WindowServer.
+    // The shelf is the only Barline-owned mainMenu+1 surface in this probe.
+    // Requiring one exact-PID, exact-layer, onscreen window avoids a synchronous
+    // AX query on every 10 ms poll; that query inflated the measured latency.
+    let matchingSurfaces = windows.filter {
+        $0.ownerProcessIdentifier == expectedProcessIdentifier &&
+            $0.layer == 25 &&
+            $0.windowNumber != nil &&
+            $0.bounds.width > 0 &&
+            $0.bounds.height > 0 &&
+            $0.bounds.height < 100
+    }
+    return matchingSurfaces.count == 1 ? matchingSurfaces[0] : nil
 }
 
 /// Buffer transport metadata rather than logging/querying windows in the hot

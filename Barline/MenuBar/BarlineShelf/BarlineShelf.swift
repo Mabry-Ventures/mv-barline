@@ -358,26 +358,20 @@ final class BarlineShelfPanel: NSPanel {
             return false
         }
 
-        // A status item becomes clickable before the slower compatibility
-        // setup finishes. On macOS 27, do not render a saved shelf while its
-        // native copies are still visible: first reconcile the current
-        // concealment transaction, then revalidate this presentation request.
-        if #available(macOS 27.0, *) {
-            let readinessInterval = signposter.beginInterval("ShelfConcealmentReadiness")
-            defer {
-                signposter.endInterval("ShelfConcealmentReadiness", readinessInterval)
-            }
-            await appState.waitForMenuBarItemSetup()
-            guard await appState.itemManager.prepareForShelfPresentation() else {
-                logger.error("Shelf presentation rejected: concealment was not ready")
-                return false
-            }
+        // Order a loading-only surface before macOS 27 concealment readiness.
+        // The loading view has no item icons, so native copies cannot appear
+        // alongside shelf copies while the reconciliation is still running.
+        // The content gate below is released only after readiness succeeds.
+        let requiresConcealmentReadiness = if #available(macOS 27.0, *) {
+            true
+        } else {
+            false
         }
         guard request.generation == presentationGeneration,
               currentSection == request.section,
               appState.navigationState.isBarlineShelfPresented
         else {
-            logger.notice("Shelf presentation rejected: ownership changed during readiness")
+            logger.notice("Shelf presentation rejected: ownership changed before ordering")
             return false
         }
 
@@ -385,7 +379,8 @@ final class BarlineShelfPanel: NSPanel {
         // items and capturing their images can take hundreds of milliseconds,
         // especially while Control Center is relaying out status items. That
         // work must not block the first visible frame after a user click.
-        let needsLoadingState = appState.itemManager.itemCache.managedItems.isEmpty ||
+        let needsLoadingState = requiresConcealmentReadiness ||
+            appState.itemManager.itemCache.managedItems.isEmpty ||
             appState.imageCache.cacheFailed(for: request.section)
         let hostingView: BarlineShelfHostingView
         if
@@ -437,6 +432,30 @@ final class BarlineShelfPanel: NSPanel {
         cacheRefreshTask = Task { [weak self, weak hostingView] in
             guard let self, let hostingView else {
                 return
+            }
+            if requiresConcealmentReadiness {
+                let readinessInterval = signposter.beginInterval("ShelfConcealmentReadiness")
+                defer {
+                    signposter.endInterval("ShelfConcealmentReadiness", readinessInterval)
+                }
+                await appState.waitForMenuBarItemSetup()
+                guard !Task.isCancelled,
+                      request.generation == presentationGeneration,
+                      currentSection == request.section,
+                      appState.navigationState.isBarlineShelfPresented
+                else { return }
+                let ready = await appState.itemManager.prepareForShelfPresentation()
+                guard !Task.isCancelled,
+                      request.generation == presentationGeneration,
+                      currentSection == request.section,
+                      appState.navigationState.isBarlineShelfPresented
+                else { return }
+                guard ready else {
+                    logger.error("Shelf item content withheld: concealment was not ready")
+                    hostingView.failPreparing()
+                    cacheRefreshTask = nil
+                    return
+                }
             }
             await refreshCache(
                 for: request,
@@ -690,7 +709,10 @@ private final class BarlineShelfHostingView: NSHostingView<BarlineShelfContentVi
     }
 
     func beginPresentation(generation: UInt) {
-        rootView.presentationGeneration = generation
+        var updatedRootView = rootView
+        updatedRootView.presentationGeneration = generation
+        updatedRootView.preparationFailed = false
+        rootView = updatedRootView
     }
 
     /// Updates the transient loading state without replacing the hosting view.
@@ -706,6 +728,13 @@ private final class BarlineShelfHostingView: NSHostingView<BarlineShelfContentVi
     /// Replaces the transient loading state after the first cache refresh.
     func finishPreparing() {
         setPreparing(false)
+    }
+
+    func failPreparing() {
+        var updatedRootView = rootView
+        updatedRootView.preparationFailed = true
+        updatedRootView.isPreparing = false
+        rootView = updatedRootView
     }
 
     @available(*, unavailable)
@@ -774,6 +803,7 @@ private struct BarlineShelfContentView: View {
     let section: MenuBarSection.Name
     var presentationGeneration: UInt
     var isPreparing: Bool
+    var preparationFailed = false
 
     private var items: [MenuBarItem] {
         itemManager.itemsForBarlineShelf(in: section, on: screen)
@@ -939,6 +969,9 @@ private struct BarlineShelfContentView: View {
         } else if menuBarManager.isMenuBarHiddenBySystemUserDefaults {
             Text("Barline cannot display menu bar items for automatically hidden menu bars")
                 .padding(.horizontal, 10)
+        } else if preparationFailed {
+            Text("Hidden items could not be prepared. Close the Barline Bar and try again.")
+                .padding(.horizontal, 10)
         } else if itemManager.itemDiscoveryState == .failed {
             HStack {
                 Text("Menu bar items could not be loaded")
@@ -962,6 +995,9 @@ private struct BarlineShelfContentView: View {
             }
             .frame(minWidth: cachedContentWidth)
             .padding(.horizontal, 10)
+        } else if items.isEmpty {
+            Text(section == .alwaysHidden ? "No always-hidden menu bar items" : "No hidden menu bar items")
+                .padding(.horizontal, 10)
         } else {
             ScrollView(.horizontal) {
                 HStack(spacing: 0) {
