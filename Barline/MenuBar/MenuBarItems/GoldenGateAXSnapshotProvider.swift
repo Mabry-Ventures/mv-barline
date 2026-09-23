@@ -273,6 +273,10 @@ actor GoldenGateAXSnapshotProvider {
     private static let maximumRememberedAssignments = 512
 
     private let logger = Logger(category: "GoldenGateAXSnapshotProvider")
+    private let inventorySignposter = OSSignposter(
+        subsystem: "com.mabryventures.Barline",
+        category: .pointsOfInterest
+    )
     private let serviceConnection = BarlineMenuService.Connection.shared
     private var generation: UInt64 = 0
     private var cachedAt: UInt64?
@@ -461,10 +465,12 @@ actor GoldenGateAXSnapshotProvider {
                         "Golden Gate legacy concealment repair could not be prepared: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
                     )
                 }
-            } else if let prepared = try? prepareRetainedInventory(
-                from: result,
-                requiredItemIDs: []
-            ) {
+            } else if retainedInventoryNeedsUpdate(from: result),
+                      let prepared = try? prepareRetainedInventory(
+                          from: result,
+                          requiredItemIDs: []
+                      )
+            {
                 commitRetainedInventory(prepared)
             }
         }
@@ -1226,6 +1232,16 @@ actor GoldenGateAXSnapshotProvider {
         UserDefaults.standard.set(prepared.data, forKey: Self.retainedInventoryKey)
     }
 
+    /// Live readings can change a descriptor's title without changing its
+    /// identity. Avoid encoding and writing the same retained inventory again
+    /// when an AX refresh has not changed any persisted descriptor.
+    private func retainedInventoryNeedsUpdate(from snapshot: MenuBarSnapshot) -> Bool {
+        snapshot.items.contains { descriptor in
+            descriptor.id.isPlausiblyStable &&
+                retainedDescriptors[descriptor.id] != Self.sanitizedDescriptor(descriptor)
+        }
+    }
+
     private static func persistencePriority(
         _ lhs: GoldenGateLogicalAssignment,
         _ rhs: GoldenGateLogicalAssignment
@@ -1636,6 +1652,10 @@ actor GoldenGateAXSnapshotProvider {
     }
 
     private func collectEntries() -> [Entry] {
+        let inventoryInterval = inventorySignposter.beginInterval("GoldenGateAXInventory")
+        defer {
+            inventorySignposter.endInterval("GoldenGateAXInventory", inventoryInterval)
+        }
         var entries = [Entry]()
         let allRunningApplications = NSWorkspace.shared.runningApplications.filter {
             !$0.isTerminated
@@ -1643,6 +1663,9 @@ actor GoldenGateAXSnapshotProvider {
         let runningProcesses = allRunningApplications.map(\.processIdentifier)
         let now = Date()
         let plan = ownerProbePolicy.processesToProbe(running: runningProcesses, now: now)
+        logger.debug(
+            "Golden Gate AX probe planned: full=\(plan.isFullScan, privacy: .public), processes=\(plan.processes.count, privacy: .public)"
+        )
         let probeSet = Set(plan.processes)
         let runningApplications = allRunningApplications.filter {
             probeSet.contains($0.processIdentifier)

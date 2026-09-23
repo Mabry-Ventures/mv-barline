@@ -98,6 +98,10 @@ final class BarlineShelfPanel: NSPanel {
 
     /// Privacy-safe lifecycle diagnostics for accessory panel presentation.
     private let logger = Logger(category: "BarlineShelf")
+    private let signposter = OSSignposter(
+        subsystem: "com.mabryventures.Barline",
+        category: .pointsOfInterest
+    )
 
     /// Creates a new Barline Bar panel.
     init(
@@ -330,6 +334,10 @@ final class BarlineShelfPanel: NSPanel {
     /// presentation request.
     @discardableResult
     func show(_ request: PresentationRequest, on screen: NSScreen) async -> Bool {
+        let presentationInterval = signposter.beginInterval("ShelfPresentation")
+        defer {
+            signposter.endInterval("ShelfPresentation", presentationInterval)
+        }
         guard let appState else {
             logger.error("Shelf presentation rejected: missing app state")
             return false
@@ -355,6 +363,10 @@ final class BarlineShelfPanel: NSPanel {
         // native copies are still visible: first reconcile the current
         // concealment transaction, then revalidate this presentation request.
         if #available(macOS 27.0, *) {
+            let readinessInterval = signposter.beginInterval("ShelfConcealmentReadiness")
+            defer {
+                signposter.endInterval("ShelfConcealmentReadiness", readinessInterval)
+            }
             await appState.waitForMenuBarItemSetup()
             guard await appState.itemManager.prepareForShelfPresentation() else {
                 logger.error("Shelf presentation rejected: concealment was not ready")

@@ -67,7 +67,12 @@ enum AXHelpers {
     }
 
     static func extrasMenuBar(for app: Application) -> UIElement? {
-        queue.sync { try? app.attribute(.extrasMenuBar) }
+        queue.sync {
+            guard let element: UIElement = try? app.attribute(.extrasMenuBar) else {
+                return nil
+            }
+            return boundedMenuBarElement(element)
+        }
     }
 
     /// Reads the extras-menu-bar attribute without erasing the AX error. The
@@ -87,7 +92,7 @@ enum AXHelpers {
                 guard let raw = value as! AXUIElement? else {
                     return (nil, .wrongType)
                 }
-                return (UIElement(raw), .success)
+                return (boundedMenuBarElement(UIElement(raw)), .success)
             case .noValue:
                 return (nil, .noValue)
             case .attributeUnsupported:
@@ -105,7 +110,21 @@ enum AXHelpers {
     }
 
     static func children(for element: UIElement) -> [UIElement] {
-        queue.sync { try? element.arrayAttribute(.children) } ?? []
+        queue.sync {
+            let children: [UIElement] = (try? element.arrayAttribute(.children)) ?? []
+            return children.map(boundedMenuBarElement)
+        }
+    }
+
+    /// An app-level AX timeout does not carry over to the menu-bar descendants
+    /// returned by another AX request. Bound those elements individually on
+    /// macOS 27 so a stalled item cannot hold an inventory for the system
+    /// default timeout. Older menu-bar discovery keeps its existing behavior.
+    private static func boundedMenuBarElement(_ element: UIElement) -> UIElement {
+        if #available(macOS 27.0, *) {
+            _ = AXUIElementSetMessagingTimeout(element.element, 0.25)
+        }
+        return element
     }
 
     static func isEnabled(_ element: UIElement) -> Bool {

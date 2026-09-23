@@ -1,5 +1,15 @@
 # Barline execution plan
 
+## Barline 1.0.49 performance candidate — September 23, 2026
+
+Build 126 is a staged, unpublished candidate. It bounds macOS 27 AX child
+requests, suppresses unchanged retained-inventory writes, and adds privacy-safe
+inventory and shelf timing intervals. The macOS 26 source/build gates and the
+macOS 27 installed candidate still need exact-source evidence before any
+release decision. In particular, a macOS 26 build cannot establish a macOS 27
+latency improvement or concealment correctness. Keep the public v1.0.48 feed
+unchanged until both OS lanes pass.
+
 ## Barline 1.0.31 macOS 27 native arrangement release published — September 17, 2026
 
 Barline 1.0.31 (build 108), annotated tag `v1.0.31` at

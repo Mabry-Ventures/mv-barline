@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.49 (build 126) — candidate
+
+- Bound macOS 27 Accessibility requests on individual menu bar elements as
+  well as their owning apps. A slow item can no longer inherit the longer
+  system default messaging timeout during inventory.
+- Skip retained-inventory encoding and preference writes when a refreshed
+  snapshot contains no changed descriptor. Layout recovery and changed-item
+  persistence continue through the existing transaction path.
+- Add privacy-safe timing intervals for app and helper inventory and for
+  shelf presentation and concealment readiness. These make the next macOS 27
+  installed-build measurements attributable to the slow phase.
+
 ## 1.0.48 (build 125) — September 21, 2026
 
 1.0.47 was built and qualified but never published; its change is included
