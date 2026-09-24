@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.53 (build 130) — candidate
+
+1.0.52 was staged but not published; its changes are included here.
+
+- Complete temporary restoration when the original item is verified off-screen
+  in its requested hidden section and display, even if macOS reinserts it at
+  a different hidden neighbor. An installed 1.0.52 popover journey had reached
+  the hidden section but its exact-slot check rejected the result and rolled
+  the item back into the visible menu bar.
+- Keep exact-slot verification for permanent layout edits and visible-section
+  restoration. Reject hidden restoration if an unrelated item changes section
+  or display.
+
 ## 1.0.52 (build 129) — candidate
 
 1.0.51 was staged but not published; its changes are included here.

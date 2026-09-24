@@ -1,5 +1,20 @@
 # Barline execution plan
 
+## Barline 1.0.53 hidden restoration candidate — September 23, 2026
+
+Build 130 supersedes the unpublished 1.0.52 candidate. The exact installed
+build 129 passed native-menu journeys but failed the popover journey after
+successful activation and action: the coordinator rejected temporary
+restoration three times with `move_postcondition_failed`, compensated back to
+the temporarily visible state, and retained the fixture-only journal. The
+helper reports destination section/display but the coordinator additionally
+requires the original hidden neighbor. For temporary rehide only, the new
+postcondition accepts the same item safely off-screen in its requested hidden
+section/display if no peer changes section/display. Permanent edits and
+visible-section restoration remain exact. Both local and remote full gates,
+signed/notarized bytes, installed native/popover journeys, and macOS 27 shelf
+latency must be rerun on this exact candidate before publication.
+
 ## Barline 1.0.52 restore-convergence candidate — September 23, 2026
 
 Build 129 supersedes the unpublished 1.0.51 candidate. An installed macOS 26

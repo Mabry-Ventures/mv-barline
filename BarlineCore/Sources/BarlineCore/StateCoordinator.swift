@@ -835,6 +835,12 @@ public actor MenuBarStateCoordinator {
                        operation: operation,
                        destinationSupport: moveDestinationSupport,
                        in: snapshot
+                   ) ?? Self.isHiddenTransientRestoration(
+                       mutation,
+                       operation: operation,
+                       destinationSupport: moveDestinationSupport,
+                       in: snapshot,
+                       from: before
                    ) ?? MenuBarMovePlanner().resultMatches(
                        operation,
                        in: snapshot,
@@ -921,7 +927,7 @@ public actor MenuBarStateCoordinator {
     /// A temporary reveal needs a usable on-screen item, not a particular
     /// insertion slot. macOS can place a newly revealed status item beside a
     /// different neighbor while preserving its visible section. Permanent
-    /// moves and transient restoration still require the exact slot.
+    /// moves and visible-section restoration still require the exact slot.
     private static func isVisibleTransientReveal(
         _ mutation: MenuBarMutation,
         operation: MenuBarMoveOperation,
@@ -935,6 +941,38 @@ public actor MenuBarStateCoordinator {
         else { return false }
         return item.section == .visible && item.isOnScreen &&
             operation.destinationDisplayID.map { item.displayID == $0 } != false
+    }
+
+    /// A temporary reveal is finished once its item is safely hidden again.
+    /// macOS may reinsert a rehidden status item beside a different hidden
+    /// neighbor; treating that harmless order drift as failure would roll the
+    /// item back into the visible menu bar. Permanent layout edits retain the
+    /// exact-neighbor postcondition.
+    private static func isHiddenTransientRestoration(
+        _ mutation: MenuBarMutation,
+        operation: MenuBarMoveOperation,
+        destinationSupport: MenuBarMoveDestinationSupport?,
+        in snapshot: MenuBarSnapshot,
+        from before: MenuBarSnapshot
+    ) -> Bool? {
+        guard case .transientMove = mutation,
+              destinationSupport != .logicalSectionsPreserveNativeOrder,
+              operation.section == .hidden || operation.section == .alwaysHidden
+        else { return nil }
+        guard let item = snapshot.items.first(where: { $0.id == operation.itemID }),
+              item.section == operation.section,
+              !item.isOnScreen,
+              operation.destinationDisplayID.map({ item.displayID == $0 }) != false,
+              snapshot.displayIDs == before.displayIDs,
+              Set(snapshot.items.map(\.id)) == Set(before.items.map(\.id))
+        else { return false }
+        return before.items.allSatisfy { original in
+            guard original.id != operation.itemID,
+                  let current = snapshot.items.first(where: { $0.id == original.id })
+            else { return original.id == operation.itemID }
+            return current.section == original.section &&
+                current.displayID == original.displayID
+        }
     }
 
     private struct VisibilityObservationSignature: Equatable {

@@ -4588,6 +4588,113 @@ struct StateCoordinatorTests {
         #expect(await coordinator.canUndo == false)
     }
 
+    @Test("Temporary rehide accepts native hidden-slot drift without rolling the item visible")
+    func transientRehideAcceptsHiddenInsertionDrift() async throws {
+        let base = makeSnapshot(generation: 1, count: 4)
+        let before = makeProfileSnapshot(
+            generation: 1,
+            layout: ProfileLayout(
+                visible: [base.items[0].id, base.items[1].id, base.items[3].id],
+                hidden: [base.items[2].id]
+            )
+        )
+        let rehidden = makeProfileSnapshot(
+            generation: 2,
+            layout: ProfileLayout(
+                visible: [base.items[0].id, base.items[1].id],
+                hidden: [base.items[2].id, base.items[3].id]
+            )
+        )
+        let operation = MenuBarMoveOperation(
+            itemID: base.items[3].id,
+            section: .hidden,
+            index: 0,
+            destinationDisplayID: MenuBarDisplayID("test-display")
+        )
+        let backend = FakeBackend(snapshots: [before, rehidden])
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+
+        let observed = try await coordinator.perform(.transientMove(operation), now: before.capturedAt)
+
+        #expect(observed == rehidden)
+        #expect(await backend.moveOperations == [operation])
+        #expect(await backend.restoredSnapshots.isEmpty)
+        #expect(await coordinator.canUndo == false)
+    }
+
+    @Test("Temporary rehide still rejects an item left in the visible section")
+    func transientRehideRejectsVisibleItem() async throws {
+        let base = makeSnapshot(generation: 1, count: 3)
+        let before = makeProfileSnapshot(
+            generation: 1,
+            layout: ProfileLayout(visible: base.items.map(\.id))
+        )
+        let unchanged = makeProfileSnapshot(
+            generation: 2,
+            layout: ProfileLayout(visible: base.items.map(\.id))
+        )
+        let rollback = makeProfileSnapshot(
+            generation: 3,
+            layout: ProfileLayout(visible: base.items.map(\.id))
+        )
+        let operation = MenuBarMoveOperation(
+            itemID: base.items[2].id,
+            section: .hidden,
+            index: 0,
+            destinationDisplayID: MenuBarDisplayID("test-display")
+        )
+        let backend = FakeBackend(snapshots: [before, unchanged, rollback])
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+
+        await #expect(throws: MenuBarBackendError.operationFailed(
+            "menu bar move did not reach requested section"
+        )) {
+            try await coordinator.perform(.transientMove(operation), now: before.capturedAt)
+        }
+        #expect(await backend.restoredSnapshots == [before])
+    }
+
+    @Test("Temporary rehide rejects unrelated section movement")
+    func transientRehideRejectsPeerSectionLeakage() async throws {
+        let base = makeSnapshot(generation: 1, count: 4)
+        let before = makeProfileSnapshot(
+            generation: 1,
+            layout: ProfileLayout(visible: base.items.map(\.id))
+        )
+        let leaked = makeProfileSnapshot(
+            generation: 2,
+            layout: ProfileLayout(
+                visible: [base.items[0].id, base.items[1].id],
+                hidden: [base.items[2].id, base.items[3].id]
+            )
+        )
+        let rollback = makeProfileSnapshot(
+            generation: 3,
+            layout: ProfileLayout(visible: base.items.map(\.id))
+        )
+        let operation = MenuBarMoveOperation(
+            itemID: base.items[3].id,
+            section: .hidden,
+            index: 0,
+            destinationDisplayID: MenuBarDisplayID("test-display")
+        )
+        let backend = FakeBackend(snapshots: [before, leaked, rollback])
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+
+        await #expect(throws: MenuBarBackendError.operationFailed(
+            "menu bar move did not reach requested section"
+        )) {
+            try await coordinator.perform(.transientMove(operation), now: before.capturedAt)
+        }
+        #expect(await backend.restoredSnapshots == [before])
+    }
+
     @Test("Temporary reveal still rejects an item that remains off screen")
     func transientRevealRejectsOffscreenItem() async throws {
         let base = makeSnapshot(generation: 1, count: 2)
