@@ -3,8 +3,8 @@
 //  Barline
 //
 
-import BarlineCore
 import ApplicationServices
+import BarlineCore
 import Cocoa
 import Combine
 import OSLog
@@ -55,6 +55,8 @@ final class HIDEventManager: ObservableObject {
         mouseDownSequence &+= 1
         switch event.type {
         case .leftMouseDown:
+            appState.menuBarManager.controlItem(withName: .visible)?
+                .notePhysicalMouseDown(eventTimestamp: event.timestamp)
             schedulePrimaryControlActionRecovery(
                 with: event,
                 appState: appState,
@@ -187,15 +189,16 @@ extension HIDEventManager {
         appState: AppState,
         screen: NSScreen
     ) {
+        guard let click = event.cgEvent,
+              let control = appState.menuBarManager.controlItem(withName: .visible) else { return }
+        let exactButtonHit = control.containsEventLocation(click.unflippedLocation)
         guard
-            let click = event.cgEvent,
-            let control = appState.menuBarManager.controlItem(withName: .visible),
             isMouseInsideMenuBar(
                 appState: appState,
                 screen: screen,
                 location: click.unflippedLocation
             ),
-            control.containsEventLocation(click.unflippedLocation),
+            exactButtonHit,
             StatusItemActionRecoveryCoordinator.shouldSchedulePrimaryRecovery(
                 eventTargetsShelf: {
                     let shelf = appState.menuBarManager.barlineShelfPanel
@@ -203,7 +206,7 @@ extension HIDEventManager {
                         shelf.isVisible && shelf.frame.contains(click.unflippedLocation)
                     )
                 }(),
-                eventLocationIsInsideExactButtonFrame: true,
+                eventLocationIsInsideExactButtonFrame: exactButtonHit,
                 eventTargetsAccessibleControl: topmostElementIsPrimaryControl(at: click.location)
             )
         else { return }
@@ -221,16 +224,34 @@ extension HIDEventManager {
     /// closed, leaving AppKit's native action path intact.
     private func topmostElementIsPrimaryControl(at point: CGPoint) -> Bool {
         guard #available(macOS 27.0, *) else { return true }
+        let systemWide = AXUIElementCreateSystemWide()
+        // This is called for the exact dot only. Bound synchronous AX IPC so
+        // an unresponsive target cannot stall the global mouse-down handler.
+        guard AXUIElementSetMessagingTimeout(systemWide, 0.05) == .success else {
+            return false
+        }
+        defer { _ = AXUIElementSetMessagingTimeout(systemWide, 0) }
         var hit: AXUIElement?
         guard AXUIElementCopyElementAtPosition(
-            AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hit
+            systemWide, Float(point.x), Float(point.y), &hit
         ) == .success, let hit else { return false }
-        var owner: pid_t = 0
-        guard AXUIElementGetPid(hit, &owner) == .success,
-              owner == ProcessInfo.processInfo.processIdentifier else { return false }
-        var identifier: CFTypeRef?
-        return AXUIElementCopyAttributeValue(hit, "AXIdentifier" as CFString, &identifier) == .success &&
-            identifier as? String == ControlItem.Identifier.visible.rawValue
+        var element = hit
+        for _ in 0 ..< 4 {
+            var owner: pid_t = 0
+            guard AXUIElementGetPid(element, &owner) == .success,
+                  owner == ProcessInfo.processInfo.processIdentifier else { return false }
+            var identifier: CFTypeRef?
+            if AXUIElementCopyAttributeValue(element, "AXIdentifier" as CFString, &identifier) == .success,
+               identifier as? String == ControlItem.Identifier.visible.rawValue
+            {
+                return true
+            }
+            var parent: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success,
+                  let parent, CFGetTypeID(parent) == AXUIElementGetTypeID() else { return false }
+            element = unsafeDowncast(parent, to: AXUIElement.self)
+        }
+        return false
     }
 
     // MARK: Handle Show On Click

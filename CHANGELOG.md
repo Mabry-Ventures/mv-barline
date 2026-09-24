@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.0.58 (build 135) — candidate
+
+1.0.57 was staged but not published. Independent review found that its
+fail-closed macOS 27 ownership check could leave a two-second duplicate-action
+window suppressing a distinct native click.
+
+- End duplicate-action ownership at the next physical mouse-down, including
+  when Accessibility cannot resolve the new click; still suppress a late
+  mouse-up from the recovered click itself.
+- Resolve Barline's status control through a bounded Accessibility parent
+  chain and cap the hit test's messaging timeout. Keep the exact-button-frame
+  gate before invoking the hit test.
+- Cover ambiguous AX ownership, consecutive native clicks, a held-click
+  release, and cancellation of a pending fallback in coordinator tests.
+
 ## 1.0.57 (build 134) — candidate
 
 1.0.56 was staged but not published. Its installed macOS 27 fixture journey

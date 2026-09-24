@@ -372,6 +372,10 @@ final class ControlItem {
         }
     }
 
+    func notePhysicalMouseDown(eventTimestamp: TimeInterval) {
+        actionRecoveryCoordinator.notePhysicalMouseDown(eventTimestamp: eventTimestamp)
+    }
+
     /// Updates the appearance of the status item using the current hiding state.
     private func updateStatusItem() {
         guard
@@ -563,7 +567,8 @@ final class ControlItem {
             let modifierFlags = NSEvent.modifierFlags
             if identifier == .visible {
                 guard actionRecoveryCoordinator.claimNativeAction(
-                    eventTimestamp: event.timestamp
+                    eventTimestamp: event.timestamp,
+                    isMouseUp: event.type == .leftMouseUp
                 ) else {
                     logger.notice("Suppressed a late duplicate status-item action")
                     return

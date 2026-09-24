@@ -53,17 +53,35 @@ public struct StatusItemActionRecoveryCoordinator: Sendable {
         return true
     }
 
+    /// A different physical mouse-down ends duplicate-action ownership from a
+    /// recovered click, even when AX cannot identify the new click's target.
+    public mutating func notePhysicalMouseDown(eventTimestamp: TimeInterval) {
+        if let pendingClick, abs(pendingClick.eventTimestamp - eventTimestamp) > 0.001 {
+            self.pendingClick = nil
+        }
+        if let lastFallbackEventTimestamp,
+           abs(lastFallbackEventTimestamp - eventTimestamp) > 0.001
+        {
+            self.lastFallbackEventTimestamp = nil
+        }
+    }
+
     /// Claims delivery through AppKit's native target/action path.
     ///
     /// Returns `false` only when the fallback already handled this click.
-    public mutating func claimNativeAction(eventTimestamp: TimeInterval) -> Bool {
+    public mutating func claimNativeAction(
+        eventTimestamp: TimeInterval,
+        isMouseUp: Bool = false
+    ) -> Bool {
         if pendingClick != nil {
             pendingClick = nil
             lastNativeEventTimestamp = eventTimestamp
             return true
         }
         if let lastFallbackEventTimestamp,
-           abs(eventTimestamp - lastFallbackEventTimestamp) <= 2
+           abs(eventTimestamp - lastFallbackEventTimestamp) <= 0.001 ||
+           (isMouseUp && eventTimestamp >= lastFallbackEventTimestamp &&
+               eventTimestamp - lastFallbackEventTimestamp <= 2)
         {
             self.lastFallbackEventTimestamp = nil
             return false
