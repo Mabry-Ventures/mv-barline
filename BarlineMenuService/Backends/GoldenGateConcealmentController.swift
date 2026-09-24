@@ -100,7 +100,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             barlineBundleIdentifier: "com.mabryventures.Barline"
         )
         logger.notice(
-            "Concealment state: desiredVisible=\(desiredConfiguration.visibleItemIDs.count, privacy: .public) desiredHidden=\(desiredConfiguration.concealedItemIDs.count, privacy: .public) temporaryVisible=\(temporarilyVisible.count, privacy: .public) concealedBundles=\(resolved.concealedBundleIdentifiers.count, privacy: .public)"
+            "Concealment state: desiredVisible=\(self.desiredConfiguration.visibleItemIDs.count, privacy: .public) desiredHidden=\(self.desiredConfiguration.concealedItemIDs.count, privacy: .public) temporaryVisible=\(temporarilyVisible.count, privacy: .public) concealedBundles=\(resolved.concealedBundleIdentifiers.count, privacy: .public)"
         )
         // Assessment-mode assertions are stateful. Replacing a healthy
         // assertion with an identical one on every shelf click can be rejected
