@@ -27,12 +27,14 @@ fixtures << base.merge('kind' => 'xpc-interruption', 'evidence' => {
   'appProcessPreserved' => true, 'replacementHelperObserved' => true,
   'recoveryInteractionObserved' => true, 'originalPointerRestored' => true
 })
-fixtures << base.merge('kind' => 'performance', 'evidence' => {
+performance = base.merge('kind' => 'performance', 'phase' => 'baseline', 'evidence' => {
   'probe' => 'status-item-click', 'samples' => 20, 'timeouts' => 0,
-  'p95Milliseconds' => 250, 'budgetMilliseconds' => 250,
+  'p95Milliseconds' => 250, 'maxMilliseconds' => 265, 'budgetMilliseconds' => 250,
   'rapidRetryFeedbackInBudget' => true, 'silentCancellation' => false,
   'originalPointerRestored' => true
 })
+fixtures << performance
+fixtures << performance.merge('phase' => 'post-xpc')
 count = 0
 check = lambda do |label, expected, mutation = nil, raw: nil, args: []|
   Dir.mktmpdir('barline-validator-tests-') do |directory|
@@ -51,7 +53,7 @@ check = lambda do |label, expected, mutation = nil, raw: nil, args: []|
 end
 check.call('complete candidate', true)
 check.call('missing all', false, ->(v) { v.clear })
-6.times { |i| check.call("missing receipt #{i}", false, ->(v) { v.delete_at(i) }) }
+fixtures.length.times { |i| check.call("missing receipt #{i}", false, ->(v) { v.delete_at(i) }) }
 check.call('wrong source', false, ->(v) { v[0]['sourceSHA'] = 'c' * 40 })
 check.call('wrong executable', false, ->(v) { v[4]['executableSHA256'] = 'c' * 64 })
 check.call('missing identity', false, ->(v) { v[1].delete('sourceSHA') })
@@ -79,8 +81,11 @@ fixtures[4]['evidence'].each_key do |field|
 end
 check.call('Settings recovery', false, ->(v) { v[4]['evidence']['recoveryProbe'] = 'apple-event-reopen' })
 check.call('debug performance', false, ->(v) { v[5]['evidence']['probe'] = 'runtime-smoke' })
+check.call('missing performance phase', false, ->(v) { v[5].delete('phase') })
+check.call('duplicate performance phase', false, ->(v) { v[6]['phase'] = 'baseline' })
 { 'samples' => [0, 19, 1001, 20.0, '20', true], 'timeouts' => [1, -1, 0.0, '0'],
   'p95Milliseconds' => [-1, 250.01, '25', nil, true],
+  'maxMilliseconds' => [249, -1, '265', nil],
   'budgetMilliseconds' => [0, -1, 251, '250', nil] }.each do |field, values|
   values.each do |value|
     check.call("invalid performance #{field}", false, ->(v) { v[5]['evidence'][field] = value })

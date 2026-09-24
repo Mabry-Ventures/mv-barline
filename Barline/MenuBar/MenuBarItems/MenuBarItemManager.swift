@@ -1117,7 +1117,7 @@ extension MenuBarItemManager {
             let priorProfileID = await appState.compatibilityCoordinator.activeProfileID
             let mutation: BarlineCore.MenuBarMutation = recordsHistory
                 ? .move(operation)
-                : .transientMove(operation)
+                : .transientReveal(operation)
             _ = try await appState.compatibilityCoordinator.perform(
                 mutation,
                 expectedGeneration: snapshot.generation,

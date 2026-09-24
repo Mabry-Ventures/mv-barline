@@ -10,7 +10,8 @@ source = 'a' * 40
 executable = 'b' * 64
 environment = {
   'BARLINE_SOURCE_SHA' => source, 'BARLINE_EXECUTABLE_SHA256' => executable,
-  'BARLINE_JOURNEY_LANE' => 'native-left', 'BARLINE_PERFORMANCE_PROBE' => 'status-item-click'
+  'BARLINE_JOURNEY_LANE' => 'native-left', 'BARLINE_PERFORMANCE_PROBE' => 'status-item-click',
+  'BARLINE_PERFORMANCE_PHASE' => 'baseline'
 }
 target = {
   'schema' => 1, 'sourceSHA' => source, 'executableSHA256' => executable,
@@ -55,6 +56,10 @@ check = lambda do |label, kind, log, passes, env: {}, existing: false|
 end
 check.call('target valid', 'target-interface', target_log, true)
 check.call('performance valid', 'performance', performance_log, true)
+check.call('post-XPC performance valid', 'performance', performance_log, true,
+  env: { 'BARLINE_PERFORMANCE_PHASE' => 'post-xpc' })
+check.call('invalid performance phase', 'performance', performance_log, false,
+  env: { 'BARLINE_PERFORMANCE_PHASE' => 'unknown' })
 check.call('one-sample XPC valid', 'xpc-interruption', xpc_log, true)
 check.call('right target valid', 'target-interface', target_log.sub('"button":"left"', '"button":"right"'), true,
   env: { 'BARLINE_JOURNEY_LANE' => 'native-right' })
@@ -89,6 +94,7 @@ check.call('duplicate result', 'target-interface', target_log + target_log, fals
 check.call('existing receipt', 'target-interface', target_log, false, existing: true)
 check.call('performance missing pointer', 'performance', performance_result, false)
 check.call('performance wrong probe', 'performance', performance_log, false, env: { 'BARLINE_PERFORMANCE_PROBE' => 'runtime-smoke' })
+check.call('performance invalid maximum', 'performance', performance_log.sub('max_ms=65.0', 'max_ms=40.0'), false)
 %w[samples=19 timeouts=1 p95_ms=251.0 p95_ms=NaN feedback_in_250ms=false silent_cancellation=true verdict=FAIL verdict=OBSERVED].each do |replacement|
   key = replacement.split('=').first
   check.call(replacement, 'performance', performance_log.sub(/#{key}=[^\s]+/, replacement), false)

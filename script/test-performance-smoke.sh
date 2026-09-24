@@ -169,7 +169,8 @@ if [[ -n "${BARLINE_EVIDENCE_OUTPUT:-}" ]]; then
         BARLINE_EXPECTED_PID="$APP_PID" BARLINE_PERFORMANCE_PROBE="$PROBE" \
         "$BINARY" | tee "$BARLINE_EVIDENCE_OUTPUT.log"
     barline_verify_installed_candidate
-    BARLINE_PERFORMANCE_PROBE="$PROBE" ruby "$ROOT/script/write-installed-evidence.rb" \
+    BARLINE_PERFORMANCE_PROBE="$PROBE" BARLINE_PERFORMANCE_PHASE="${BARLINE_PERFORMANCE_PHASE:-baseline}" \
+        ruby "$ROOT/script/write-installed-evidence.rb" \
         --kind performance --log "$BARLINE_EVIDENCE_OUTPUT.log" --output "$BARLINE_EVIDENCE_OUTPUT"
 elif [[ -n "$OUTPUT_PATH" ]]; then
     mkdir -p "$(dirname "$OUTPUT_PATH")"

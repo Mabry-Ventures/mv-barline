@@ -6,7 +6,9 @@
   places the item beside a different native neighbor. Permanent layout edits
   and restoration retain their exact-position verification.
 - Exercise twenty post-recovery shelf opens so the installed latency p95 gate
-  has a meaningful sample after XPC helper interruption.
+  has a meaningful sample after XPC helper interruption. Keep separate
+  candidate-bound baseline and post-interruption receipts, including each
+  run's slowest click.
 
 ## 1.0.50 (build 127) — candidate
 

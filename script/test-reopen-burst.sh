@@ -64,6 +64,7 @@ if ! "$REUSE_RUNNING"; then
     BARLINE_RUNTIME_SMOKE=1 "$ROOT/script/build_and_run.sh" --verify
 fi
 BARLINE_PERFORMANCE_CYCLES=20 BARLINE_PERFORMANCE_WARMUPS=1 \
+    BARLINE_PERFORMANCE_PHASE=baseline \
     BARLINE_EVIDENCE_OUTPUT="${BARLINE_INSTALLED_EVIDENCE_DIR:+$BARLINE_INSTALLED_EVIDENCE_DIR/performance.json}" \
     "$ROOT/script/test-performance-smoke.sh" --reuse-running --probe "$PROBE"
 
@@ -75,6 +76,7 @@ BARLINE_EVIDENCE_OUTPUT="${BARLINE_INSTALLED_EVIDENCE_DIR:+$BARLINE_INSTALLED_EV
     "$ROOT/script/test-xpc-interruption.sh" \
     --reuse-running --recovery-probe "$PROBE"
 BARLINE_PERFORMANCE_CYCLES=20 BARLINE_PERFORMANCE_WARMUPS=1 \
-    BARLINE_EVIDENCE_OUTPUT="" \
+    BARLINE_PERFORMANCE_PHASE=post-xpc \
+    BARLINE_EVIDENCE_OUTPUT="${BARLINE_INSTALLED_EVIDENCE_DIR:+$BARLINE_INSTALLED_EVIDENCE_DIR/post-xpc-performance.json}" \
     "$ROOT/script/test-performance-smoke.sh" --reuse-running --probe "$PROBE"
 printf 'PASS: nonactivating shelf burst and one helper recovery; Settings reopen and soak are separate lanes\n'

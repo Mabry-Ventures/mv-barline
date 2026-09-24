@@ -7,10 +7,11 @@ build 127 passed the macOS 26 signed Sparkle upgrade but failed a physical
 hidden-item click: macOS moved the item into view at a different native slot,
 so the strict temporary-move postcondition prevented activation. The new
 postcondition requires the same item on the intended display, in the visible
-section, and on screen; permanent arrangement and restoration still require
-exact placement. The macOS 27 post-helper p95 sample expands from five to
-twenty real opens. Rebuild, sign, notarize, and repeat installed journeys on
-both macOS 26 and 27 before publication.
+section, and on screen; an explicit transaction kind keeps permanent
+arrangement and every restoration on exact placement verification. The macOS
+27 post-helper p95 sample expands from five to twenty real opens and emits its
+own candidate-bound receipt with maximum latency. Rebuild, sign, notarize, and
+repeat installed journeys on both macOS 26 and 27 before publication.
 
 ## Barline 1.0.50 responsive shelf candidate — September 23, 2026
 

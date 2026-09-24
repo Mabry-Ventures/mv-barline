@@ -12,21 +12,23 @@ public enum MenuBarAuthorityRefreshError: Error, Equatable, Sendable {
 
 public enum MenuBarMutation: Sendable {
     case move(MenuBarMoveOperation)
+    case transientReveal(MenuBarMoveOperation)
     case transientMove(MenuBarMoveOperation)
     case reveal(MenuBarItemID)
     case restoreLastKnownGood
 
     fileprivate var recordsLayoutHistory: Bool {
-        if case .transientMove = self {
+        switch self {
+        case .transientReveal, .transientMove:
             false
-        } else {
+        case .move, .reveal, .restoreLastKnownGood:
             true
         }
     }
 
     fileprivate var moveOperation: MenuBarMoveOperation? {
         switch self {
-        case let .move(operation), let .transientMove(operation):
+        case let .move(operation), let .transientReveal(operation), let .transientMove(operation):
             operation
         case .reveal, .restoreLastKnownGood:
             nil
@@ -833,14 +835,13 @@ public actor MenuBarStateCoordinator {
                        operation: operation,
                        destinationSupport: moveDestinationSupport,
                        in: snapshot
-                   ) ||
-                       MenuBarMovePlanner().resultMatches(
-                           operation,
-                           in: snapshot,
-                           from: before,
-                           destinationSupport: moveDestinationSupport,
-                           visibilityAssignmentGranularity: visibilityAssignmentGranularity
-                       ))
+                   ) ?? MenuBarMovePlanner().resultMatches(
+                       operation,
+                       in: snapshot,
+                       from: before,
+                       destinationSupport: moveDestinationSupport,
+                       visibilityAssignmentGranularity: visibilityAssignmentGranularity
+                   ))
                 {
                     if moveDestinationSupport == .logicalSectionsPreserveNativeOrder,
                        let failure = MenuBarMovePlanner().logicalSectionVerificationFailure(
@@ -926,10 +927,10 @@ public actor MenuBarStateCoordinator {
         operation: MenuBarMoveOperation,
         destinationSupport: MenuBarMoveDestinationSupport?,
         in snapshot: MenuBarSnapshot
-    ) -> Bool {
-        guard case .transientMove = mutation,
-              destinationSupport != .logicalSectionsPreserveNativeOrder,
-              operation.section == .visible,
+    ) -> Bool? {
+        guard case .transientReveal = mutation else { return nil }
+        guard destinationSupport != .logicalSectionsPreserveNativeOrder else { return nil }
+        guard operation.section == .visible,
               let item = snapshot.items.first(where: { $0.id == operation.itemID })
         else { return false }
         return item.section == .visible && item.isOnScreen &&
@@ -2409,7 +2410,7 @@ public actor MenuBarStateCoordinator {
         in snapshot: MenuBarSnapshot
     ) throws {
         let itemID: MenuBarItemID? = switch mutation {
-        case let .move(operation), let .transientMove(operation):
+        case let .move(operation), let .transientReveal(operation), let .transientMove(operation):
             operation.itemID
         case let .reveal(referencedItemID):
             referencedItemID
@@ -2427,11 +2428,19 @@ public actor MenuBarStateCoordinator {
         {
             throw MenuBarBackendError.operationFailed("menu bar item cannot be hidden")
         }
-        if case let .transientMove(operation) = mutation,
-           operation.section != .visible,
-           snapshot.items.first(where: { $0.id == operation.itemID })?.canBeHidden == false
-        {
-            throw MenuBarBackendError.operationFailed("menu bar item cannot be hidden")
+        switch mutation {
+        case let .transientReveal(operation):
+            guard operation.section == .visible else {
+                throw MenuBarBackendError.operationFailed("temporary reveal must target visible section")
+            }
+        case let .transientMove(operation):
+            if operation.section != .visible,
+               snapshot.items.first(where: { $0.id == operation.itemID })?.canBeHidden == false
+            {
+                throw MenuBarBackendError.operationFailed("menu bar item cannot be hidden")
+            }
+        case .move, .reveal, .restoreLastKnownGood:
+            break
         }
     }
 
@@ -2567,7 +2576,7 @@ public actor MenuBarStateCoordinator {
         restoreTarget: MenuBarSnapshot? = nil
     ) async throws {
         switch mutation {
-        case let .move(operation), let .transientMove(operation):
+        case let .move(operation), let .transientReveal(operation), let .transientMove(operation):
             _ = try await backend.move(operation)
         case let .reveal(itemID):
             _ = try await backend.reveal(itemID)
