@@ -158,6 +158,12 @@ if golden_gate_snapshot.match?(/canonicalization\.repairedItemIDs.*?preparePersi
    golden_gate_snapshot.match?(/canonicalization\.repairedItemIDs.*?commitPersistence/m)
   abort('Golden Gate snapshot read must not persist transient fail-visible canonicalization')
 end
+unless golden_gate_provider.match?(/assignmentsForPersistence\(.*?editing: requiredItemIDs/m)
+  abort('Golden Gate persistence must scope writes to explicitly edited item identities')
+end
+if golden_gate_snapshot.match?(/else if retainedInventoryNeedsUpdate/)
+  abort('Golden Gate retained inventory must refresh even during transient fail-visible normalization')
+end
 
 unless golden_gate_positions.match?(/func readPositions\(.*?authorizeAccess.*?defer \{ scopedURL\?\.stopAccessingSecurityScopedResource\(\) \}.*?readPreferences/m) &&
        golden_gate_positions.match?(/func apply\(.*?authorizeAccess.*?defer \{ scopedURL\?\.stopAccessingSecurityScopedResource\(\) \}/m) &&

@@ -1,6 +1,20 @@
 # Changelog
 
-## 1.0.60 (build 137) — candidate
+## 1.0.61 (build 138) — candidate
+
+1.0.60 was staged but not published. Independent review found that an
+unrelated layout edit could still save a transient fail-visible state over a
+hidden assignment.
+
+- Persist only the identities the user explicitly edited. A temporary status
+  item can no longer erase another app's saved hidden assignment when the user
+  edits a different app or reorders the shelf.
+- Keep retained-inventory refresh independent of transient fail-visible
+  normalization, and lower repetitive diagnostic logging.
+- Cover unrelated visibility edits, shelf ordering, and intentional changes
+  to the affected group.
+
+## 1.0.60 (build 137) — staged, not published
 
 - Keep macOS 27 fail-visible normalization transient. A newly launched item
   from an app whose other items are hidden can temporarily make that bundle

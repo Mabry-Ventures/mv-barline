@@ -451,14 +451,15 @@ actor GoldenGateAXSnapshotProvider {
                 // A temporary item from the same bundle can make an otherwise
                 // supported saved assignment mixed. Fail visible for this
                 // snapshot, but never replace the user's saved intent on a read.
-                logger.info(
+                logger.debug(
                     "Golden Gate temporarily failed unsupported concealment visible: count=\(canonicalization.repairedItemIDs.count, privacy: .public)"
                 )
-            } else if retainedInventoryNeedsUpdate(from: result),
-                      let prepared = try? prepareRetainedInventory(
-                          from: result,
-                          requiredItemIDs: []
-                      )
+            }
+            if retainedInventoryNeedsUpdate(from: result),
+               let prepared = try? prepareRetainedInventory(
+                   from: result,
+                   requiredItemIDs: []
+               )
             {
                 commitRetainedInventory(prepared)
             }
@@ -764,7 +765,14 @@ actor GoldenGateAXSnapshotProvider {
         }
         let persistence = try preparePersistence(
             from: candidate,
-            requiredItemIDs: [operation.itemID]
+            requiredItemIDs: Set(candidate.items.compactMap { item in
+                guard item.section == operation.section,
+                      !item.isBarlineControlItem,
+                      explicitAssignments[item.id]?.section == operation.section ||
+                      item.id == operation.itemID
+                else { return nil }
+                return item.id
+            })
         )
         guard commitPersistence(persistence) else {
             throw MenuBarBackendError.mutationNotStarted
@@ -1055,6 +1063,7 @@ actor GoldenGateAXSnapshotProvider {
         let assignmentCandidates = logicalLayoutPlanner.assignmentsForPersistence(
             from: snapshot,
             preserving: explicitAssignments,
+            editing: requiredItemIDs,
             barlineBundleIdentifier: Bundle.main.bundleIdentifier
                 ?? "com.mabryventures.Barline",
             maximumCount: Self.maximumRememberedAssignments * 2

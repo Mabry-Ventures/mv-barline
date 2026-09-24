@@ -164,6 +164,7 @@ struct GoldenGateLogicalLayoutPlannerTests {
         let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
             from: before,
             preserving: existing,
+            editing: [id(1)],
             barlineBundleIdentifier: "com.mabryventures.Barline",
             maximumCount: 10
         )
@@ -188,11 +189,87 @@ struct GoldenGateLogicalLayoutPlannerTests {
         let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
             from: before,
             preserving: existing,
+            editing: [id(1)],
             barlineBundleIdentifier: "com.mabryventures.Barline",
             maximumCount: 3
         )
 
         #expect(assignments.map(\.itemID) == [id(1), id(2), id(3)])
+    }
+
+    @Test("Unrelated visibility edit cannot save transient fail-visible state")
+    func persistenceEditsOnlyRequestedIdentity() {
+        let saved = [
+            id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .hidden, rank: 0),
+            id(2): GoldenGateLogicalAssignment(itemID: id(2), section: .hidden, rank: 1),
+            id(3): GoldenGateLogicalAssignment(itemID: id(3), section: .visible, rank: 0),
+        ]
+        let runtime = snapshot([
+            item(1, section: .visible, order: 0),
+            item(2, section: .visible, order: 1),
+            item(4, section: .visible, order: 2), // temporary, unsaved sibling
+            item(3, section: .hidden, order: 3), // unrelated explicit edit
+        ])
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: runtime,
+            preserving: saved,
+            editing: [id(3)],
+            barlineBundleIdentifier: "com.mabryventures.Barline",
+            maximumCount: 10
+        )
+        let byID = Dictionary(uniqueKeysWithValues: assignments.map { ($0.itemID, $0) })
+
+        #expect(byID[id(1)]?.section == .hidden)
+        #expect(byID[id(2)]?.section == .hidden)
+        #expect(byID[id(3)]?.section == .hidden)
+        #expect(byID[id(4)] == nil)
+    }
+
+    @Test("Shelf reorder preserves unrelated hidden intent")
+    func shelfReorderEditsOnlyItsSection() {
+        let saved = [
+            id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .hidden, rank: 0),
+            id(2): GoldenGateLogicalAssignment(itemID: id(2), section: .hidden, rank: 0),
+            id(3): GoldenGateLogicalAssignment(itemID: id(3), section: .hidden, rank: 1),
+        ]
+        let runtime = snapshot([
+            item(1, section: .visible, order: 0), // temporarily fail-visible
+            item(3, section: .hidden, order: 1),
+            item(2, section: .hidden, order: 2),
+        ])
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: runtime,
+            preserving: saved,
+            editing: [id(2), id(3)],
+            barlineBundleIdentifier: "com.mabryventures.Barline",
+            maximumCount: 10
+        )
+        let byID = Dictionary(uniqueKeysWithValues: assignments.map { ($0.itemID, $0) })
+
+        #expect(byID[id(1)] == saved[id(1)])
+        #expect(byID[id(3)]?.rank == 0)
+        #expect(byID[id(2)]?.rank == 1)
+    }
+
+    @Test("Editing the previously hidden group intentionally replaces its intent")
+    func explicitGroupEditCanMakeItemsVisible() {
+        let saved = [
+            id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .hidden, rank: 0),
+            id(2): GoldenGateLogicalAssignment(itemID: id(2), section: .hidden, rank: 1),
+        ]
+        let runtime = snapshot([
+            item(1, section: .visible, order: 0),
+            item(2, section: .visible, order: 1),
+        ])
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: runtime,
+            preserving: saved,
+            editing: [id(1), id(2)],
+            barlineBundleIdentifier: "com.mabryventures.Barline",
+            maximumCount: 10
+        )
+
+        #expect(assignments.allSatisfy { $0.section == .visible })
     }
 
     @Test("Restore applies target sections and advances generation")
