@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.60 (build 137) — candidate
+
+- Keep macOS 27 fail-visible normalization transient. A newly launched item
+  from an app whose other items are hidden can temporarily make that bundle
+  impossible to conceal as a group. Barline now leaves the saved hidden layout
+  intact and restores it when that item exits, instead of overwriting the
+  user's choice while reading the menu bar.
+- Add a regression for mixed temporary items and a source guard that prevents
+  snapshot reads from persisting canonicalized visibility.
+
 ## 1.0.59 (build 136) — diagnostic candidate, not for distribution
 
 - Record privacy-safe counts at the macOS 27 logical-layout and native

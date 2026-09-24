@@ -448,23 +448,12 @@ actor GoldenGateAXSnapshotProvider {
         }
         if verificationAssignments == nil {
             if !canonicalization.repairedItemIDs.isEmpty {
-                do {
-                    let prepared = try preparePersistence(
-                        from: result,
-                        requiredItemIDs: canonicalization.repairedItemIDs
-                    )
-                    if commitPersistence(prepared) {
-                        logger.notice(
-                            "Golden Gate repaired unsupported legacy concealment assignments: count=\(canonicalization.repairedItemIDs.count, privacy: .public)"
-                        )
-                    } else {
-                        logger.error("Golden Gate legacy concealment repair could not be synchronized")
-                    }
-                } catch {
-                    logger.error(
-                        "Golden Gate legacy concealment repair could not be prepared: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
-                    )
-                }
+                // A temporary item from the same bundle can make an otherwise
+                // supported saved assignment mixed. Fail visible for this
+                // snapshot, but never replace the user's saved intent on a read.
+                logger.info(
+                    "Golden Gate temporarily failed unsupported concealment visible: count=\(canonicalization.repairedItemIDs.count, privacy: .public)"
+                )
             } else if retainedInventoryNeedsUpdate(from: result),
                       let prepared = try? prepareRetainedInventory(
                           from: result,

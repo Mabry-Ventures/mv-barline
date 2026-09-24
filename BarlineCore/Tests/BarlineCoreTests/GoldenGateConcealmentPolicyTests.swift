@@ -53,6 +53,37 @@ struct GoldenGateConcealmentPolicyTests {
         #expect(canonical.concealedItemIDs.isEmpty)
     }
 
+    @Test("Temporary visible item must not erase a saved hidden bundle")
+    func temporaryVisibleSiblingRestoresSavedConcealment() {
+        let first = item("com.example.fixture", "Native")
+        let second = item("com.example.fixture", "Popover")
+        let temporary = item("com.example.fixture", "UI Test")
+        let saved = MenuBarConcealmentConfiguration(
+            visibleItemIDs: [],
+            concealedItemIDs: [first, second]
+        )
+        let mixed = MenuBarConcealmentConfiguration(
+            visibleItemIDs: [temporary],
+            concealedItemIDs: saved.concealedItemIDs
+        )
+
+        let failVisible = GoldenGateConcealmentPolicy.canonicalConfiguration(
+            mixed,
+            allItems: [first, second, temporary],
+            barlineBundleIdentifier: barlineID
+        )
+        #expect(failVisible.visibleItemIDs == [first, second, temporary])
+        #expect(failVisible.concealedItemIDs.isEmpty)
+
+        let restored = GoldenGateConcealmentPolicy.canonicalConfiguration(
+            saved,
+            allItems: [first, second],
+            barlineBundleIdentifier: barlineID
+        )
+        #expect(restored.visibleItemIDs.isEmpty)
+        #expect(restored.concealedItemIDs == [first, second])
+    }
+
     @Test("Canonicalization preserves supported whole-app concealment")
     func canonicalizationPreservesWholeAppConcealment() {
         let first = item("com.example.stats", "CPU")
