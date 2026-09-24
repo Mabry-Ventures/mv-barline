@@ -828,13 +828,19 @@ public actor MenuBarStateCoordinator {
                 }
 
                 if let operation = mutation.moveOperation,
-                   !MenuBarMovePlanner().resultMatches(
-                       operation,
-                       in: snapshot,
-                       from: before,
+                   !(Self.isVisibleTransientReveal(
+                       mutation,
+                       operation: operation,
                        destinationSupport: moveDestinationSupport,
-                       visibilityAssignmentGranularity: visibilityAssignmentGranularity
-                   )
+                       in: snapshot
+                   ) ||
+                       MenuBarMovePlanner().resultMatches(
+                           operation,
+                           in: snapshot,
+                           from: before,
+                           destinationSupport: moveDestinationSupport,
+                           visibilityAssignmentGranularity: visibilityAssignmentGranularity
+                       ))
                 {
                     if moveDestinationSupport == .logicalSectionsPreserveNativeOrder,
                        let failure = MenuBarMovePlanner().logicalSectionVerificationFailure(
@@ -909,6 +915,25 @@ public actor MenuBarStateCoordinator {
         throw mostRecentError ?? MenuBarBackendError.operationFailed(
             "menu bar mutation postcondition was unavailable"
         )
+    }
+
+    /// A temporary reveal needs a usable on-screen item, not a particular
+    /// insertion slot. macOS can place a newly revealed status item beside a
+    /// different neighbor while preserving its visible section. Permanent
+    /// moves and transient restoration still require the exact slot.
+    private static func isVisibleTransientReveal(
+        _ mutation: MenuBarMutation,
+        operation: MenuBarMoveOperation,
+        destinationSupport: MenuBarMoveDestinationSupport?,
+        in snapshot: MenuBarSnapshot
+    ) -> Bool {
+        guard case .transientMove = mutation,
+              destinationSupport != .logicalSectionsPreserveNativeOrder,
+              operation.section == .visible,
+              let item = snapshot.items.first(where: { $0.id == operation.itemID })
+        else { return false }
+        return item.section == .visible && item.isOnScreen &&
+            operation.destinationDisplayID.map { item.displayID == $0 } != false
     }
 
     private struct VisibilityObservationSignature: Equatable {

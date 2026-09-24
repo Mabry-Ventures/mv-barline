@@ -4513,6 +4513,73 @@ struct StateCoordinatorTests {
         #expect(await coordinator.currentSnapshot == verifiedRollback)
     }
 
+    @Test("Temporary reveal accepts an on-screen item at a different native insertion slot")
+    func transientRevealAcceptsNativeInsertionDrift() async throws {
+        let base = makeSnapshot(generation: 1, count: 3)
+        let before = makeProfileSnapshot(
+            generation: 1,
+            layout: ProfileLayout(
+                visible: [base.items[0].id, base.items[1].id],
+                hidden: [base.items[2].id]
+            )
+        )
+        let after = makeProfileSnapshot(
+            generation: 2,
+            layout: ProfileLayout(
+                visible: [base.items[2].id, base.items[0].id, base.items[1].id]
+            )
+        )
+        let operation = MenuBarMoveOperation(
+            itemID: base.items[2].id,
+            section: .visible,
+            index: 2,
+            destinationDisplayID: MenuBarDisplayID("test-display")
+        )
+        let backend = FakeBackend(snapshots: [before, after])
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+
+        let observed = try await coordinator.perform(.transientMove(operation), now: before.capturedAt)
+
+        #expect(observed == after)
+        #expect(await backend.moveOperations == [operation])
+        #expect(await coordinator.canUndo == false)
+    }
+
+    @Test("Temporary reveal still rejects an item that remains off screen")
+    func transientRevealRejectsOffscreenItem() async throws {
+        let base = makeSnapshot(generation: 1, count: 2)
+        let before = makeProfileSnapshot(
+            generation: 1,
+            layout: ProfileLayout(visible: [base.items[0].id], hidden: [base.items[1].id])
+        )
+        let offscreen = makeProfileSnapshot(
+            generation: 2,
+            layout: ProfileLayout(visible: [base.items[0].id], hidden: [base.items[1].id])
+        )
+        let rollback = makeProfileSnapshot(
+            generation: 3,
+            layout: ProfileLayout(visible: [base.items[0].id], hidden: [base.items[1].id])
+        )
+        let operation = MenuBarMoveOperation(
+            itemID: base.items[1].id,
+            section: .visible,
+            index: 1,
+            destinationDisplayID: MenuBarDisplayID("test-display")
+        )
+        let backend = FakeBackend(snapshots: [before, offscreen, rollback])
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+
+        await #expect(throws: MenuBarBackendError.operationFailed(
+            "menu bar move did not reach requested section"
+        )) {
+            try await coordinator.perform(.transientMove(operation), now: before.capturedAt)
+        }
+        #expect(await backend.restoredSnapshots == [before])
+    }
+
     @Test("Logical section moves ignore synthetic insertion slots while preserving native order")
     func acceptsLogicalSectionMoveAtNativeOrder() async throws {
         let base = makeSnapshot(generation: 1, count: 3)

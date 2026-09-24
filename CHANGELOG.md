@@ -1,6 +1,16 @@
 # Changelog
 
+## 1.0.51 (build 128) — candidate
+
+- Accept a verified on-screen temporary reveal on macOS 26 even when macOS
+  places the item beside a different native neighbor. Permanent layout edits
+  and restoration retain their exact-position verification.
+- Exercise twenty post-recovery shelf opens so the installed latency p95 gate
+  has a meaningful sample after XPC helper interruption.
+
 ## 1.0.50 (build 127) — candidate
+
+This candidate was staged but not published; 1.0.51 supersedes it.
 
 - Show a loading-only Barline Bar immediately on macOS 27 while native item
   concealment is reconciled. Item icons remain withheld until that check

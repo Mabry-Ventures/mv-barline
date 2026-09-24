@@ -67,13 +67,14 @@ BARLINE_PERFORMANCE_CYCLES=20 BARLINE_PERFORMANCE_WARMUPS=1 \
     BARLINE_EVIDENCE_OUTPUT="${BARLINE_INSTALLED_EVIDENCE_DIR:+$BARLINE_INSTALLED_EVIDENCE_DIR/performance.json}" \
     "$ROOT/script/test-performance-smoke.sh" --reuse-running --probe "$PROBE"
 
-# One forced helper interruption followed by five real opens proves same-process
-# recovery without a synthetic crash loop or repeated focus changes. Sustained
+# One forced helper interruption followed by twenty real opens proves same-process
+# recovery and makes the p95 latency gate meaningful instead of treating the
+# maximum of five noisy samples as a percentile. Sustained
 # recovery/soak is a separate lane, explicitly deferred by the user.
 BARLINE_EVIDENCE_OUTPUT="${BARLINE_INSTALLED_EVIDENCE_DIR:+$BARLINE_INSTALLED_EVIDENCE_DIR/xpc-interruption.json}" \
     "$ROOT/script/test-xpc-interruption.sh" \
     --reuse-running --recovery-probe "$PROBE"
-BARLINE_PERFORMANCE_CYCLES=5 BARLINE_PERFORMANCE_WARMUPS=1 \
+BARLINE_PERFORMANCE_CYCLES=20 BARLINE_PERFORMANCE_WARMUPS=1 \
     BARLINE_EVIDENCE_OUTPUT="" \
     "$ROOT/script/test-performance-smoke.sh" --reuse-running --probe "$PROBE"
 printf 'PASS: nonactivating shelf burst and one helper recovery; Settings reopen and soak are separate lanes\n'

@@ -1,5 +1,17 @@
 # Barline execution plan
 
+## Barline 1.0.51 temporary-reveal hardening — September 23, 2026
+
+Build 128 supersedes the unpublished 1.0.50 candidate. The exact installed
+build 127 passed the macOS 26 signed Sparkle upgrade but failed a physical
+hidden-item click: macOS moved the item into view at a different native slot,
+so the strict temporary-move postcondition prevented activation. The new
+postcondition requires the same item on the intended display, in the visible
+section, and on screen; permanent arrangement and restoration still require
+exact placement. The macOS 27 post-helper p95 sample expands from five to
+twenty real opens. Rebuild, sign, notarize, and repeat installed journeys on
+both macOS 26 and 27 before publication.
+
 ## Barline 1.0.50 responsive shelf candidate — September 23, 2026
 
 Build 127 supersedes the unpublished 1.0.49 candidate. Installed macOS 27
