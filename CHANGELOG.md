@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.0.56 (build 133) — candidate
+
+1.0.55 was qualified in source tests but not published. An installed macOS 26
+journey exposed a disagreement between the helper's visible move result and
+the coordinator's first postcondition, followed by unnecessary compensation
+and failed activation. Whether the inventory lagged or the item remained
+non-clickable requires installed-candidate telemetry to distinguish.
+
+- Retry the transient reveal/restore postcondition against bounded fresh
+  inventories before starting rollback; permanent layout edits keep their
+  existing strict verification.
+- Require installed journeys to prove a genuinely concealed fixture, an empty
+  recovery journal, and a stable restoration after the compensation window.
+  macOS 27 uses native Accessibility hit testing because its source status-item
+  frame remains on screen even when the item is hidden.
+- Keep diagnostic logging limited to section, on-screen state, and display
+  match, with no item names or application inventory.
+
 ## 1.0.55 (build 132) — candidate
 
 1.0.54 was a private diagnostic build, not published. Its installed macOS 26

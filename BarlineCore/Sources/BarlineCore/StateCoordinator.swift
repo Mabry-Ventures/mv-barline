@@ -793,6 +793,10 @@ public actor MenuBarStateCoordinator {
     ) async throws -> MenuBarSnapshot {
         let retriesEventuallyConsistentVisibility = mutation.moveOperation != nil &&
             visibilityAssignmentGranularity == .applicationGroupAndKnownSystemItem
+        let retriesTransientMove = switch mutation {
+        case .transientReveal, .transientMove: true
+        default: false
+        }
         let attemptCount = retriesEventuallyConsistentVisibility
             // Golden Gate's compatibility inventory request can consume one
             // complete attempt while its XPC generation is replaced. A
@@ -800,7 +804,11 @@ public actor MenuBarStateCoordinator {
             // valid post-write inventory has actually settled. Neither event
             // should reduce the caller's ordinary recovery budget.
             ? max(2, retryPolicy.maximumAttempts + 2)
-            : 1
+            // The native helper can observe a successful status-item drag
+            // before the app's next WindowServer inventory has caught up. A single
+            // stale read must not trigger a whole-layout compensation while
+            // the item is actually in the requested section.
+            : (retriesTransientMove ? retryPolicy.maximumAttempts : 1)
         var mostRecentError: (any Error)?
         var previousSuccessfulVisibilitySignature: VisibilityObservationSignature?
         let validationClockStartedAt = Date()
@@ -849,6 +857,14 @@ public actor MenuBarStateCoordinator {
                        visibilityAssignmentGranularity: visibilityAssignmentGranularity
                    ))
                 {
+                    if retriesTransientMove,
+                       let operation = mutation.moveOperation
+                    {
+                        let observed = snapshot.items.first { $0.id == operation.itemID }
+                        Self.logger.notice(
+                            "Transient move postcondition: section=\(observed?.section.rawValue ?? "missing", privacy: .public) onScreen=\(observed?.isOnScreen == true, privacy: .public) displayMatched=\(operation.destinationDisplayID.map { observed?.displayID == $0 } ?? true, privacy: .public)"
+                        )
+                    }
                     if moveDestinationSupport == .logicalSectionsPreserveNativeOrder,
                        let failure = MenuBarMovePlanner().logicalSectionVerificationFailure(
                            operation,
