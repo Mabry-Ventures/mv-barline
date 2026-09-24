@@ -410,6 +410,9 @@ public actor MenuBarStateCoordinator {
                 !$0.isBarlineControlItem && concealedSections.contains($0.section)
             }.map(\.id)
         )
+        Self.logger.notice(
+            "Concealment sync: visible=\(configuration.visibleItemIDs.count, privacy: .public) hidden=\(configuration.concealedItemIDs.count, privacy: .public)"
+        )
         // Once the backend acknowledges the complete configuration, do not
         // reinterpret caller cancellation as failure: the native side effect
         // has already committed and is now the latest serialized state.

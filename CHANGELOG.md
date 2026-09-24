@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.59 (build 136) — diagnostic candidate, not for distribution
+
+- Record privacy-safe counts at the macOS 27 logical-layout and native
+  concealment boundaries to isolate an intermittent post-activation restore
+  failure. This candidate remains internal until the cause is fixed and both
+  installed operating-system gates pass.
+
 ## 1.0.58 (build 135) — candidate
 
 1.0.57 was staged but not published. Independent review found that its
