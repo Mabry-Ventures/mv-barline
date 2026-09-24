@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.55 (build 132) — candidate
+
+1.0.54 was a private diagnostic build, not published. Its installed macOS 26
+journeys confirmed successful section restoration while the prior journey gate
+still rejected offscreen slot compaction as a failure.
+
+- Qualify temporary hidden-item restoration by verifying the same unique
+  fixture window returns behind Barline's hidden divider, rather than requiring
+  the old offscreen pixel coordinate. The gate still requires the exact
+  signed candidate, real pointer events, one fixture action, and a closed
+  interface before accepting restoration.
+- Carry forward privacy-safe helper move diagnostics for any recurrence.
+
 ## 1.0.54 (build 131) — diagnostic candidate
 
 1.0.53 was staged but not published. Its installed macOS 26 popover journey

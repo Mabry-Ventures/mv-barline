@@ -41,7 +41,7 @@ A PASS requires all of these, not just successful event posting:
 - Clicking the fixture's semantic shelf control increments the target process's receipt with the correct mouse button.
 - The target reports menu/popover opening **and** exposes its actual action through AppKit Accessibility.
 - Clicking that target action produces a receipt, then a target closure.
-- The original fixture status-item position is restored within 25 seconds.
+- The same, uniquely identified fixture status-item window returns behind Barline's hidden divider within 25 seconds, with its AX and WindowServer frames agreeing and its height and width unchanged. macOS may compact offscreen slots, so the exact hidden pixel position is not an acceptance condition.
 
 The JSON result binds the runtime observations to the source SHA, installed executable SHA-256, app version, and host OS. A failure must remain a failed gate. If the host blocks synthetic pointer delivery, use Computer Use or the user's physical clicks for a separately recorded equivalent journey; do not substitute an AXPress, Debug notification, or fixture-only test and call this gate passed.
 

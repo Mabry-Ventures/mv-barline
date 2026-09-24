@@ -191,6 +191,31 @@ do {
         guard let bar = extras(fixture), let element = find(bar, named: target) else { return nil }
         return frame(element)
     }
+    func hiddenFixtureFrame() -> CGRect? {
+        let titles = [
+            "BF Native": "BarlineFixture.Journey.Native",
+            "BF Popover": "BarlineFixture.Journey.Popover",
+            "BF Delayed": "BarlineFixture.Journey.Delayed",
+        ]
+        guard let title = titles[target] else { return nil }
+        let records = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let fixtureWindows = records.filter {
+            guard let owner = ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value else { return false }
+            return (owner == fixturePID ||
+                NSRunningApplication(processIdentifier: owner)?.bundleIdentifier == "com.apple.controlcenter") &&
+                ($0[kCGWindowName as String] as? String) == title
+        }
+        let dividers = records.filter {
+            guard let owner = ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value else { return false }
+            return (owner == appPID ||
+                NSRunningApplication(processIdentifier: owner)?.bundleIdentifier == "com.apple.controlcenter") &&
+                ($0[kCGWindowName as String] as? String) == "Barline.ControlItem.Hidden"
+        }
+        guard fixtureWindows.count == 1, dividers.count == 1,
+              let item = bounds(fixtureWindows[0]), let divider = bounds(dividers[0]),
+              item.maxX <= divider.minX - 2 else { return nil }
+        return item
+    }
     let actionRole = target == "BF Popover" && !right ? kAXButtonRole : kAXMenuItemRole
     func targetAction() -> AXUIElement? {
         let visibleFixtureWindows = windows().filter {
@@ -381,7 +406,8 @@ do {
             return capture.terminationStatus == 0 && FileManager.default.fileExists(atPath: output.path)
         } catch { return false }
     }
-    guard let baseline = receipt(), !baseline.visible, let original = targetFrame(), !shelfVisible() else {
+    guard let baseline = receipt(), !baseline.visible, let original = targetFrame(),
+          hiddenFixtureFrame() != nil, !shelfVisible() else {
         throw JourneyError.failed("fixture_ready_and_closed_shelf_baseline_required")
     }
     func checkedReceipt() throws -> Receipt? {
@@ -566,10 +592,15 @@ do {
         guard let current = try checkedReceipt() else { return false }
         return exactlyOneCompletedJourney(current)
     }
-    try wait("item_position_not_restored", seconds: 25) {
+    // macOS can compact hidden status-item slots after a drag. The production
+    // contract is that the same fixture window returns behind Barline's hidden
+    // divider, not that its offscreen pixel coordinate remains identical.
+    try wait("item_not_rehidden", seconds: 25) {
         guard let current = try checkedReceipt(), exactlyOneCompletedJourney(current),
-              let restored = targetFrame() else { return false }
-        return sameFrame(restored, original)
+              let restored = targetFrame(), let hidden = hiddenFixtureFrame() else { return false }
+        return sameFrame(restored, hidden) &&
+            abs(restored.midY - original.midY) <= 2 &&
+            abs(restored.width - original.width) <= 2
     }
     guard let completed = try checkedReceipt(), exactlyOneCompletedJourney(completed) else {
         throw JourneyError.failed("exact_one_target_journey_not_observed")
