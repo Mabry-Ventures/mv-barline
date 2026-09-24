@@ -23,6 +23,20 @@ struct StatusItemActionRecoveryCoordinatorTests {
         ))
     }
 
+    @Test("an overlapping menu cannot be mistaken for the status control")
+    func overlappingMenuIsExcluded() {
+        #expect(!StatusItemActionRecoveryCoordinator.shouldSchedulePrimaryRecovery(
+            eventTargetsShelf: false,
+            eventLocationIsInsideExactButtonFrame: true,
+            eventTargetsAccessibleControl: false
+        ))
+        #expect(StatusItemActionRecoveryCoordinator.shouldSchedulePrimaryRecovery(
+            eventTargetsShelf: false,
+            eventLocationIsInsideExactButtonFrame: true,
+            eventTargetsAccessibleControl: true
+        ))
+    }
+
     @Test("scene-sized and invalid frames are rejected")
     func onlyStatusItemSizedFramesArePlausible() {
         #expect(StatusItemActionRecoveryCoordinator.isPlausibleExactButtonFrame(

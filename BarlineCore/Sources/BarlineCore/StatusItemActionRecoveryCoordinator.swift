@@ -23,9 +23,10 @@ public struct StatusItemActionRecoveryCoordinator: Sendable {
     /// reinterpreted as a missing click on the menu-bar control.
     public static func shouldSchedulePrimaryRecovery(
         eventTargetsShelf: Bool,
-        eventLocationIsInsideExactButtonFrame: Bool
+        eventLocationIsInsideExactButtonFrame: Bool,
+        eventTargetsAccessibleControl: Bool = true
     ) -> Bool {
-        !eventTargetsShelf && eventLocationIsInsideExactButtonFrame
+        !eventTargetsShelf && eventLocationIsInsideExactButtonFrame && eventTargetsAccessibleControl
     }
 
     /// Rejects scene/container frames masquerading as a status-item button.

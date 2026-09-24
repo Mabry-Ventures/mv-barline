@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.57 (build 134) — candidate
+
+1.0.56 was staged but not published. Its installed macOS 27 fixture journey
+opened and completed the target menu once, then Barline's delayed status-item
+fallback mistook an overlapping menu click for a missed click on its own icon
+and reopened the shelf.
+
+- Require the macOS 27 fallback to verify that Barline's accessible status
+  control is the topmost element at the click point. Ambiguous hits fail closed;
+  AppKit's normal status-item action remains available.
+- Keep the macOS 26 fallback unchanged and add a regression case for an
+  overlapping menu at the control's screen coordinates.
+
 ## 1.0.56 (build 133) — candidate
 
 1.0.55 was qualified in source tests but not published. An installed macOS 26

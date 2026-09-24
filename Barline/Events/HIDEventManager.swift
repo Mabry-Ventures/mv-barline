@@ -4,6 +4,7 @@
 //
 
 import BarlineCore
+import ApplicationServices
 import Cocoa
 import Combine
 import OSLog
@@ -194,6 +195,7 @@ extension HIDEventManager {
                 screen: screen,
                 location: click.unflippedLocation
             ),
+            control.containsEventLocation(click.unflippedLocation),
             StatusItemActionRecoveryCoordinator.shouldSchedulePrimaryRecovery(
                 eventTargetsShelf: {
                     let shelf = appState.menuBarManager.barlineShelfPanel
@@ -201,9 +203,8 @@ extension HIDEventManager {
                         shelf.isVisible && shelf.frame.contains(click.unflippedLocation)
                     )
                 }(),
-                eventLocationIsInsideExactButtonFrame: control.containsEventLocation(
-                    click.unflippedLocation
-                )
+                eventLocationIsInsideExactButtonFrame: true,
+                eventTargetsAccessibleControl: topmostElementIsPrimaryControl(at: click.location)
             )
         else { return }
 
@@ -212,6 +213,24 @@ extension HIDEventManager {
             eventTimestamp: event.timestamp,
             modifierFlags: event.modifierFlags
         )
+    }
+
+    /// A scene-backed button's frame can overlap another app's menu while its
+    /// interface is open. Only recover a lost action when the control itself is
+    /// the accessible element actually under the click. Ambiguous hits fail
+    /// closed, leaving AppKit's native action path intact.
+    private func topmostElementIsPrimaryControl(at point: CGPoint) -> Bool {
+        guard #available(macOS 27.0, *) else { return true }
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(
+            AXUIElementCreateSystemWide(), Float(point.x), Float(point.y), &hit
+        ) == .success, let hit else { return false }
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(hit, &owner) == .success,
+              owner == ProcessInfo.processInfo.processIdentifier else { return false }
+        var identifier: CFTypeRef?
+        return AXUIElementCopyAttributeValue(hit, "AXIdentifier" as CFString, &identifier) == .success &&
+            identifier as? String == ControlItem.Identifier.visible.rawValue
     }
 
     // MARK: Handle Show On Click
