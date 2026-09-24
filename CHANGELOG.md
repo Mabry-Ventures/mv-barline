@@ -1,6 +1,23 @@
 # Changelog
 
+## 1.0.52 (build 129) — candidate
+
+1.0.51 was staged but not published; its changes are included here.
+
+- Accept a verified on-screen temporary reveal on macOS 26 even when macOS
+  places the item beside a different native neighbor. Permanent layout edits
+  and restoration retain their exact-position verification.
+- Continue a bounded physical drag when an item moves but has not reached its
+  requested section or display. A partial movement no longer falsely ends
+  temporary restoration with the item still visible.
+- Exercise twenty post-recovery shelf opens so the installed latency p95 gate
+  has a meaningful sample after XPC helper interruption. Keep separate
+  candidate-bound baseline and post-interruption receipts, including each
+  run's slowest click.
+
 ## 1.0.51 (build 128) — candidate
+
+This candidate was staged but not published; 1.0.52 supersedes it.
 
 - Accept a verified on-screen temporary reveal on macOS 26 even when macOS
   places the item beside a different native neighbor. Permanent layout edits

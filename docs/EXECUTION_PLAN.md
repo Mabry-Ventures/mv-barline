@@ -1,5 +1,20 @@
 # Barline execution plan
 
+## Barline 1.0.52 restore-convergence candidate — September 23, 2026
+
+Build 129 supersedes the unpublished 1.0.51 candidate. An installed macOS 26
+popover journey activated the correct hidden item but left it in the visible
+section during temporary restoration. The helper had stopped after any origin
+change, even when the requested hidden section had not been reached. The
+bounded drag now continues until the observed item reaches the requested
+section and display; a focused regression rejects intermediate movement. The
+coordinator retains exact logical-slot verification for restoration and
+permanent edits. The old installed app recovered the fixture-only journal on
+a clean relaunch, but that is not live-journey proof of this change. Run full
+source gates, sign and notarize this exact commit, and repeat installed
+native and popover journeys on macOS 26 and 27 before publication. Do not
+alter the public feed while either installed lane is unproven.
+
 ## Barline 1.0.51 temporary-reveal hardening — September 23, 2026
 
 Build 128 supersedes the unpublished 1.0.50 candidate. The exact installed

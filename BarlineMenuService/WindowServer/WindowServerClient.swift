@@ -348,6 +348,7 @@ final class WindowServerClient: @unchecked Sendable {
     private func moveWhileExclusive(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
         let maximumAttempts = 8
         var lastOrigin: CGPoint?
+        var reachedRequestedSection = false
         for attempt in 0 ..< maximumAttempts {
             try Task.checkCancellation()
             let windows = try currentWindows()
@@ -415,15 +416,24 @@ final class WindowServerClient: @unchecked Sendable {
             let delay = min(25 + (attempt * 20), 150)
             try await Task.sleep(for: .milliseconds(delay))
             let refreshed = try currentWindows()
-            if let moved = identifiedWindows(refreshed)
-                .first(where: { $0.id == operation.itemID })?.window,
-                moved.bounds.origin != lastOrigin
+            if let movedIndex = identifiedWindows(refreshed)
+                .firstIndex(where: { $0.id == operation.itemID }),
+                HelperMoveSettlement.reachedDestination(
+                    originChanged: refreshed[movedIndex].bounds.origin != lastOrigin,
+                    observedSection: classifiedWindows(refreshed)[movedIndex].section,
+                    requestedSection: operation.section,
+                    displayMatched: operation.destinationDisplayID.map { displayID(for: refreshed[movedIndex]) == $0 } != false
+                )
             {
+                reachedRequestedSection = true
                 break
             }
             if attempt == maximumAttempts - 1 {
-                throw MenuBarBackendError.operationFailed("Menu bar item did not respond to move")
+                throw MenuBarBackendError.operationFailed("Menu bar item did not reach requested section")
             }
+        }
+        guard reachedRequestedSection else {
+            throw MenuBarBackendError.operationFailed("Menu bar item did not reach requested section")
         }
         let updated = try snapshot()
         return MenuBarMutationResult(generation: updated.generation, changedItemIDs: [operation.itemID])

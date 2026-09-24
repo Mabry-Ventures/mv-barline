@@ -15,7 +15,8 @@ private enum EventDeliveryTests {
         unrelatedClickIsNotRetargeted()
         try await releaseWithoutIntermediateTransition()
         try await releaseTransportFailurePropagates()
-        print("PASS: production event delivery synchronization and routing (9 tests; no taps or posted events)")
+        moveRequiresRequestedPhysicalDestination()
+        print("PASS: production event delivery synchronization and routing (10 tests; no taps or posted events)")
     }
 
     private static func matchedClickRestoresTargetWithoutChangingPayload() {
@@ -86,6 +87,21 @@ private enum EventDeliveryTests {
         } catch is CancellationError {
             require(events.values == ["observe"], "failed release cannot be treated as settled")
         }
+    }
+
+    private static func moveRequiresRequestedPhysicalDestination() {
+        func settled(_ changed: Bool, _ section: String, _ displayMatched: Bool) -> Bool {
+            HelperMoveSettlement.reachedDestination(
+                originChanged: changed,
+                observedSection: section,
+                requestedSection: "hidden",
+                displayMatched: displayMatched
+            )
+        }
+        require(!settled(true, "visible", true), "partial movement does not stop section retries")
+        require(!settled(false, "hidden", true), "same-section reorder needs observed movement")
+        require(!settled(true, "hidden", false), "move to another display does not settle")
+        require(settled(true, "hidden", true), "requested section and display settle")
     }
 
     private static func moveStagesDispatchIndependentlyOnce() {
