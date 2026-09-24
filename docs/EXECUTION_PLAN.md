@@ -1,5 +1,19 @@
 # Barline execution plan
 
+## Barline 1.0.54 move diagnostic — September 23, 2026
+
+Build 131 is a private diagnostic candidate, not a release. The exact signed
+build 130 passed both full source gates and the installed macOS 26 native-left
+and native-right journeys. Its popover-left journey activated the target and
+completed its action, but the item remained visible; three restoration
+attempts reported generic `operation_failed` and the fixture-only journal was
+retained. Final visible geometry may be compensation, not the helper's chosen
+drag endpoint. Build 131 adds closed error classification and name-free helper
+move observations without changing the move algorithm. Reproduce with only
+synthetic fixtures, identify the selected anchor and resulting section, then
+make a bounded correction. Do not publish either candidate or treat the prior
+macOS 27 full gate as installed 1.0.54 evidence.
+
 ## Barline 1.0.53 hidden restoration candidate — September 23, 2026
 
 Build 130 supersedes the unpublished 1.0.52 candidate. The exact installed

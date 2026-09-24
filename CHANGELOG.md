@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.0.54 (build 131) — diagnostic candidate
+
+1.0.53 was staged but not published. Its installed macOS 26 popover journey
+still failed restoration after successful activation; the helper reported a
+generic operation failure before the new coordinator postcondition could help.
+
+- Distinguish a helper move that never reaches the requested section from a
+  coordinator postcondition failure in privacy-safe diagnostics.
+- Record bounded, name-free move observations (anchor category, side, section,
+  display match, and relative geometry) to locate the native drag failure.
+  No movement behavior changes in this diagnostic build.
+
 ## 1.0.53 (build 130) — candidate
 
 1.0.52 was staged but not published; its changes are included here.

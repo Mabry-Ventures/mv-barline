@@ -53,6 +53,9 @@ struct PrivacySafeDiagnosticsTests {
 
     @Test func knownMoveFailuresUseClosedCodes() {
         #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.operationFailed(
+            "Menu bar item did not reach requested section"
+        )) == "move_section_settlement_failed")
+        #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.operationFailed(
             "menu bar move did not reach requested section"
         )) == "move_postcondition_failed")
         #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.operationFailed(
