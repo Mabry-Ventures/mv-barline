@@ -14,8 +14,10 @@ published. Their changes are included here.
 - Your Hidden choices stay put. Moving one app's items, or reordering the
   Barline Bar, no longer rewrites another app's saved Hidden setting, even when
   an app briefly shows an extra menu bar item.
-- Fixed a crash that could occur when the Barline Bar was opened and closed
-  repeatedly after Barline's background helper restarted.
+- Fixed a crash that could occur while the Barline Bar was opening or
+  closing. Barline read its own menu bar items from a background thread while
+  the main thread was changing them; those reads now happen on the main
+  thread.
 - A slow menu bar item can no longer hold up Barline: each item is asked for
   its details with its own short time limit.
 - Clicking the Barline icon behaves correctly when another app's menu overlaps
