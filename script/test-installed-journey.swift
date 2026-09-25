@@ -315,8 +315,20 @@ do {
     }
     func shelfRoot() -> AXUIElement? {
         (attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? []).first {
-            matches($0, "Barline Bar")
+            matches($0, "Barline Bar") || matches($0, "Barline.Bar")
         }
+    }
+    func shelfRootDiagnostic() -> [String: Any] {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value)
+        let windows = value as? [AXUIElement]
+        return [
+            "attributeError": result.rawValue,
+            "attributeType": value.map { CFGetTypeID($0) } ?? 0,
+            "windowCount": windows?.count ?? -1,
+            "shelfIdentifierPresent": windows?.contains { matches($0, "Barline.Bar") } ?? false,
+            "shelfTitlePresent": windows?.contains { matches($0, "Barline Bar") } ?? false,
+        ]
     }
     func shelfTarget() -> AXUIElement? {
         guard let shelf = shelfRoot() else { return nil }
@@ -566,7 +578,11 @@ do {
         }
         shelfAXTraversalPassed = true
     } catch {
-        let diagnostic = ["shelfWindowStillVisible": shelfVisible(), "shelfAXWindowPresent": shelfRoot() != nil]
+        let diagnostic: [String: Any] = [
+            "shelfWindowStillVisible": shelfVisible(),
+            "shelfAXWindowPresent": shelfRoot() != nil,
+            "applicationAXWindows": shelfRootDiagnostic(),
+        ]
         try print(String(decoding: JSONSerialization.data(withJSONObject: diagnostic, options: [.sortedKeys]), as: UTF8.self))
         print("{\"stage\":\"shelf_ax_traversal\",\"verdict\":\"FAIL\",\"fallback\":\"bounded_shelf_hit_test\"}")
         shelfItem = hitTestShelfTarget()

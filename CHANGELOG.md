@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.0.62 (build 139) — candidate
+
+- Register the shelf directly with Barline's application Accessibility root so
+  its window remains discoverable without depending on SwiftUI's delegate
+  identity. Installed journeys now distinguish AX errors, empty window lists,
+  and shelf identity mismatches.
+- Preserve a temporary reveal's durable restoration obligation if a menu bar
+  census briefly omits the item during compaction. Defer and retry rather than
+  treating one absent observation as verified restoration.
+
 ## 1.0.61 (build 138) — candidate
 
 1.0.60 was staged but not published. Independent review found that an

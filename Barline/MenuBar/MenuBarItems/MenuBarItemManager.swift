@@ -1694,10 +1694,16 @@ extension MenuBarItemManager {
                           item.section == context.entry.checkpoint.originalSection,
                           item.displayID == context.entry.checkpoint.originalDisplayID
                     else { throw EventError.cannotComplete }
-                case .itemAbsent, .superseded:
-                    // A validated census or explicit external relocation owns
-                    // the current state; don't chase a replacement identity.
-                    break
+                case .itemAbsent:
+                    // A single otherwise-valid census can omit an item while
+                    // the menu bar compacts after a temporary reveal. Absence
+                    // does not prove restoration and must not discharge the
+                    // durable compensation obligation.
+                    logger.warning("Item restoration deferred: target absent from snapshot")
+                    throw EventError.cannotComplete
+                case .superseded:
+                    // An explicit external relocation owns the new position.
+                    logger.notice("Item restoration superseded by external relocation")
                 case .displayUnavailable, .unavailable:
                     context.paused = true
                     activationNotice = "Item restoration needs review. Use Retry Item Restoration in Layouts & Focus."
