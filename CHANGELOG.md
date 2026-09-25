@@ -1,5 +1,42 @@
 # Changelog
 
+## 1.0.64 (build 141) — September 25, 2026
+
+Candidates 1.0.49 through 1.0.63 were built and tested internally but never
+published. Their changes are included here.
+
+### macOS 27
+
+- The Barline Bar responds as soon as you click. While Barline confirms which
+  items macOS has hidden, it shows a short loading state instead of looking
+  unresponsive, and it never shows an item twice — once in the menu bar and
+  again in the Barline Bar.
+- Your Hidden choices stay put. Moving one app's items, or reordering the
+  Barline Bar, no longer rewrites another app's saved Hidden setting, even when
+  an app briefly shows an extra menu bar item.
+- Fixed a crash that could occur when the Barline Bar was opened and closed
+  repeatedly after Barline's background helper restarted.
+- A slow menu bar item can no longer hold up Barline: each item is asked for
+  its details with its own short time limit.
+- Clicking the Barline icon behaves correctly when another app's menu overlaps
+  it.
+
+### macOS 26
+
+- Temporarily showing a hidden item and hiding it again is more reliable,
+  including when macOS puts the item back beside a different neighbour.
+- A drag that only gets part of the way now keeps going until the item reaches
+  its section, instead of stopping with the item still visible.
+- If an app quits while one of its items is temporarily shown, Barline lets
+  that item go instead of refusing later layout changes.
+
+### Both
+
+- Clicks on the Barline icon recover correctly after a missed click, without
+  mistaking your next click for a duplicate.
+- Diagnostics record more precise counts and timings for support, still with
+  no item names, app lists, or paths.
+
 ## 1.0.63 (build 140) — candidate
 
 - Avoid synchronous Accessibility self-hit-testing from the macOS 27
