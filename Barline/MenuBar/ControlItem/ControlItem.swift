@@ -520,6 +520,13 @@ final class ControlItem {
         return eventWindow === statusItem.button?.window || eventWindow === window
     }
 
+    /// Compare WindowServer's mouse-down target to the live status button.
+    /// Do not treat the menu-bar container or an unknown window as ownership.
+    func ownsWindowNumber(_ number: Int) -> Bool {
+        guard number > 0 else { return false }
+        return number == statusItem.button?.window?.windowNumber || number == window?.windowNumber
+    }
+
     /// Global hosted events may not expose an NSWindow. Resolve their captured
     /// point against the button's exact screen geometry before considering the
     /// cached frame. A scene-backed button's window can span the whole menu bar

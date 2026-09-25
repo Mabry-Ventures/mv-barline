@@ -3,7 +3,6 @@
 //  Barline
 //
 
-import ApplicationServices
 import BarlineCore
 import Cocoa
 import Combine
@@ -207,7 +206,10 @@ extension HIDEventManager {
                     )
                 }(),
                 eventLocationIsInsideExactButtonFrame: exactButtonHit,
-                eventTargetsAccessibleControl: topmostElementIsPrimaryControl(at: click.location)
+                eventTargetsAccessibleControl: topmostWindowIsPrimaryControl(
+                    at: click.unflippedLocation,
+                    control: control
+                )
             )
         else { return }
 
@@ -218,40 +220,14 @@ extension HIDEventManager {
         )
     }
 
-    /// A scene-backed button's frame can overlap another app's menu while its
-    /// interface is open. Only recover a lost action when the control itself is
-    /// the accessible element actually under the click. Ambiguous hits fail
-    /// closed, leaving AppKit's native action path intact.
-    private func topmostElementIsPrimaryControl(at point: CGPoint) -> Bool {
+    /// A scene-backed button's frame can overlap another app's menu. Use the
+    /// window that AppKit would actually deliver a mouse-down to, rather than
+    /// synchronously asking our own Accessibility server to hit-test while it
+    /// is processing that same mouse-down. An unknown window fails closed.
+    private func topmostWindowIsPrimaryControl(at point: CGPoint, control: ControlItem) -> Bool {
         guard #available(macOS 27.0, *) else { return true }
-        let systemWide = AXUIElementCreateSystemWide()
-        // This is called for the exact dot only. Bound synchronous AX IPC so
-        // an unresponsive target cannot stall the global mouse-down handler.
-        guard AXUIElementSetMessagingTimeout(systemWide, 0.05) == .success else {
-            return false
-        }
-        defer { _ = AXUIElementSetMessagingTimeout(systemWide, 0) }
-        var hit: AXUIElement?
-        guard AXUIElementCopyElementAtPosition(
-            systemWide, Float(point.x), Float(point.y), &hit
-        ) == .success, let hit else { return false }
-        var element = hit
-        for _ in 0 ..< 4 {
-            var owner: pid_t = 0
-            guard AXUIElementGetPid(element, &owner) == .success,
-                  owner == ProcessInfo.processInfo.processIdentifier else { return false }
-            var identifier: CFTypeRef?
-            if AXUIElementCopyAttributeValue(element, "AXIdentifier" as CFString, &identifier) == .success,
-               identifier as? String == ControlItem.Identifier.visible.rawValue
-            {
-                return true
-            }
-            var parent: CFTypeRef?
-            guard AXUIElementCopyAttributeValue(element, kAXParentAttribute as CFString, &parent) == .success,
-                  let parent, CFGetTypeID(parent) == AXUIElementGetTypeID() else { return false }
-            element = unsafeDowncast(parent, to: AXUIElement.self)
-        }
-        return false
+        let hitWindowNumber = NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0)
+        return control.ownsWindowNumber(hitWindowNumber)
     }
 
     // MARK: Handle Show On Click

@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.0.63 (build 140) — candidate
+
+- Avoid synchronous Accessibility self-hit-testing from the macOS 27
+  mouse-down path. Verify the topmost mouse-down window instead and fail closed
+  when the menu-bar control does not own it. This addresses a crash observed
+  during repeated shelf opens after helper recovery; both OS lanes must be
+  requalified before release.
+
 ## 1.0.62 (build 139) — candidate
 
 - Register the shelf directly with Barline's application Accessibility root so
