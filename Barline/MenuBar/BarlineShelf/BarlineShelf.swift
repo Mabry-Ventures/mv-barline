@@ -751,21 +751,26 @@ private final class BarlineShelfHostingView: NSHostingView<BarlineShelfContentVi
         true
     }
 
+    // Accessibility requests arrive from other processes while the shelf opens
+    // and closes, and AppKit retains and autoreleases whatever these return.
+    // Keep the getters free of side effects and never hand out a button that
+    // SwiftUI has already detached from this window. Each button sets its own
+    // parent when it joins or leaves the shelf (see `viewDidMoveToWindow`).
     override func accessibilityChildren() -> [Any]? {
         let inherited = super.accessibilityChildren() ?? []
-        let nativeButtons = descendantShelfItemButtons()
-        nativeButtons.forEach { $0.setAccessibilityParent(self) }
+        guard let window, window.isVisible else { return inherited }
+        let nativeButtons = descendantShelfItemButtons().filter { $0.window === window }
         return inherited + nativeButtons.filter { button in
             !inherited.contains { ($0 as AnyObject) === button }
         }
     }
 
     override func accessibilityHitTest(_ point: NSPoint) -> Any? {
-        guard let window else { return super.accessibilityHitTest(point) }
+        guard let window, window.isVisible else { return super.accessibilityHitTest(point) }
         let windowPoint = window.convertPoint(fromScreen: point)
         var candidate = hitTest(convert(windowPoint, from: nil))
         while let view = candidate {
-            if let button = view as? BarlineShelfItemClickView.Represented {
+            if let button = view as? BarlineShelfItemClickView.Represented, button.window === window {
                 return button
             }
             candidate = view.superview
@@ -1274,6 +1279,22 @@ private struct BarlineShelfItemClickView: NSViewRepresentable {
         @objc private func activateItem() {
             logger.debug("Shelf item activated by keyboard")
             leftClickAction()
+        }
+
+        /// Parents the button to the shelf's hosting view while it is on screen
+        /// and clears that link as soon as SwiftUI detaches it, so an
+        /// Accessibility client can never reach a button through a stale parent.
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil else {
+                setAccessibilityParent(nil)
+                return
+            }
+            var ancestor = superview
+            while let view = ancestor, !(view is BarlineShelfHostingView) {
+                ancestor = view.superview
+            }
+            setAccessibilityParent(ancestor)
         }
 
         override func accessibilityPerformPress() -> Bool {
