@@ -74,14 +74,18 @@ module InstalledEvidenceWriter
     check(samples.between?(minimum_samples, 1000), 'invalid_performance_samples')
     check(value['timeouts'] == '0', 'performance_timeouts')
     p95 = value['p95_ms']
+    maximum = value['max_ms']
     check(p95&.match?(/\A[0-9]+(?:\.[0-9]+)?\z/), 'invalid_performance_p95')
+    check(maximum&.match?(/\A[0-9]+(?:\.[0-9]+)?\z/), 'invalid_performance_maximum')
     p95 = p95.to_f
+    maximum = maximum.to_f
     check(p95.finite? && p95.between?(0, 250), 'performance_budget_exceeded')
+    check(maximum.finite? && maximum >= p95, 'invalid_performance_maximum')
     check(value['feedback_in_250ms'] == 'true', 'rapid_retry_feedback_failed')
     check(value['silent_cancellation'] == 'false', 'silent_cancellation')
     [index, {
       'probe' => 'status-item-click', 'samples' => samples, 'timeouts' => 0,
-      'p95Milliseconds' => p95, 'budgetMilliseconds' => 250,
+      'p95Milliseconds' => p95, 'maxMilliseconds' => maximum, 'budgetMilliseconds' => 250,
       'rapidRetryFeedbackInBudget' => true, 'silentCancellation' => false
     }]
   end
@@ -111,8 +115,11 @@ module InstalledEvidenceWriter
         .merge('originalPointerRestored' => true)
     when 'performance'
       check(ENV['BARLINE_PERFORMANCE_PROBE'] == 'status-item-click', 'wrong_performance_probe')
+      phase = ENV['BARLINE_PERFORMANCE_PHASE']
+      check(InstalledEvidence::PERFORMANCE_PHASES.include?(phase), 'invalid_performance_phase')
       index, evidence = performance_result(results, minimum_samples: 20)
       pointer_index(objects, after: index)
+      receipt['phase'] = phase
       receipt['evidence'] = evidence.merge('originalPointerRestored' => true)
     when 'xpc-interruption'
       index, = performance_result(results, minimum_samples: 1)

@@ -100,11 +100,13 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
     }
 
     /// Produces a bounded, deterministic persistence document. Assignments for
-    /// temporarily absent applications are retained, while control items and
-    /// identities currently observed as invalid are removed.
+    /// temporarily absent applications are retained. A runtime snapshot may
+    /// temporarily fail a mixed bundle visible, so only explicitly edited
+    /// identities may replace previously saved intent.
     public func assignmentsForPersistence(
         from snapshot: MenuBarSnapshot,
         preserving existing: [MenuBarItemID: GoldenGateLogicalAssignment],
+        editing editedItemIDs: Set<MenuBarItemID>,
         barlineBundleIdentifier: String,
         maximumCount: Int
     ) -> [GoldenGateLogicalAssignment] {
@@ -118,8 +120,11 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
                         $0.id.isPlausiblyStable
                 }
                 .enumerated()
-                .map { rank, item in
-                    GoldenGateLogicalAssignment(
+                .compactMap { rank, item in
+                    if !editedItemIDs.contains(item.id) {
+                        return existing[item.id]
+                    }
+                    return GoldenGateLogicalAssignment(
                         itemID: item.id,
                         section: section,
                         rank: rank

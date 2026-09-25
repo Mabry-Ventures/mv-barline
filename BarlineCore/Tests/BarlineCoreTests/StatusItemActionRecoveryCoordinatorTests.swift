@@ -23,6 +23,20 @@ struct StatusItemActionRecoveryCoordinatorTests {
         ))
     }
 
+    @Test("an overlapping menu cannot be mistaken for the status control")
+    func overlappingMenuIsExcluded() {
+        #expect(!StatusItemActionRecoveryCoordinator.shouldSchedulePrimaryRecovery(
+            eventTargetsShelf: false,
+            eventLocationIsInsideExactButtonFrame: true,
+            eventTargetsAccessibleControl: false
+        ))
+        #expect(StatusItemActionRecoveryCoordinator.shouldSchedulePrimaryRecovery(
+            eventTargetsShelf: false,
+            eventLocationIsInsideExactButtonFrame: true,
+            eventTargetsAccessibleControl: true
+        ))
+    }
+
     @Test("scene-sized and invalid frames are rejected")
     func onlyStatusItemSizedFramesArePlausible() {
         #expect(StatusItemActionRecoveryCoordinator.isPlausibleExactButtonFrame(
@@ -56,7 +70,7 @@ struct StatusItemActionRecoveryCoordinatorTests {
         let scheduled = coordinator.observeMouseDown(sequence: 1, eventTimestamp: 10)
         let fallbackClaimed = coordinator.claimFallback(sequence: 1)
         let fallbackClaimedAgain = coordinator.claimFallback(sequence: 1)
-        let lateNativeClaimed = coordinator.claimNativeAction(eventTimestamp: 10.08)
+        let lateNativeClaimed = coordinator.claimNativeAction(eventTimestamp: 10.08, isMouseUp: true)
         #expect(scheduled)
         #expect(fallbackClaimed)
         #expect(!fallbackClaimedAgain)
@@ -87,6 +101,52 @@ struct StatusItemActionRecoveryCoordinatorTests {
         #expect(secondScheduled)
         #expect(secondNativeClaimed)
         #expect(!secondFallbackClaimed)
+    }
+
+    @Test("a distinct native click survives an earlier fallback when AX cannot observe it")
+    func laterUnobservedNativeClickIsIndependent() {
+        var coordinator = StatusItemActionRecoveryCoordinator()
+        let firstScheduled = coordinator.observeMouseDown(sequence: 1, eventTimestamp: 10)
+        let firstFallbackClaimed = coordinator.claimFallback(sequence: 1)
+        // A topmost AX hit can fail closed, so this later physical click may
+        // reach AppKit without ever being registered for fallback recovery.
+        coordinator.notePhysicalMouseDown(eventTimestamp: 10.3)
+        let secondNativeClaimed = coordinator.claimNativeAction(eventTimestamp: 10.3)
+        #expect(firstScheduled)
+        #expect(firstFallbackClaimed)
+        #expect(secondNativeClaimed)
+    }
+
+    @Test("native-first second mouse-down is not an old fallback duplicate")
+    func nativeFirstSecondClickIsIndependent() {
+        var coordinator = StatusItemActionRecoveryCoordinator()
+        let firstScheduled = coordinator.observeMouseDown(sequence: 1, eventTimestamp: 10)
+        let firstFallbackClaimed = coordinator.claimFallback(sequence: 1)
+        let secondNativeClaimed = coordinator.claimNativeAction(eventTimestamp: 10.3)
+        #expect(firstScheduled)
+        #expect(firstFallbackClaimed)
+        #expect(secondNativeClaimed)
+    }
+
+    @Test("a held-click mouse-up remains a duplicate of its recovered down")
+    func heldClickReleaseIsSuppressed() {
+        var coordinator = StatusItemActionRecoveryCoordinator()
+        let firstScheduled = coordinator.observeMouseDown(sequence: 1, eventTimestamp: 10)
+        let firstFallbackClaimed = coordinator.claimFallback(sequence: 1)
+        let lateNativeClaimed = coordinator.claimNativeAction(eventTimestamp: 10.8, isMouseUp: true)
+        #expect(firstScheduled)
+        #expect(firstFallbackClaimed)
+        #expect(!lateNativeClaimed)
+    }
+
+    @Test("a newer physical click cancels an unclaimed recovery")
+    func newerClickCancelsPendingRecovery() {
+        var coordinator = StatusItemActionRecoveryCoordinator()
+        let firstScheduled = coordinator.observeMouseDown(sequence: 1, eventTimestamp: 10)
+        coordinator.notePhysicalMouseDown(eventTimestamp: 10.05)
+        let staleFallbackClaimed = coordinator.claimFallback(sequence: 1)
+        #expect(firstScheduled)
+        #expect(!staleFallbackClaimed)
     }
 
     @Test("stale fallback cannot claim a newer click")

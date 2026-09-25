@@ -372,6 +372,10 @@ final class ControlItem {
         }
     }
 
+    func notePhysicalMouseDown(eventTimestamp: TimeInterval) {
+        actionRecoveryCoordinator.notePhysicalMouseDown(eventTimestamp: eventTimestamp)
+    }
+
     /// Updates the appearance of the status item using the current hiding state.
     private func updateStatusItem() {
         guard
@@ -516,6 +520,13 @@ final class ControlItem {
         return eventWindow === statusItem.button?.window || eventWindow === window
     }
 
+    /// Compare WindowServer's mouse-down target to the live status button.
+    /// Do not treat the menu-bar container or an unknown window as ownership.
+    func ownsWindowNumber(_ number: Int) -> Bool {
+        guard number > 0 else { return false }
+        return number == statusItem.button?.window?.windowNumber || number == window?.windowNumber
+    }
+
     /// Global hosted events may not expose an NSWindow. Resolve their captured
     /// point against the button's exact screen geometry before considering the
     /// cached frame. A scene-backed button's window can span the whole menu bar
@@ -563,7 +574,8 @@ final class ControlItem {
             let modifierFlags = NSEvent.modifierFlags
             if identifier == .visible {
                 guard actionRecoveryCoordinator.claimNativeAction(
-                    eventTimestamp: event.timestamp
+                    eventTimestamp: event.timestamp,
+                    isMouseUp: event.type == .leftMouseUp
                 ) else {
                     logger.notice("Suppressed a late duplicate status-item action")
                     return

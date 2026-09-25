@@ -191,6 +191,80 @@ do {
         guard let bar = extras(fixture), let element = find(bar, named: target) else { return nil }
         return frame(element)
     }
+    let displays = NSScreen.screens.compactMap { screen -> CGRect? in
+        guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
+        return CGDisplayBounds(number.uint32Value)
+    }
+    let isGoldenGate = ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
+    let journalURL = URL.applicationSupportDirectory
+        .appendingPathComponent(bundleID, isDirectory: true)
+        .appendingPathComponent("TemporaryReveals", isDirectory: true)
+        .appendingPathComponent("temporary-reveals.json")
+    func journalEmpty(allowMissing: Bool = false) -> Bool {
+        guard let attributes = try? FileManager.default.attributesOfItem(atPath: journalURL.path) else {
+            return allowMissing && !FileManager.default.fileExists(atPath: journalURL.path)
+        }
+        guard attributes[.type] as? FileAttributeType == .typeRegular,
+              let data = try? Data(contentsOf: journalURL), data.count <= 1024 * 1024,
+              let entries = try? JSONSerialization.jsonObject(with: data) as? [Any]
+        else { return false }
+        return entries.isEmpty
+    }
+    func nativeFixtureIsTopmost(at source: CGRect) -> Bool? {
+        let system = AXUIElementCreateSystemWide()
+        AXUIElementSetMessagingTimeout(system, 0.1)
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(system, Float(source.midX), Float(source.midY), &hit) == .success,
+              let hit else { return nil }
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(hit, &owner) == .success else { return nil }
+        return owner == fixturePID
+    }
+    func hiddenFixtureFrame() -> CGRect? {
+        guard let source = targetFrame(), source.width > 0, source.height > 0 else { return nil }
+        if isGoldenGate {
+            // macOS 27 keeps a visible source AX frame even when its native
+            // status item is concealed. A system-wide hit at that exact frame
+            // must no longer resolve to the fixture process.
+            guard displays.contains(where: { $0.contains(CGPoint(x: source.midX, y: source.midY)) }),
+                  nativeFixtureIsTopmost(at: source) == false else { return nil }
+            return source
+        }
+        let titles = [
+            "BF Native": "BarlineFixture.Journey.Native",
+            "BF Popover": "BarlineFixture.Journey.Popover",
+            "BF Delayed": "BarlineFixture.Journey.Delayed",
+        ]
+        guard let title = titles[target] else { return nil }
+        let records = CGWindowListCopyWindowInfo([.optionAll, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+        let fixtureWindows = records.filter {
+            guard let owner = ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value else { return false }
+            return (owner == fixturePID ||
+                NSRunningApplication(processIdentifier: owner)?.bundleIdentifier == "com.apple.controlcenter") &&
+                ($0[kCGWindowName as String] as? String) == title
+        }
+        let dividers = records.filter {
+            guard let owner = ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value else { return false }
+            return (owner == appPID ||
+                NSRunningApplication(processIdentifier: owner)?.bundleIdentifier == "com.apple.controlcenter") &&
+                ($0[kCGWindowName as String] as? String) == "Barline.ControlItem.Hidden"
+        }
+        let alwaysHiddenDividers = records.filter {
+            guard let owner = ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value else { return false }
+            return (owner == appPID ||
+                NSRunningApplication(processIdentifier: owner)?.bundleIdentifier == "com.apple.controlcenter") &&
+                ($0[kCGWindowName as String] as? String) == "Barline.ControlItem.AlwaysHidden"
+        }
+        guard fixtureWindows.count == 1, dividers.count == 1, alwaysHiddenDividers.count <= 1,
+              let item = bounds(fixtureWindows[0]), let divider = bounds(dividers[0]),
+              item.maxX <= divider.minX - 2,
+              !displays.contains(where: { $0.intersects(item) }),
+              alwaysHiddenDividers.isEmpty || alwaysHiddenDividers.contains(where: {
+                  guard let edge = bounds($0) else { return false }
+                  return item.minX >= edge.maxX + 2
+              }) else { return nil }
+        return item
+    }
     let actionRole = target == "BF Popover" && !right ? kAXButtonRole : kAXMenuItemRole
     func targetAction() -> AXUIElement? {
         let visibleFixtureWindows = windows().filter {
@@ -241,8 +315,20 @@ do {
     }
     func shelfRoot() -> AXUIElement? {
         (attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? []).first {
-            matches($0, "Barline Bar")
+            matches($0, "Barline Bar") || matches($0, "Barline.Bar")
         }
+    }
+    func shelfRootDiagnostic() -> [String: Any] {
+        var value: CFTypeRef?
+        let result = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &value)
+        let windows = value as? [AXUIElement]
+        return [
+            "attributeError": result.rawValue,
+            "attributeType": value.map { CFGetTypeID($0) } ?? 0,
+            "windowCount": windows?.count ?? -1,
+            "shelfIdentifierPresent": windows?.contains { matches($0, "Barline.Bar") } ?? false,
+            "shelfTitlePresent": windows?.contains { matches($0, "Barline Bar") } ?? false,
+        ]
     }
     func shelfTarget() -> AXUIElement? {
         guard let shelf = shelfRoot() else { return nil }
@@ -381,7 +467,9 @@ do {
             return capture.terminationStatus == 0 && FileManager.default.fileExists(atPath: output.path)
         } catch { return false }
     }
-    guard let baseline = receipt(), !baseline.visible, let original = targetFrame(), !shelfVisible() else {
+    guard let baseline = receipt(), !baseline.visible, let original = targetFrame(),
+          hiddenFixtureFrame() != nil, journalEmpty(allowMissing: true), !shelfVisible()
+    else {
         throw JourneyError.failed("fixture_ready_and_closed_shelf_baseline_required")
     }
     func checkedReceipt() throws -> Receipt? {
@@ -408,14 +496,16 @@ do {
     print("{\"fixtureHostedAliasVerified\":\(shelfLabels.count == 2)}")
     // The chosen fixture must actually be hidden; a visible-item click is not
     // evidence that reveal/activation/restore works. Do not move user items here.
-    let displays = NSScreen.screens.compactMap { screen -> CGRect? in
-        guard let number = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return nil }
-        return CGDisplayBounds(number.uint32Value)
+    if isGoldenGate {
+        guard nativeFixtureIsTopmost(at: original) == false else {
+            throw JourneyError.failed("fixture_target_must_be_placed_in_hidden_section_first")
+        }
+    } else {
+        guard !windows().contains(where: { row in
+            guard let rect = bounds(row) else { return false }
+            return sameFrame(rect, original) && displays.contains { $0.intersects(rect) }
+        }) else { throw JourneyError.failed("fixture_target_must_be_placed_in_hidden_section_first") }
     }
-    guard !windows().contains(where: { row in
-        guard let rect = bounds(row) else { return false }
-        return sameFrame(rect, original) && displays.contains { $0.intersects(rect) }
-    }) else { throw JourneyError.failed("fixture_target_must_be_placed_in_hidden_section_first") }
     guard let sourceBar = extras(app) else { throw JourneyError.failed("barline_source_extras_unavailable") }
     let sourceItems = (attribute(sourceBar, kAXChildrenAttribute) as? [AXUIElement] ?? []).filter {
         (attribute($0, "AXIdentifier") as? String) == "Barline.ControlItem.Visible" &&
@@ -488,7 +578,11 @@ do {
         }
         shelfAXTraversalPassed = true
     } catch {
-        let diagnostic = ["shelfWindowStillVisible": shelfVisible(), "shelfAXWindowPresent": shelfRoot() != nil]
+        let diagnostic: [String: Any] = [
+            "shelfWindowStillVisible": shelfVisible(),
+            "shelfAXWindowPresent": shelfRoot() != nil,
+            "applicationAXWindows": shelfRootDiagnostic(),
+        ]
         try print(String(decoding: JSONSerialization.data(withJSONObject: diagnostic, options: [.sortedKeys]), as: UTF8.self))
         print("{\"stage\":\"shelf_ax_traversal\",\"verdict\":\"FAIL\",\"fallback\":\"bounded_shelf_hit_test\"}")
         shelfItem = hitTestShelfTarget()
@@ -566,10 +660,25 @@ do {
         guard let current = try checkedReceipt() else { return false }
         return exactlyOneCompletedJourney(current)
     }
-    try wait("item_position_not_restored", seconds: 25) {
+    // macOS can compact hidden status-item slots after a drag. The production
+    // contract is that the same fixture window returns behind Barline's hidden
+    // divider, not that its offscreen pixel coordinate remains identical.
+    func restorationCommitted() throws -> Bool {
         guard let current = try checkedReceipt(), exactlyOneCompletedJourney(current),
-              let restored = targetFrame() else { return false }
-        return sameFrame(restored, original)
+              let restored = targetFrame(), let hidden = hiddenFixtureFrame() else { return false }
+        return sameFrame(restored, hidden) &&
+            abs(restored.midY - original.midY) <= 2 &&
+            abs(restored.width - original.width) <= 2 &&
+            journalEmpty(allowMissing: isGoldenGate) && !shelfVisible()
+    }
+    try wait("item_not_rehidden_and_journal_not_cleared", seconds: 25) {
+        try restorationCommitted()
+    }
+    // A transient native hide is not completion: give the coordinator time to
+    // compensate before accepting the durable journal and layout postcondition.
+    Thread.sleep(forTimeInterval: 1)
+    guard try restorationCommitted() else {
+        throw JourneyError.failed("restoration_not_stable_after_commit")
     }
     guard let completed = try checkedReceipt(), exactlyOneCompletedJourney(completed) else {
         throw JourneyError.failed("exact_one_target_journey_not_observed")

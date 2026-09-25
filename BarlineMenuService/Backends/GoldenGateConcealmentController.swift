@@ -53,6 +53,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             let candidateLedger = temporaryRevealLedger.beginning(item)
             try await applyCurrentState(temporaryRevealLedger: candidateLedger)
             temporaryRevealLedger = candidateLedger
+            logger.notice("Temporary reveal began: activeItemCount=\(candidateLedger.visibleItemIDs.count, privacy: .public)")
             return true
         }
     }
@@ -62,6 +63,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             guard let candidateLedger = temporaryRevealLedger.ending(item) else { return }
             try await applyCurrentState(temporaryRevealLedger: candidateLedger)
             temporaryRevealLedger = candidateLedger
+            logger.notice("Temporary reveal ended: activeItemCount=\(candidateLedger.visibleItemIDs.count, privacy: .public)")
         }
     }
 
@@ -96,6 +98,9 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         let resolved = GoldenGateConcealmentPolicy.resolve(
             configuration,
             barlineBundleIdentifier: "com.mabryventures.Barline"
+        )
+        logger.notice(
+            "Concealment state: desiredVisible=\(self.desiredConfiguration.visibleItemIDs.count, privacy: .public) desiredHidden=\(self.desiredConfiguration.concealedItemIDs.count, privacy: .public) temporaryVisible=\(temporarilyVisible.count, privacy: .public) concealedBundles=\(resolved.concealedBundleIdentifiers.count, privacy: .public)"
         )
         // Assessment-mode assertions are stateful. Replacing a healthy
         // assertion with an identical one on every shelf click can be rejected

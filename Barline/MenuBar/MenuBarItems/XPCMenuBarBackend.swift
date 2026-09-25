@@ -5,8 +5,10 @@
 
 import BarlineCore
 import Foundation
+import OSLog
 
 actor XPCMenuBarBackend: MenuBarBackend {
+    private static let logger = Logger(subsystem: "com.mabryventures.Barline", category: "ConcealmentBoundary")
     private let connection = BarlineMenuService.Connection.shared
     private let goldenGateProvider = GoldenGateAXSnapshotProvider()
 
@@ -85,6 +87,13 @@ actor XPCMenuBarBackend: MenuBarBackend {
             // present to conceal, so drop it instead of rejecting every other
             // assignment along with it.
             let configuration = configuration.retainingOnly(Set(liveItemIDs))
+            let resolution = GoldenGateConcealmentPolicy.resolve(
+                configuration,
+                barlineBundleIdentifier: Bundle.main.bundleIdentifier ?? "com.mabryventures.Barline"
+            )
+            Self.logger.notice(
+                "Concealment boundary: live=\(liveItemIDs.count, privacy: .public) visible=\(configuration.visibleItemIDs.count, privacy: .public) hidden=\(configuration.concealedItemIDs.count, privacy: .public) concealedBundles=\(resolution.concealedBundleIdentifiers.count, privacy: .public)"
+            )
             guard GoldenGateConcealmentPolicy.supports(
                 configuration,
                 allItems: liveItemIDs,

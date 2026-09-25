@@ -46,6 +46,31 @@ enum AXHelpers {
         attributes: .concurrent
     )
 
+    private static let ownProcessIdentifier = ProcessInfo.processInfo.processIdentifier
+
+    /// Accessibility requests for an element in Barline's own process are not
+    /// IPC: HIServices calls AppKit's accessibility implementation directly on
+    /// the calling thread, and AppKit is not thread-safe. Answering our own
+    /// menu bar items from this background queue raced the main thread while
+    /// the shelf opened and closed, and crashed inside AppKit
+    /// (`ConvertOutgoingValueForAttribute` on this queue, and an over-release
+    /// while the main thread served a hit test). Run those requests on the main
+    /// thread; every other process keeps the background queue. The process is
+    /// checked before taking the queue, so no thread holds this queue while it
+    /// waits for the main thread.
+    private static func run<T>(on element: AXUIElement, _ body: () -> T) -> T {
+        var owner: pid_t = 0
+        guard AXUIElementGetPid(element, &owner) == .success,
+              owner == ownProcessIdentifier
+        else {
+            return queue.sync(execute: body)
+        }
+        if Thread.isMainThread {
+            return body()
+        }
+        return DispatchQueue.main.sync(execute: body)
+    }
+
     @discardableResult
     static func isProcessTrusted(prompt: Bool = false) -> Bool {
         queue.sync { checkIsProcessTrusted(prompt: prompt) }
@@ -67,7 +92,12 @@ enum AXHelpers {
     }
 
     static func extrasMenuBar(for app: Application) -> UIElement? {
-        queue.sync { try? app.attribute(.extrasMenuBar) }
+        run(on: app.element) {
+            guard let element: UIElement = try? app.attribute(.extrasMenuBar) else {
+                return nil
+            }
+            return boundedMenuBarElement(element)
+        }
     }
 
     /// Reads the extras-menu-bar attribute without erasing the AX error. The
@@ -75,7 +105,7 @@ enum AXHelpers {
     static func extrasMenuBarResult(
         for app: Application
     ) -> (element: UIElement?, disposition: ElementAttributeReadDisposition) {
-        queue.sync {
+        run(on: app.element) {
             var value: AnyObject?
             let error = AXUIElementCopyAttributeValue(
                 app.element,
@@ -87,7 +117,7 @@ enum AXHelpers {
                 guard let raw = value as! AXUIElement? else {
                     return (nil, .wrongType)
                 }
-                return (UIElement(raw), .success)
+                return (boundedMenuBarElement(UIElement(raw)), .success)
             case .noValue:
                 return (nil, .noValue)
             case .attributeUnsupported:
@@ -105,31 +135,45 @@ enum AXHelpers {
     }
 
     static func children(for element: UIElement) -> [UIElement] {
-        queue.sync { try? element.arrayAttribute(.children) } ?? []
+        run(on: element.element) {
+            let children: [UIElement] = (try? element.arrayAttribute(.children)) ?? []
+            return children.map(boundedMenuBarElement)
+        }
+    }
+
+    /// An app-level AX timeout does not carry over to the menu-bar descendants
+    /// returned by another AX request. Bound those elements individually on
+    /// macOS 27 so a stalled item cannot hold an inventory for the system
+    /// default timeout. Older menu-bar discovery keeps its existing behavior.
+    private static func boundedMenuBarElement(_ element: UIElement) -> UIElement {
+        if #available(macOS 27.0, *) {
+            _ = AXUIElementSetMessagingTimeout(element.element, 0.25)
+        }
+        return element
     }
 
     static func isEnabled(_ element: UIElement) -> Bool {
-        queue.sync { try? element.attribute(.enabled) } ?? false
+        run(on: element.element) { try? element.attribute(.enabled) } ?? false
     }
 
     static func frame(for element: UIElement) -> CGRect? {
-        queue.sync { try? element.attribute(.frame) }
+        run(on: element.element) { try? element.attribute(.frame) }
     }
 
     static func role(for element: UIElement) -> Role? {
-        queue.sync { try? element.role() }
+        run(on: element.element) { try? element.role() }
     }
 
     static func title(for element: UIElement) -> String? {
-        queue.sync { try? element.attribute(.title) }
+        run(on: element.element) { try? element.attribute(.title) }
     }
 
     static func identifier(for element: UIElement) -> String? {
-        queue.sync { try? element.attribute(.identifier) }
+        run(on: element.element) { try? element.attribute(.identifier) }
     }
 
     static func accessibilityDescription(for element: UIElement) -> String? {
-        queue.sync { try? element.attribute(.description) }
+        run(on: element.element) { try? element.attribute(.description) }
     }
 
     /// Reads only an AX result category, never returning the value. This
@@ -140,7 +184,7 @@ enum AXHelpers {
         for element: UIElement,
         attribute: Attribute
     ) -> StringAttributeReadDisposition {
-        queue.sync {
+        run(on: element.element) {
             var value: AnyObject?
             let error = AXUIElementCopyAttributeValue(
                 element.element,
@@ -172,7 +216,7 @@ enum AXHelpers {
     /// Checks whether asking the already-collected element for its direct
     /// children is currently viable, without returning any child metadata.
     static func childrenReadDisposition(for element: UIElement) -> ChildrenReadDisposition {
-        queue.sync {
+        run(on: element.element) {
             var value: AnyObject?
             let error = AXUIElementCopyAttributeValue(
                 element.element,
@@ -197,7 +241,7 @@ enum AXHelpers {
     /// AXUIElementGetPid is a bounded, value-free validity probe for an
     /// already-collected element. It never reveals the PID.
     static func isElementValid(_ element: UIElement) -> Bool {
-        queue.sync {
+        run(on: element.element) {
             var processIdentifier: pid_t = 0
             return AXUIElementGetPid(element.element, &processIdentifier) == .success
         }

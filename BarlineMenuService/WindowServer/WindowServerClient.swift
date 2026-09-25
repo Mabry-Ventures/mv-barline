@@ -348,6 +348,7 @@ final class WindowServerClient: @unchecked Sendable {
     private func moveWhileExclusive(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
         let maximumAttempts = 8
         var lastOrigin: CGPoint?
+        var reachedRequestedSection = false
         for attempt in 0 ..< maximumAttempts {
             try Task.checkCancellation()
             let windows = try currentWindows()
@@ -409,21 +410,67 @@ final class WindowServerClient: @unchecked Sendable {
                 placement = .right
             }
             let target = classified[targetIndex].window
+            let anchorKind: String = switch target.title {
+            case "Barline.ControlItem.Hidden": "hidden_control"
+            case "Barline.ControlItem.AlwaysHidden": "always_hidden_control"
+            case "Barline.ControlItem.Visible": "visible_control"
+            default: "ordinary"
+            }
+            let side: String = switch placement {
+            case .left: "left"
+            case .right: "right"
+            }
+            let hiddenBoundary = classified.first {
+                $0.window.title == "Barline.ControlItem.Hidden"
+            }?.window.bounds.minX ?? 0
+            let sourceEdgeOffset = Int((item.bounds.maxX - hiddenBoundary).rounded())
+            let anchorEdgeOffset = Int((target.bounds.maxX - hiddenBoundary).rounded())
+            logger.notice(
+                "Move probe attempt=\(attempt + 1, privacy: .public) requested=\(operation.section.rawValue, privacy: .public) source=\(classified[sourceIndex].section.rawValue, privacy: .public) anchor=\(anchorKind, privacy: .public) side=\(side, privacy: .public) insertion=\(insertionIndex, privacy: .public) peers=\(destinationIndices.count, privacy: .public) sourceEdge=\(sourceEdgeOffset, privacy: .public) anchorEdge=\(anchorEdgeOffset, privacy: .public)"
+            )
             lastOrigin = item.bounds.origin
             try Task.checkCancellation()
-            try await synthesizeMove(item: item, target: target, placement: placement)
+            do {
+                try await synthesizeMove(item: item, target: target, placement: placement)
+            } catch {
+                logger.notice(
+                    "Move probe synthesis rejected: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
+                )
+                throw error
+            }
             let delay = min(25 + (attempt * 20), 150)
             try await Task.sleep(for: .milliseconds(delay))
             let refreshed = try currentWindows()
-            if let moved = identifiedWindows(refreshed)
-                .first(where: { $0.id == operation.itemID })?.window,
-                moved.bounds.origin != lastOrigin
+            if let movedIndex = identifiedWindows(refreshed)
+                .firstIndex(where: { $0.id == operation.itemID })
             {
-                break
+                let observedSection = classifiedWindows(refreshed)[movedIndex].section
+                let originChanged = refreshed[movedIndex].bounds.origin != lastOrigin
+                let displayMatched = operation.destinationDisplayID.map {
+                    displayID(for: refreshed[movedIndex]) == $0
+                } != false
+                let observedEdgeOffset = Int((refreshed[movedIndex].bounds.maxX - hiddenBoundary).rounded())
+                logger.notice(
+                    "Move probe result attempt=\(attempt + 1, privacy: .public) observed=\(observedSection.rawValue, privacy: .public) changed=\(originChanged, privacy: .public) displayMatched=\(displayMatched, privacy: .public) observedEdge=\(observedEdgeOffset, privacy: .public)"
+                )
+                if HelperMoveSettlement.reachedDestination(
+                    originChanged: originChanged,
+                    observedSection: observedSection,
+                    requestedSection: operation.section,
+                    displayMatched: displayMatched
+                ) {
+                    reachedRequestedSection = true
+                    break
+                }
+            } else {
+                logger.notice("Move probe result attempt=\(attempt + 1, privacy: .public) observed=missing")
             }
             if attempt == maximumAttempts - 1 {
-                throw MenuBarBackendError.operationFailed("Menu bar item did not respond to move")
+                throw MenuBarBackendError.operationFailed("Menu bar item did not reach requested section")
             }
+        }
+        guard reachedRequestedSection else {
+            throw MenuBarBackendError.operationFailed("Menu bar item did not reach requested section")
         }
         let updated = try snapshot()
         return MenuBarMutationResult(generation: updated.generation, changedItemIDs: [operation.itemID])

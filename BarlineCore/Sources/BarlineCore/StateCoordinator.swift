@@ -12,21 +12,23 @@ public enum MenuBarAuthorityRefreshError: Error, Equatable, Sendable {
 
 public enum MenuBarMutation: Sendable {
     case move(MenuBarMoveOperation)
+    case transientReveal(MenuBarMoveOperation)
     case transientMove(MenuBarMoveOperation)
     case reveal(MenuBarItemID)
     case restoreLastKnownGood
 
     fileprivate var recordsLayoutHistory: Bool {
-        if case .transientMove = self {
+        switch self {
+        case .transientReveal, .transientMove:
             false
-        } else {
+        case .move, .reveal, .restoreLastKnownGood:
             true
         }
     }
 
     fileprivate var moveOperation: MenuBarMoveOperation? {
         switch self {
-        case let .move(operation), let .transientMove(operation):
+        case let .move(operation), let .transientReveal(operation), let .transientMove(operation):
             operation
         case .reveal, .restoreLastKnownGood:
             nil
@@ -407,6 +409,9 @@ public actor MenuBarStateCoordinator {
             concealedItemIDs: snapshot.items.filter {
                 !$0.isBarlineControlItem && concealedSections.contains($0.section)
             }.map(\.id)
+        )
+        Self.logger.notice(
+            "Concealment sync: visible=\(configuration.visibleItemIDs.count, privacy: .public) hidden=\(configuration.concealedItemIDs.count, privacy: .public)"
         )
         // Once the backend acknowledges the complete configuration, do not
         // reinterpret caller cancellation as failure: the native side effect
@@ -791,6 +796,10 @@ public actor MenuBarStateCoordinator {
     ) async throws -> MenuBarSnapshot {
         let retriesEventuallyConsistentVisibility = mutation.moveOperation != nil &&
             visibilityAssignmentGranularity == .applicationGroupAndKnownSystemItem
+        let retriesTransientMove = switch mutation {
+        case .transientReveal, .transientMove: true
+        default: false
+        }
         let attemptCount = retriesEventuallyConsistentVisibility
             // Golden Gate's compatibility inventory request can consume one
             // complete attempt while its XPC generation is replaced. A
@@ -798,7 +807,11 @@ public actor MenuBarStateCoordinator {
             // valid post-write inventory has actually settled. Neither event
             // should reduce the caller's ordinary recovery budget.
             ? max(2, retryPolicy.maximumAttempts + 2)
-            : 1
+            // The native helper can observe a successful status-item drag
+            // before the app's next WindowServer inventory has caught up. A single
+            // stale read must not trigger a whole-layout compensation while
+            // the item is actually in the requested section.
+            : (retriesTransientMove ? retryPolicy.maximumAttempts : 1)
         var mostRecentError: (any Error)?
         var previousSuccessfulVisibilitySignature: VisibilityObservationSignature?
         let validationClockStartedAt = Date()
@@ -828,14 +841,33 @@ public actor MenuBarStateCoordinator {
                 }
 
                 if let operation = mutation.moveOperation,
-                   !MenuBarMovePlanner().resultMatches(
+                   !(Self.isVisibleTransientReveal(
+                       mutation,
+                       operation: operation,
+                       destinationSupport: moveDestinationSupport,
+                       in: snapshot
+                   ) ?? Self.isHiddenTransientRestoration(
+                       mutation,
+                       operation: operation,
+                       destinationSupport: moveDestinationSupport,
+                       in: snapshot,
+                       from: before
+                   ) ?? MenuBarMovePlanner().resultMatches(
                        operation,
                        in: snapshot,
                        from: before,
                        destinationSupport: moveDestinationSupport,
                        visibilityAssignmentGranularity: visibilityAssignmentGranularity
-                   )
+                   ))
                 {
+                    if retriesTransientMove,
+                       let operation = mutation.moveOperation
+                    {
+                        let observed = snapshot.items.first { $0.id == operation.itemID }
+                        Self.logger.notice(
+                            "Transient move postcondition: section=\(observed?.section.rawValue ?? "missing", privacy: .public) onScreen=\(observed?.isOnScreen == true, privacy: .public) displayMatched=\(operation.destinationDisplayID.map { observed?.displayID == $0 } ?? true, privacy: .public)"
+                        )
+                    }
                     if moveDestinationSupport == .logicalSectionsPreserveNativeOrder,
                        let failure = MenuBarMovePlanner().logicalSectionVerificationFailure(
                            operation,
@@ -909,6 +941,57 @@ public actor MenuBarStateCoordinator {
         throw mostRecentError ?? MenuBarBackendError.operationFailed(
             "menu bar mutation postcondition was unavailable"
         )
+    }
+
+    /// A temporary reveal needs a usable on-screen item, not a particular
+    /// insertion slot. macOS can place a newly revealed status item beside a
+    /// different neighbor while preserving its visible section. Permanent
+    /// moves and visible-section restoration still require the exact slot.
+    private static func isVisibleTransientReveal(
+        _ mutation: MenuBarMutation,
+        operation: MenuBarMoveOperation,
+        destinationSupport: MenuBarMoveDestinationSupport?,
+        in snapshot: MenuBarSnapshot
+    ) -> Bool? {
+        guard case .transientReveal = mutation else { return nil }
+        guard destinationSupport != .logicalSectionsPreserveNativeOrder else { return nil }
+        guard operation.section == .visible,
+              let item = snapshot.items.first(where: { $0.id == operation.itemID })
+        else { return false }
+        return item.section == .visible && item.isOnScreen &&
+            operation.destinationDisplayID.map { item.displayID == $0 } != false
+    }
+
+    /// A temporary reveal is finished once its item is safely hidden again.
+    /// macOS may reinsert a rehidden status item beside a different hidden
+    /// neighbor; treating that harmless order drift as failure would roll the
+    /// item back into the visible menu bar. Permanent layout edits retain the
+    /// exact-neighbor postcondition.
+    private static func isHiddenTransientRestoration(
+        _ mutation: MenuBarMutation,
+        operation: MenuBarMoveOperation,
+        destinationSupport: MenuBarMoveDestinationSupport?,
+        in snapshot: MenuBarSnapshot,
+        from before: MenuBarSnapshot
+    ) -> Bool? {
+        guard case .transientMove = mutation,
+              destinationSupport != .logicalSectionsPreserveNativeOrder,
+              operation.section == .hidden || operation.section == .alwaysHidden
+        else { return nil }
+        guard let item = snapshot.items.first(where: { $0.id == operation.itemID }),
+              item.section == operation.section,
+              !item.isOnScreen,
+              operation.destinationDisplayID.map({ item.displayID == $0 }) != false,
+              snapshot.displayIDs == before.displayIDs,
+              Set(snapshot.items.map(\.id)) == Set(before.items.map(\.id))
+        else { return false }
+        return before.items.allSatisfy { original in
+            guard original.id != operation.itemID,
+                  let current = snapshot.items.first(where: { $0.id == original.id })
+            else { return original.id == operation.itemID }
+            return current.section == original.section &&
+                current.displayID == original.displayID
+        }
     }
 
     private struct VisibilityObservationSignature: Equatable {
@@ -2384,7 +2467,7 @@ public actor MenuBarStateCoordinator {
         in snapshot: MenuBarSnapshot
     ) throws {
         let itemID: MenuBarItemID? = switch mutation {
-        case let .move(operation), let .transientMove(operation):
+        case let .move(operation), let .transientReveal(operation), let .transientMove(operation):
             operation.itemID
         case let .reveal(referencedItemID):
             referencedItemID
@@ -2402,11 +2485,19 @@ public actor MenuBarStateCoordinator {
         {
             throw MenuBarBackendError.operationFailed("menu bar item cannot be hidden")
         }
-        if case let .transientMove(operation) = mutation,
-           operation.section != .visible,
-           snapshot.items.first(where: { $0.id == operation.itemID })?.canBeHidden == false
-        {
-            throw MenuBarBackendError.operationFailed("menu bar item cannot be hidden")
+        switch mutation {
+        case let .transientReveal(operation):
+            guard operation.section == .visible else {
+                throw MenuBarBackendError.operationFailed("temporary reveal must target visible section")
+            }
+        case let .transientMove(operation):
+            if operation.section != .visible,
+               snapshot.items.first(where: { $0.id == operation.itemID })?.canBeHidden == false
+            {
+                throw MenuBarBackendError.operationFailed("menu bar item cannot be hidden")
+            }
+        case .move, .reveal, .restoreLastKnownGood:
+            break
         }
     }
 
@@ -2542,7 +2633,7 @@ public actor MenuBarStateCoordinator {
         restoreTarget: MenuBarSnapshot? = nil
     ) async throws {
         switch mutation {
-        case let .move(operation), let .transientMove(operation):
+        case let .move(operation), let .transientReveal(operation), let .transientMove(operation):
             _ = try await backend.move(operation)
         case let .reveal(itemID):
             _ = try await backend.reveal(itemID)

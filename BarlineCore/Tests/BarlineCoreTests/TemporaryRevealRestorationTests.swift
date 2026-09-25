@@ -141,3 +141,48 @@ struct TemporaryRevealRestorationTests {
                         menuTrackingIsActive: tracking)
     }
 }
+
+@Suite("Temporary reveal absence policy")
+struct TemporaryRevealAbsencePolicyTests {
+    @Test("An item whose application has quit is released immediately")
+    func quitOwnerReleases() {
+        #expect(
+            TemporaryRevealAbsencePolicy.decision(ownerIsRunning: false, consecutiveAbsences: 1)
+                == .release
+        )
+    }
+
+    @Test("A brief absence while the application runs is deferred")
+    func briefAbsenceDefers() {
+        for count in 1 ..< TemporaryRevealAbsencePolicy.maximumDeferrals {
+            #expect(
+                TemporaryRevealAbsencePolicy.decision(ownerIsRunning: true, consecutiveAbsences: count)
+                    == .deferRestoration
+            )
+        }
+    }
+
+    @Test("A persistent absence is released so it cannot block later edits")
+    func persistentAbsenceReleases() {
+        #expect(
+            TemporaryRevealAbsencePolicy.decision(
+                ownerIsRunning: true,
+                consecutiveAbsences: TemporaryRevealAbsencePolicy.maximumDeferrals
+            ) == .release
+        )
+        #expect(
+            TemporaryRevealAbsencePolicy.decision(
+                ownerIsRunning: nil,
+                consecutiveAbsences: TemporaryRevealAbsencePolicy.maximumDeferrals
+            ) == .release
+        )
+    }
+
+    @Test("An unknown owner is deferred like a running one")
+    func unknownOwnerDefers() {
+        #expect(
+            TemporaryRevealAbsencePolicy.decision(ownerIsRunning: nil, consecutiveAbsences: 1)
+                == .deferRestoration
+        )
+    }
+}

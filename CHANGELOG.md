@@ -1,5 +1,233 @@
 # Changelog
 
+## 1.0.64 (build 141) — September 25, 2026
+
+Candidates 1.0.49 through 1.0.63 were built and tested internally but never
+published. Their changes are included here.
+
+### macOS 27
+
+- The Barline Bar responds as soon as you click. While Barline confirms which
+  items macOS has hidden, it shows a short loading state instead of looking
+  unresponsive, and it never shows an item twice — once in the menu bar and
+  again in the Barline Bar.
+- Your Hidden choices stay put. Moving one app's items, or reordering the
+  Barline Bar, no longer rewrites another app's saved Hidden setting, even when
+  an app briefly shows an extra menu bar item.
+- Fixed a crash that could occur while the Barline Bar was opening or
+  closing. Barline read its own menu bar items from a background thread while
+  the main thread was changing them; those reads now happen on the main
+  thread.
+- A slow menu bar item can no longer hold up Barline: each item is asked for
+  its details with its own short time limit.
+- Clicking the Barline icon behaves correctly when another app's menu overlaps
+  it.
+
+### macOS 26
+
+- Temporarily showing a hidden item and hiding it again is more reliable,
+  including when macOS puts the item back beside a different neighbour.
+- A drag that only gets part of the way now keeps going until the item reaches
+  its section, instead of stopping with the item still visible.
+- If an app quits while one of its items is temporarily shown, Barline lets
+  that item go instead of refusing later layout changes.
+
+### Both
+
+- Clicks on the Barline icon recover correctly after a missed click, without
+  mistaking your next click for a duplicate.
+- Diagnostics record more precise counts and timings for support, still with
+  no item names, app lists, or paths.
+
+## 1.0.63 (build 140) — candidate
+
+- Avoid synchronous Accessibility self-hit-testing from the macOS 27
+  mouse-down path. Verify the topmost mouse-down window instead and fail closed
+  when the menu-bar control does not own it. This addresses a crash observed
+  during repeated shelf opens after helper recovery; both OS lanes must be
+  requalified before release.
+
+## 1.0.62 (build 139) — candidate
+
+- Register the shelf directly with Barline's application Accessibility root so
+  its window remains discoverable without depending on SwiftUI's delegate
+  identity. Installed journeys now distinguish AX errors, empty window lists,
+  and shelf identity mismatches.
+- Preserve a temporary reveal's durable restoration obligation if a menu bar
+  census briefly omits the item during compaction. Defer and retry rather than
+  treating one absent observation as verified restoration.
+
+## 1.0.61 (build 138) — candidate
+
+1.0.60 was staged but not published. Independent review found that an
+unrelated layout edit could still save a transient fail-visible state over a
+hidden assignment.
+
+- Persist only the identities the user explicitly edited. A temporary status
+  item can no longer erase another app's saved hidden assignment when the user
+  edits a different app or reorders the shelf.
+- Keep retained-inventory refresh independent of transient fail-visible
+  normalization, and lower repetitive diagnostic logging.
+- Cover unrelated visibility edits, shelf ordering, and intentional changes
+  to the affected group.
+
+## 1.0.60 (build 137) — staged, not published
+
+- Keep macOS 27 fail-visible normalization transient. A newly launched item
+  from an app whose other items are hidden can temporarily make that bundle
+  impossible to conceal as a group. Barline now leaves the saved hidden layout
+  intact and restores it when that item exits, instead of overwriting the
+  user's choice while reading the menu bar.
+- Add a regression for mixed temporary items and a source guard that prevents
+  snapshot reads from persisting canonicalized visibility.
+
+## 1.0.59 (build 136) — diagnostic candidate, not for distribution
+
+- Record privacy-safe counts at the macOS 27 logical-layout and native
+  concealment boundaries to isolate an intermittent post-activation restore
+  failure. This candidate remains internal until the cause is fixed and both
+  installed operating-system gates pass.
+
+## 1.0.58 (build 135) — candidate
+
+1.0.57 was staged but not published. Independent review found that its
+fail-closed macOS 27 ownership check could leave a two-second duplicate-action
+window suppressing a distinct native click.
+
+- End duplicate-action ownership at the next physical mouse-down, including
+  when Accessibility cannot resolve the new click; still suppress a late
+  mouse-up from the recovered click itself.
+- Resolve Barline's status control through a bounded Accessibility parent
+  chain and cap the hit test's messaging timeout. Keep the exact-button-frame
+  gate before invoking the hit test.
+- Cover ambiguous AX ownership, consecutive native clicks, a held-click
+  release, and cancellation of a pending fallback in coordinator tests.
+
+## 1.0.57 (build 134) — candidate
+
+1.0.56 was staged but not published. Its installed macOS 27 fixture journey
+opened and completed the target menu once, then Barline's delayed status-item
+fallback mistook an overlapping menu click for a missed click on its own icon
+and reopened the shelf.
+
+- Require the macOS 27 fallback to verify that Barline's accessible status
+  control is the topmost element at the click point. Ambiguous hits fail closed;
+  AppKit's normal status-item action remains available.
+- Keep the macOS 26 fallback unchanged and add a regression case for an
+  overlapping menu at the control's screen coordinates.
+
+## 1.0.56 (build 133) — candidate
+
+1.0.55 was qualified in source tests but not published. An installed macOS 26
+journey exposed a disagreement between the helper's visible move result and
+the coordinator's first postcondition, followed by unnecessary compensation
+and failed activation. Whether the inventory lagged or the item remained
+non-clickable requires installed-candidate telemetry to distinguish.
+
+- Retry the transient reveal/restore postcondition against bounded fresh
+  inventories before starting rollback; permanent layout edits keep their
+  existing strict verification.
+- Require installed journeys to prove a genuinely concealed fixture, an empty
+  recovery journal, and a stable restoration after the compensation window.
+  macOS 27 uses native Accessibility hit testing because its source status-item
+  frame remains on screen even when the item is hidden.
+- Keep diagnostic logging limited to section, on-screen state, and display
+  match, with no item names or application inventory.
+
+## 1.0.55 (build 132) — candidate
+
+1.0.54 was a private diagnostic build, not published. Its installed macOS 26
+journeys confirmed successful section restoration while the prior journey gate
+still rejected offscreen slot compaction as a failure.
+
+- Qualify temporary hidden-item restoration by verifying the same unique
+  fixture window returns behind Barline's hidden divider, rather than requiring
+  the old offscreen pixel coordinate. The gate still requires the exact
+  signed candidate, real pointer events, one fixture action, and a closed
+  interface before accepting restoration.
+- Carry forward privacy-safe helper move diagnostics for any recurrence.
+
+## 1.0.54 (build 131) — diagnostic candidate
+
+1.0.53 was staged but not published. Its installed macOS 26 popover journey
+still failed restoration after successful activation; the helper reported a
+generic operation failure before the new coordinator postcondition could help.
+
+- Distinguish a helper move that never reaches the requested section from a
+  coordinator postcondition failure in privacy-safe diagnostics.
+- Record bounded, name-free move observations (anchor category, side, section,
+  display match, and relative geometry) to locate the native drag failure.
+  No movement behavior changes in this diagnostic build.
+
+## 1.0.53 (build 130) — candidate
+
+1.0.52 was staged but not published; its changes are included here.
+
+- Complete temporary restoration when the original item is verified off-screen
+  in its requested hidden section and display, even if macOS reinserts it at
+  a different hidden neighbor. An installed 1.0.52 popover journey had reached
+  the hidden section but its exact-slot check rejected the result and rolled
+  the item back into the visible menu bar.
+- Keep exact-slot verification for permanent layout edits and visible-section
+  restoration. Reject hidden restoration if an unrelated item changes section
+  or display.
+
+## 1.0.52 (build 129) — candidate
+
+1.0.51 was staged but not published; its changes are included here.
+
+- Accept a verified on-screen temporary reveal on macOS 26 even when macOS
+  places the item beside a different native neighbor. Permanent layout edits
+  and restoration retain their exact-position verification.
+- Continue a bounded physical drag when an item moves but has not reached its
+  requested section or display. A partial movement no longer falsely ends
+  temporary restoration with the item still visible.
+- Exercise twenty post-recovery shelf opens so the installed latency p95 gate
+  has a meaningful sample after XPC helper interruption. Keep separate
+  candidate-bound baseline and post-interruption receipts, including each
+  run's slowest click.
+
+## 1.0.51 (build 128) — candidate
+
+This candidate was staged but not published; 1.0.52 supersedes it.
+
+- Accept a verified on-screen temporary reveal on macOS 26 even when macOS
+  places the item beside a different native neighbor. Permanent layout edits
+  and restoration retain their exact-position verification.
+- Exercise twenty post-recovery shelf opens so the installed latency p95 gate
+  has a meaningful sample after XPC helper interruption. Keep separate
+  candidate-bound baseline and post-interruption receipts, including each
+  run's slowest click.
+
+## 1.0.50 (build 127) — candidate
+
+This candidate was staged but not published; 1.0.51 supersedes it.
+
+- Show a loading-only Barline Bar immediately on macOS 27 while native item
+  concealment is reconciled. Item icons remain withheld until that check
+  succeeds, preventing duplicate native and shelf copies without making the
+  first click appear unresponsive.
+- Show a clear preparation failure instead of leaving the loading state open,
+  and give an empty hidden section a readable placeholder rather than a tiny
+  blank panel.
+- Correct the installed macOS 27 performance probe to identify the unique
+  app-owned shelf surface when WindowServer omits its title. Repeated
+  Accessibility queries no longer inflate click timing.
+
+## 1.0.49 (build 126) — candidate
+
+This candidate was staged but not published; 1.0.50 supersedes it.
+
+- Bound macOS 27 Accessibility requests on individual menu bar elements as
+  well as their owning apps. A slow item can no longer inherit the longer
+  system default messaging timeout during inventory.
+- Skip retained-inventory encoding and preference writes when a refreshed
+  snapshot contains no changed descriptor. Layout recovery and changed-item
+  persistence continue through the existing transaction path.
+- Add privacy-safe timing intervals for app and helper inventory and for
+  shelf presentation and concealment readiness. These make the next macOS 27
+  installed-build measurements attributable to the slow phase.
+
 ## 1.0.48 (build 125) — September 21, 2026
 
 1.0.47 was built and qualified but never published; its change is included

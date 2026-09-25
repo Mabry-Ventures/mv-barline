@@ -23,6 +23,18 @@ enum HelperClickRouting {
 /// Intermediate geometry is optional; only the caller's final placement
 /// postcondition can certify a drag. Transport errors still propagate.
 enum HelperMoveSettlement {
+    /// A geometry change alone can be an intermediate drag position. Keep
+    /// retrying until the item reaches the requested physical section and
+    /// display; the coordinator separately verifies the exact logical slot.
+    static func reachedDestination<Section: Equatable>(
+        originChanged: Bool,
+        observedSection: Section,
+        requestedSection: Section,
+        displayMatched: Bool
+    ) -> Bool {
+        originChanged && observedSection == requestedSection && displayMatched
+    }
+
     static func releaseAndObserve<Origin: Sendable>(
         initialOrigin: Origin,
         observeChange: (Origin) async throws -> Origin?,

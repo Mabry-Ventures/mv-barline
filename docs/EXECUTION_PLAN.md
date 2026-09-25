@@ -1,5 +1,82 @@
 # Barline execution plan
 
+## Barline 1.0.54 move diagnostic — September 23, 2026
+
+Build 131 is a private diagnostic candidate, not a release. The exact signed
+build 130 passed both full source gates and the installed macOS 26 native-left
+and native-right journeys. Its popover-left journey activated the target and
+completed its action, but the item remained visible; three restoration
+attempts reported generic `operation_failed` and the fixture-only journal was
+retained. Final visible geometry may be compensation, not the helper's chosen
+drag endpoint. Build 131 adds closed error classification and name-free helper
+move observations without changing the move algorithm. Reproduce with only
+synthetic fixtures, identify the selected anchor and resulting section, then
+make a bounded correction. Do not publish either candidate or treat the prior
+macOS 27 full gate as installed 1.0.54 evidence.
+
+## Barline 1.0.53 hidden restoration candidate — September 23, 2026
+
+Build 130 supersedes the unpublished 1.0.52 candidate. The exact installed
+build 129 passed native-menu journeys but failed the popover journey after
+successful activation and action: the coordinator rejected temporary
+restoration three times with `move_postcondition_failed`, compensated back to
+the temporarily visible state, and retained the fixture-only journal. The
+helper reports destination section/display but the coordinator additionally
+requires the original hidden neighbor. For temporary rehide only, the new
+postcondition accepts the same item safely off-screen in its requested hidden
+section/display if no peer changes section/display. Permanent edits and
+visible-section restoration remain exact. Both local and remote full gates,
+signed/notarized bytes, installed native/popover journeys, and macOS 27 shelf
+latency must be rerun on this exact candidate before publication.
+
+## Barline 1.0.52 restore-convergence candidate — September 23, 2026
+
+Build 129 supersedes the unpublished 1.0.51 candidate. An installed macOS 26
+popover journey activated the correct hidden item but left it in the visible
+section during temporary restoration. The helper had stopped after any origin
+change, even when the requested hidden section had not been reached. The
+bounded drag now continues until the observed item reaches the requested
+section and display; a focused regression rejects intermediate movement. The
+coordinator retains exact logical-slot verification for restoration and
+permanent edits. The old installed app recovered the fixture-only journal on
+a clean relaunch, but that is not live-journey proof of this change. Run full
+source gates, sign and notarize this exact commit, and repeat installed
+native and popover journeys on macOS 26 and 27 before publication. Do not
+alter the public feed while either installed lane is unproven.
+
+## Barline 1.0.51 temporary-reveal hardening — September 23, 2026
+
+Build 128 supersedes the unpublished 1.0.50 candidate. The exact installed
+build 127 passed the macOS 26 signed Sparkle upgrade but failed a physical
+hidden-item click: macOS moved the item into view at a different native slot,
+so the strict temporary-move postcondition prevented activation. The new
+postcondition requires the same item on the intended display, in the visible
+section, and on screen; an explicit transaction kind keeps permanent
+arrangement and every restoration on exact placement verification. The macOS
+27 post-helper p95 sample expands from five to twenty real opens and emits its
+own candidate-bound receipt with maximum latency. Rebuild, sign, notarize, and
+repeat installed journeys on both macOS 26 and 27 before publication.
+
+## Barline 1.0.50 responsive shelf candidate — September 23, 2026
+
+Build 127 supersedes the unpublished 1.0.49 candidate. Installed macOS 27
+testing showed that concealment reconciliation can delay the first shelf
+surface beyond the 250 ms feedback budget. The shelf now commits a loading-only
+surface first and withholds all item icons until concealment is verified. A
+failed reconciliation shows an explicit message and never exposes the cached
+icons. Qualify the exact signed build on macOS 26 and macOS 27, including
+rapid retries and hidden-item interaction, before changing the public feed.
+
+## Barline 1.0.49 performance candidate — September 23, 2026
+
+Build 126 is a staged, unpublished candidate. It bounds macOS 27 AX child
+requests, suppresses unchanged retained-inventory writes, and adds privacy-safe
+inventory and shelf timing intervals. The macOS 26 source/build gates and the
+macOS 27 installed candidate still need exact-source evidence before any
+release decision. In particular, a macOS 26 build cannot establish a macOS 27
+latency improvement or concealment correctness. Keep the public v1.0.48 feed
+unchanged until both OS lanes pass.
+
 ## Barline 1.0.31 macOS 27 native arrangement release published — September 17, 2026
 
 Barline 1.0.31 (build 108), annotated tag `v1.0.31` at

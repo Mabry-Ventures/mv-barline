@@ -98,6 +98,10 @@ final class BarlineShelfPanel: NSPanel {
 
     /// Privacy-safe lifecycle diagnostics for accessory panel presentation.
     private let logger = Logger(category: "BarlineShelf")
+    private let signposter = OSSignposter(
+        subsystem: "com.mabryventures.Barline",
+        category: .pointsOfInterest
+    )
 
     /// Creates a new Barline Bar panel.
     init(
@@ -330,6 +334,10 @@ final class BarlineShelfPanel: NSPanel {
     /// presentation request.
     @discardableResult
     func show(_ request: PresentationRequest, on screen: NSScreen) async -> Bool {
+        let presentationInterval = signposter.beginInterval("ShelfPresentation")
+        defer {
+            signposter.endInterval("ShelfPresentation", presentationInterval)
+        }
         guard let appState else {
             logger.error("Shelf presentation rejected: missing app state")
             return false
@@ -350,22 +358,20 @@ final class BarlineShelfPanel: NSPanel {
             return false
         }
 
-        // A status item becomes clickable before the slower compatibility
-        // setup finishes. On macOS 27, do not render a saved shelf while its
-        // native copies are still visible: first reconcile the current
-        // concealment transaction, then revalidate this presentation request.
-        if #available(macOS 27.0, *) {
-            await appState.waitForMenuBarItemSetup()
-            guard await appState.itemManager.prepareForShelfPresentation() else {
-                logger.error("Shelf presentation rejected: concealment was not ready")
-                return false
-            }
+        // Order a loading-only surface before macOS 27 concealment readiness.
+        // The loading view has no item icons, so native copies cannot appear
+        // alongside shelf copies while the reconciliation is still running.
+        // The content gate below is released only after readiness succeeds.
+        let requiresConcealmentReadiness = if #available(macOS 27.0, *) {
+            true
+        } else {
+            false
         }
         guard request.generation == presentationGeneration,
               currentSection == request.section,
               appState.navigationState.isBarlineShelfPresented
         else {
-            logger.notice("Shelf presentation rejected: ownership changed during readiness")
+            logger.notice("Shelf presentation rejected: ownership changed before ordering")
             return false
         }
 
@@ -373,7 +379,8 @@ final class BarlineShelfPanel: NSPanel {
         // items and capturing their images can take hundreds of milliseconds,
         // especially while Control Center is relaying out status items. That
         // work must not block the first visible frame after a user click.
-        let needsLoadingState = appState.itemManager.itemCache.managedItems.isEmpty ||
+        let needsLoadingState = requiresConcealmentReadiness ||
+            appState.itemManager.itemCache.managedItems.isEmpty ||
             appState.imageCache.cacheFailed(for: request.section)
         let hostingView: BarlineShelfHostingView
         if
@@ -425,6 +432,30 @@ final class BarlineShelfPanel: NSPanel {
         cacheRefreshTask = Task { [weak self, weak hostingView] in
             guard let self, let hostingView else {
                 return
+            }
+            if requiresConcealmentReadiness {
+                let readinessInterval = signposter.beginInterval("ShelfConcealmentReadiness")
+                defer {
+                    signposter.endInterval("ShelfConcealmentReadiness", readinessInterval)
+                }
+                await appState.waitForMenuBarItemSetup()
+                guard !Task.isCancelled,
+                      request.generation == presentationGeneration,
+                      currentSection == request.section,
+                      appState.navigationState.isBarlineShelfPresented
+                else { return }
+                let ready = await appState.itemManager.prepareForShelfPresentation()
+                guard !Task.isCancelled,
+                      request.generation == presentationGeneration,
+                      currentSection == request.section,
+                      appState.navigationState.isBarlineShelfPresented
+                else { return }
+                guard ready else {
+                    logger.error("Shelf item content withheld: concealment was not ready")
+                    hostingView.failPreparing()
+                    cacheRefreshTask = nil
+                    return
+                }
             }
             await refreshCache(
                 for: request,
@@ -678,7 +709,10 @@ private final class BarlineShelfHostingView: NSHostingView<BarlineShelfContentVi
     }
 
     func beginPresentation(generation: UInt) {
-        rootView.presentationGeneration = generation
+        var updatedRootView = rootView
+        updatedRootView.presentationGeneration = generation
+        updatedRootView.preparationFailed = false
+        rootView = updatedRootView
     }
 
     /// Updates the transient loading state without replacing the hosting view.
@@ -696,6 +730,13 @@ private final class BarlineShelfHostingView: NSHostingView<BarlineShelfContentVi
         setPreparing(false)
     }
 
+    func failPreparing() {
+        var updatedRootView = rootView
+        updatedRootView.preparationFailed = true
+        updatedRootView.isPreparing = false
+        rootView = updatedRootView
+    }
+
     @available(*, unavailable)
     required init?(coder _: NSCoder) {
         fatalError("init(coder:) has not been implemented")
@@ -710,21 +751,26 @@ private final class BarlineShelfHostingView: NSHostingView<BarlineShelfContentVi
         true
     }
 
+    // Accessibility requests arrive from other processes while the shelf opens
+    // and closes, and AppKit retains and autoreleases whatever these return.
+    // Keep the getters free of side effects and never hand out a button that
+    // SwiftUI has already detached from this window. Each button sets its own
+    // parent when it joins or leaves the shelf (see `viewDidMoveToWindow`).
     override func accessibilityChildren() -> [Any]? {
         let inherited = super.accessibilityChildren() ?? []
-        let nativeButtons = descendantShelfItemButtons()
-        nativeButtons.forEach { $0.setAccessibilityParent(self) }
+        guard let window, window.isVisible else { return inherited }
+        let nativeButtons = descendantShelfItemButtons().filter { $0.window === window }
         return inherited + nativeButtons.filter { button in
             !inherited.contains { ($0 as AnyObject) === button }
         }
     }
 
     override func accessibilityHitTest(_ point: NSPoint) -> Any? {
-        guard let window else { return super.accessibilityHitTest(point) }
+        guard let window, window.isVisible else { return super.accessibilityHitTest(point) }
         let windowPoint = window.convertPoint(fromScreen: point)
         var candidate = hitTest(convert(windowPoint, from: nil))
         while let view = candidate {
-            if let button = view as? BarlineShelfItemClickView.Represented {
+            if let button = view as? BarlineShelfItemClickView.Represented, button.window === window {
                 return button
             }
             candidate = view.superview
@@ -762,6 +808,7 @@ private struct BarlineShelfContentView: View {
     let section: MenuBarSection.Name
     var presentationGeneration: UInt
     var isPreparing: Bool
+    var preparationFailed = false
 
     private var items: [MenuBarItem] {
         itemManager.itemsForBarlineShelf(in: section, on: screen)
@@ -927,6 +974,9 @@ private struct BarlineShelfContentView: View {
         } else if menuBarManager.isMenuBarHiddenBySystemUserDefaults {
             Text("Barline cannot display menu bar items for automatically hidden menu bars")
                 .padding(.horizontal, 10)
+        } else if preparationFailed {
+            Text("Hidden items could not be prepared. Close the Barline Bar and try again.")
+                .padding(.horizontal, 10)
         } else if itemManager.itemDiscoveryState == .failed {
             HStack {
                 Text("Menu bar items could not be loaded")
@@ -950,6 +1000,9 @@ private struct BarlineShelfContentView: View {
             }
             .frame(minWidth: cachedContentWidth)
             .padding(.horizontal, 10)
+        } else if items.isEmpty {
+            Text(section == .alwaysHidden ? "No always-hidden menu bar items" : "No hidden menu bar items")
+                .padding(.horizontal, 10)
         } else {
             ScrollView(.horizontal) {
                 HStack(spacing: 0) {
@@ -1226,6 +1279,22 @@ private struct BarlineShelfItemClickView: NSViewRepresentable {
         @objc private func activateItem() {
             logger.debug("Shelf item activated by keyboard")
             leftClickAction()
+        }
+
+        /// Parents the button to the shelf's hosting view while it is on screen
+        /// and clears that link as soon as SwiftUI detaches it, so an
+        /// Accessibility client can never reach a button through a stale parent.
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            guard window != nil else {
+                setAccessibilityParent(nil)
+                return
+            }
+            var ancestor = superview
+            while let view = ancestor, !(view is BarlineShelfHostingView) {
+                ancestor = view.superview
+            }
+            setAccessibilityParent(ancestor)
         }
 
         override func accessibilityPerformPress() -> Bool {

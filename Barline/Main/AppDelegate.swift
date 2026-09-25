@@ -12,10 +12,15 @@ import SwiftUI
 @objc(BarlineApplication)
 @MainActor
 final class BarlineApplication: NSApplication {
+    private weak var accessibilityShelfPanel: BarlineShelfPanel?
+
+    func registerAccessibilityShelf(_ shelf: BarlineShelfPanel) {
+        accessibilityShelfPanel = shelf
+    }
+
     override func accessibilityWindows() -> [Any]? {
         let windows = super.accessibilityWindows() ?? []
-        guard let appDelegate = delegate as? AppDelegate else { return windows }
-        let shelf = appDelegate.appState.menuBarManager.barlineShelfPanel
+        guard let shelf = accessibilityShelfPanel else { return windows }
         return Self.includingShelf(
             shelf,
             whenVisible: shelf.isVisible,
@@ -86,6 +91,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     // MARK: NSApplicationDelegate Methods
 
     func applicationWillFinishLaunching(_: Notification) {
+        if let application = NSApp as? BarlineApplication {
+            application.registerAccessibilityShelf(appState.menuBarManager.barlineShelfPanel)
+        } else {
+            Logger.default.error("Shelf Accessibility registration unavailable: unexpected application class")
+        }
         // Initial chore work.
         NSSplitViewItem.swizzle()
         MigrationManager(appState: appState).migrateAll()

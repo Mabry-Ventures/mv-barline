@@ -130,7 +130,6 @@ public enum GoldenGateConcealmentPolicy {
         guard visible.isDisjoint(with: concealed) else { return false }
         let requested = visible.union(concealed)
         guard requested.isSubset(of: Set(allItems)) else {
-            let missing = requested.subtracting(Set(allItems))
             return false
         }
 

@@ -217,7 +217,12 @@ final class MenuBarSection {
             Task {
                 let didShow = await panel.show(presentation, on: screen)
                 if didShow {
-                    appState?.itemManager.scheduleGoldenGateConcealmentSync()
+                    // The macOS 27 panel owns a readiness reconciliation
+                    // before revealing item icons. Scheduling another sync
+                    // here races that transaction and repeats the same work.
+                    if #unavailable(macOS 27.0) {
+                        appState?.itemManager.scheduleGoldenGateConcealmentSync()
+                    }
                     if keyboardFocus {
                         panel.focusItemsForKeyboard()
                     }

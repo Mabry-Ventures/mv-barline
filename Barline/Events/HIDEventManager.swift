@@ -54,6 +54,8 @@ final class HIDEventManager: ObservableObject {
         mouseDownSequence &+= 1
         switch event.type {
         case .leftMouseDown:
+            appState.menuBarManager.controlItem(withName: .visible)?
+                .notePhysicalMouseDown(eventTimestamp: event.timestamp)
             schedulePrimaryControlActionRecovery(
                 with: event,
                 appState: appState,
@@ -186,14 +188,16 @@ extension HIDEventManager {
         appState: AppState,
         screen: NSScreen
     ) {
+        guard let click = event.cgEvent,
+              let control = appState.menuBarManager.controlItem(withName: .visible) else { return }
+        let exactButtonHit = control.containsEventLocation(click.unflippedLocation)
         guard
-            let click = event.cgEvent,
-            let control = appState.menuBarManager.controlItem(withName: .visible),
             isMouseInsideMenuBar(
                 appState: appState,
                 screen: screen,
                 location: click.unflippedLocation
             ),
+            exactButtonHit,
             StatusItemActionRecoveryCoordinator.shouldSchedulePrimaryRecovery(
                 eventTargetsShelf: {
                     let shelf = appState.menuBarManager.barlineShelfPanel
@@ -201,8 +205,10 @@ extension HIDEventManager {
                         shelf.isVisible && shelf.frame.contains(click.unflippedLocation)
                     )
                 }(),
-                eventLocationIsInsideExactButtonFrame: control.containsEventLocation(
-                    click.unflippedLocation
+                eventLocationIsInsideExactButtonFrame: exactButtonHit,
+                eventTargetsAccessibleControl: topmostWindowIsPrimaryControl(
+                    at: click.unflippedLocation,
+                    control: control
                 )
             )
         else { return }
@@ -212,6 +218,16 @@ extension HIDEventManager {
             eventTimestamp: event.timestamp,
             modifierFlags: event.modifierFlags
         )
+    }
+
+    /// A scene-backed button's frame can overlap another app's menu. Use the
+    /// window that AppKit would actually deliver a mouse-down to, rather than
+    /// synchronously asking our own Accessibility server to hit-test while it
+    /// is processing that same mouse-down. An unknown window fails closed.
+    private func topmostWindowIsPrimaryControl(at point: CGPoint, control: ControlItem) -> Bool {
+        guard #available(macOS 27.0, *) else { return true }
+        let hitWindowNumber = NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0)
+        return control.ownsWindowNumber(hitWindowNumber)
     }
 
     // MARK: Handle Show On Click

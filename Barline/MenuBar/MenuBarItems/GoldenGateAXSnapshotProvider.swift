@@ -273,6 +273,10 @@ actor GoldenGateAXSnapshotProvider {
     private static let maximumRememberedAssignments = 512
 
     private let logger = Logger(category: "GoldenGateAXSnapshotProvider")
+    private let inventorySignposter = OSSignposter(
+        subsystem: "com.mabryventures.Barline",
+        category: .pointsOfInterest
+    )
     private let serviceConnection = BarlineMenuService.Connection.shared
     private var generation: UInt64 = 0
     private var cachedAt: UInt64?
@@ -444,27 +448,19 @@ actor GoldenGateAXSnapshotProvider {
         }
         if verificationAssignments == nil {
             if !canonicalization.repairedItemIDs.isEmpty {
-                do {
-                    let prepared = try preparePersistence(
-                        from: result,
-                        requiredItemIDs: canonicalization.repairedItemIDs
-                    )
-                    if commitPersistence(prepared) {
-                        logger.notice(
-                            "Golden Gate repaired unsupported legacy concealment assignments: count=\(canonicalization.repairedItemIDs.count, privacy: .public)"
-                        )
-                    } else {
-                        logger.error("Golden Gate legacy concealment repair could not be synchronized")
-                    }
-                } catch {
-                    logger.error(
-                        "Golden Gate legacy concealment repair could not be prepared: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)"
-                    )
-                }
-            } else if let prepared = try? prepareRetainedInventory(
-                from: result,
-                requiredItemIDs: []
-            ) {
+                // A temporary item from the same bundle can make an otherwise
+                // supported saved assignment mixed. Fail visible for this
+                // snapshot, but never replace the user's saved intent on a read.
+                logger.debug(
+                    "Golden Gate temporarily failed unsupported concealment visible: count=\(canonicalization.repairedItemIDs.count, privacy: .public)"
+                )
+            }
+            if retainedInventoryNeedsUpdate(from: result),
+               let prepared = try? prepareRetainedInventory(
+                   from: result,
+                   requiredItemIDs: []
+               )
+            {
                 commitRetainedInventory(prepared)
             }
         }
@@ -769,7 +765,14 @@ actor GoldenGateAXSnapshotProvider {
         }
         let persistence = try preparePersistence(
             from: candidate,
-            requiredItemIDs: [operation.itemID]
+            requiredItemIDs: Set(candidate.items.compactMap { item in
+                guard item.section == operation.section,
+                      !item.isBarlineControlItem,
+                      explicitAssignments[item.id]?.section == operation.section ||
+                      item.id == operation.itemID
+                else { return nil }
+                return item.id
+            })
         )
         guard commitPersistence(persistence) else {
             throw MenuBarBackendError.mutationNotStarted
@@ -1060,6 +1063,7 @@ actor GoldenGateAXSnapshotProvider {
         let assignmentCandidates = logicalLayoutPlanner.assignmentsForPersistence(
             from: snapshot,
             preserving: explicitAssignments,
+            editing: requiredItemIDs,
             barlineBundleIdentifier: Bundle.main.bundleIdentifier
                 ?? "com.mabryventures.Barline",
             maximumCount: Self.maximumRememberedAssignments * 2
@@ -1224,6 +1228,16 @@ actor GoldenGateAXSnapshotProvider {
             ($0.id, $0)
         })
         UserDefaults.standard.set(prepared.data, forKey: Self.retainedInventoryKey)
+    }
+
+    /// Live readings can change a descriptor's title without changing its
+    /// identity. Avoid encoding and writing the same retained inventory again
+    /// when an AX refresh has not changed any persisted descriptor.
+    private func retainedInventoryNeedsUpdate(from snapshot: MenuBarSnapshot) -> Bool {
+        snapshot.items.contains { descriptor in
+            descriptor.id.isPlausiblyStable &&
+                retainedDescriptors[descriptor.id] != Self.sanitizedDescriptor(descriptor)
+        }
     }
 
     private static func persistencePriority(
@@ -1636,6 +1650,10 @@ actor GoldenGateAXSnapshotProvider {
     }
 
     private func collectEntries() -> [Entry] {
+        let inventoryInterval = inventorySignposter.beginInterval("GoldenGateAXInventory")
+        defer {
+            inventorySignposter.endInterval("GoldenGateAXInventory", inventoryInterval)
+        }
         var entries = [Entry]()
         let allRunningApplications = NSWorkspace.shared.runningApplications.filter {
             !$0.isTerminated
@@ -1643,6 +1661,9 @@ actor GoldenGateAXSnapshotProvider {
         let runningProcesses = allRunningApplications.map(\.processIdentifier)
         let now = Date()
         let plan = ownerProbePolicy.processesToProbe(running: runningProcesses, now: now)
+        logger.debug(
+            "Golden Gate AX probe planned: full=\(plan.isFullScan, privacy: .public), processes=\(plan.processes.count, privacy: .public)"
+        )
         let probeSet = Set(plan.processes)
         let runningApplications = allRunningApplications.filter {
             probeSet.contains($0.processIdentifier)

@@ -69,6 +69,7 @@ public enum PrivacySafeDiagnostics {
         case "Menu bar event delivery failed": "move_delivery_failed"
         case "No destination item is available": "move_destination_unavailable"
         case "No destination item is available on the requested display": "move_display_unavailable"
+        case "Menu bar item did not reach requested section": "move_section_settlement_failed"
         case "menu bar move did not reach requested section": "move_postcondition_failed"
         case "native concealment did not reach requested visibility": "concealment_postcondition_failed"
         case "Golden Gate native concealment rejected": "concealment_native_rejected"

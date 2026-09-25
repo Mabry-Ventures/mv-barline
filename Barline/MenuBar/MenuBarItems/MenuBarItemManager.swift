@@ -1117,7 +1117,7 @@ extension MenuBarItemManager {
             let priorProfileID = await appState.compatibilityCoordinator.activeProfileID
             let mutation: BarlineCore.MenuBarMutation = recordsHistory
                 ? .move(operation)
-                : .transientMove(operation)
+                : .transientReveal(operation)
             _ = try await appState.compatibilityCoordinator.perform(
                 mutation,
                 expectedGeneration: snapshot.generation,
@@ -1415,6 +1415,7 @@ extension MenuBarItemManager {
 
         var revealObservation: MenuBarRevealObservationToken?
         var rehideAttempts = 0
+        var consecutiveAbsences = 0
         var paused: Bool
 
         init(entry: TemporaryRevealJournal.Entry, tag: MenuBarItemTag?, authority: UInt64, paused: Bool = false) {
@@ -1684,6 +1685,7 @@ extension MenuBarItemManager {
                 }
                 switch context.entry.checkpoint.resolve(in: snapshot) {
                 case let .move(operation):
+                    context.consecutiveAbsences = 0
                     try await waitForUserToPauseInput()
                     let restored = try await appState.compatibilityCoordinator.perform(
                         .transientMove(operation),
@@ -1694,10 +1696,32 @@ extension MenuBarItemManager {
                           item.section == context.entry.checkpoint.originalSection,
                           item.displayID == context.entry.checkpoint.originalDisplayID
                     else { throw EventError.cannotComplete }
-                case .itemAbsent, .superseded:
-                    // A validated census or explicit external relocation owns
-                    // the current state; don't chase a replacement identity.
-                    break
+                case .itemAbsent:
+                    // A census can briefly omit an item while the menu bar
+                    // compacts, but an item whose app has quit never returns.
+                    // Defer only within bounds, so an obligation that can no
+                    // longer be met cannot block later layout edits.
+                    context.consecutiveAbsences += 1
+                    let owner = context.itemID.bundleIdentifier
+                    // Item identities store lowercased bundle identifiers.
+                    let ownerIsRunning: Bool? = owner.hasPrefix("barline.")
+                        ? nil
+                        : NSWorkspace.shared.runningApplications.contains {
+                            $0.bundleIdentifier?.caseInsensitiveCompare(owner) == .orderedSame
+                        }
+                    switch TemporaryRevealAbsencePolicy.decision(
+                        ownerIsRunning: ownerIsRunning,
+                        consecutiveAbsences: context.consecutiveAbsences
+                    ) {
+                    case .deferRestoration:
+                        logger.notice("Item restoration deferred: target absent from snapshot")
+                        continue
+                    case .release:
+                        logger.notice("Item restoration released: target no longer present")
+                    }
+                case .superseded:
+                    // An explicit external relocation owns the new position.
+                    logger.notice("Item restoration superseded by external relocation")
                 case .displayUnavailable, .unavailable:
                     context.paused = true
                     activationNotice = "Item restoration needs review. Use Retry Item Restoration in Layouts & Focus."

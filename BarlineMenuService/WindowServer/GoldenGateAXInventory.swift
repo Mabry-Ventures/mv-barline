@@ -37,6 +37,10 @@ enum GoldenGateAXInventory {
     private static let cacheLifetimeNanoseconds: UInt64 = 100_000_000
     private static let menuBarAgentBundleIdentifier = "com.apple.MenuBarAgent"
     private static let logger = Logger(category: "GoldenGateAXInventory")
+    private static let signposter = OSSignposter(
+        subsystem: "com.mabryventures.Barline.MenuService",
+        category: .pointsOfInterest
+    )
     /// Limits each inventory to processes that own menu bar items; see
     /// `MenuBarOwnerProbePolicy`.
     private static let ownerProbePolicy = OSAllocatedUnfairLock(
@@ -118,6 +122,10 @@ enum GoldenGateAXInventory {
     }
 
     private static func collectFresh() throws -> [Observation] {
+        let inventoryInterval = signposter.beginInterval("GoldenGateHelperAXInventory")
+        defer {
+            signposter.endInterval("GoldenGateHelperAXInventory", inventoryInterval)
+        }
         guard AXHelpers.isProcessTrusted() else {
             throw MenuBarBackendError.unavailableCapability("Accessibility menu bar inventory")
         }
@@ -129,6 +137,9 @@ enum GoldenGateAXInventory {
         let plan = ownerProbePolicy.withLock {
             $0.processesToProbe(running: runningProcesses, now: now)
         }
+        logger.debug(
+            "Golden Gate helper AX probe planned: full=\(plan.isFullScan, privacy: .public), processes=\(plan.processes.count, privacy: .public)"
+        )
         let probeSet = Set(plan.processes)
         var owningProcesses = Set<Int32>()
         defer {

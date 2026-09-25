@@ -109,3 +109,34 @@ public struct TemporaryRevealRestoration: Codable, Equatable, Sendable {
             .compactMap(\.self).allSatisfy { $0.utf8.count <= 4096 }
     }
 }
+
+/// Decides what to do when a temporarily revealed item is missing from a menu
+/// bar census during restoration.
+///
+/// The menu bar can omit an item from one census while it compacts after a
+/// reveal, so a single absence does not prove the item is gone. But an item
+/// whose application has quit will never return to be restored, and a durable
+/// obligation that can never be discharged blocks every later permanent layout
+/// edit. Absence is therefore deferred only while the owning application is
+/// running, and only for a bounded number of consecutive censuses.
+public enum TemporaryRevealAbsencePolicy {
+    public enum Decision: Equatable, Sendable {
+        /// Keep the obligation and check again on a later census.
+        case deferRestoration
+        /// The item is gone; release the obligation.
+        case release
+    }
+
+    public static let maximumDeferrals = 3
+
+    public static func decision(
+        ownerIsRunning: Bool?,
+        consecutiveAbsences: Int
+    ) -> Decision {
+        if ownerIsRunning == false {
+            return .release
+        }
+        return consecutiveAbsences < maximumDeferrals ? .deferRestoration : .release
+    }
+}
+

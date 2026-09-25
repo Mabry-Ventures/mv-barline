@@ -10,6 +10,7 @@ require 'optparse'
 
 module InstalledEvidence
   LANES = %w[native-left native-right popover-left popover-reuse].freeze
+  PERFORMANCE_PHASES = %w[baseline post-xpc].freeze
   KINDS = %w[target-interface xpc-interruption performance].freeze
   MAX_BYTES = 131_072
   MAX_RECEIPTS = 32
@@ -75,17 +76,21 @@ module InstalledEvidence
       [kind]
     when 'performance'
       require_check(!receipt.key?('lane'), 'unexpected_lane')
+      phase = receipt['phase']
+      require_check(PERFORMANCE_PHASES.include?(phase), 'invalid_performance_phase')
       require_check(evidence['probe'] == 'status-item-click', 'performance_wrong_probe')
       samples = evidence['samples']
       require_check(samples.is_a?(Integer) && samples.between?(20, 1000), 'performance_invalid_sample_count')
       require_check(evidence['timeouts'].is_a?(Integer) && evidence['timeouts'].zero?, 'performance_timeouts')
       p95 = evidence['p95Milliseconds']
+      maximum = evidence['maxMilliseconds']
       budget = evidence['budgetMilliseconds']
       require_check(finite_number?(budget) && budget.positive? && budget <= 250, 'performance_invalid_budget')
       require_check(finite_number?(p95) && p95 >= 0 && p95 <= budget, 'performance_budget_exceeded')
+      require_check(finite_number?(maximum) && maximum >= p95, 'performance_invalid_maximum')
       true_fields(evidence, %w[rapidRetryFeedbackInBudget originalPointerRestored], kind)
       require_check(evidence['silentCancellation'].equal?(false), 'performance_silent_cancellation')
-      [kind]
+      [kind, phase]
     end
   end
 
@@ -121,7 +126,10 @@ module InstalledEvidence
       seen[key] = true
     end
     LANES.each { |lane| require_check(seen[['target-interface', lane]], "missing_target_lane_#{lane}") }
-    %w[xpc-interruption performance].each { |kind| require_check(seen[[kind]], "missing_#{kind}") }
+    require_check(seen[['xpc-interruption']], 'missing_xpc-interruption')
+    PERFORMANCE_PHASES.each do |phase|
+      require_check(seen[['performance', phase]], "missing_performance_#{phase}")
+    end
     puts JSON.generate(schema: 1, verdict: 'PASS', artifactKind: 'installed-candidate', validatedReceipts: seen.length)
     0
   rescue Invalid => e
