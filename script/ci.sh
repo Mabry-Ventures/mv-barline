@@ -180,9 +180,9 @@ ci_exit() {
 trap ci_exit EXIT
 
 # Check before publishing a pending status, so a rejected run never leaves the
-# required context pending.
+# required context pending. nonfocus runs the fixture UI qualification too.
 case "$MODE" in
-    full|release|xcode27|soak)
+    nonfocus|full|release|xcode27|soak)
         competing_managers="$(barline_competing_menu_bar_managers | /usr/bin/paste -sd ',' - | /usr/bin/sed 's/,/, /g')"
         [[ -z "$competing_managers" ]] ||
             barline_die "quit other menu bar managers before $MODE runtime gates: $competing_managers"

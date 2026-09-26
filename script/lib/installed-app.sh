@@ -41,7 +41,7 @@ barline_competing_menu_bar_managers() {
         snapshot="$(/bin/ps -axo pid=,comm= 2>/dev/null || true)"
     fi
     /usr/bin/awk '
-        match($0, /\/(Bartender[^\/]*|Ice|Hidden Bar|Dozer|Vanilla)\.app\/Contents\/MacOS\//) {
+        match($0, /\/(Bartender[^\/]*|Ice|Thaw|Pelmet|Barbee|Hidden Bar|Dozer|Vanilla)\.app\/Contents\/MacOS\//) {
             app = substr($0, RSTART + 1, RLENGTH - 1)
             sub(/\.app\/Contents\/MacOS\/$/, "", app)
             if (!(app in seen)) {

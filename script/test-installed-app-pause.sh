@@ -58,9 +58,12 @@ BARLINE_PROCESS_SNAPSHOT="$(cat <<'SNAPSHOT'
   604 /Applications/Barline.app/Contents/MacOS/Barline
   605 /Applications/Icebox.app/Contents/MacOS/Icebox
   606 /Applications/Hidden Bar.app/Contents/MacOS/Hidden Bar
+  607 /Applications/Thaw.app/Contents/MacOS/Thaw
+  608 /Applications/Pelmet.app/Contents/MacOS/Pelmet
+  609 /Applications/Barbee.app/Contents/MacOS/Barbee
 SNAPSHOT
 )"
-[[ "$(joined barline_competing_menu_bar_managers)" == "Bartender 7 Ice Hidden Bar " ]] ||
+[[ "$(joined barline_competing_menu_bar_managers)" == "Bartender 7 Ice Hidden Bar Thaw Pelmet Barbee " ]] ||
     fail "menu bar managers match: $(joined barline_competing_menu_bar_managers)"
 BARLINE_PROCESS_SNAPSHOT="  604 /Applications/Barline.app/Contents/MacOS/Barline"
 [[ -z "$(barline_competing_menu_bar_managers)" ]] || fail "Barline alone was reported as a competing manager"
