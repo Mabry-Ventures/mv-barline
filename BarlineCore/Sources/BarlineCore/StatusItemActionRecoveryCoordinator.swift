@@ -35,6 +35,31 @@ public struct StatusItemActionRecoveryCoordinator: Sendable {
         width.isFinite && height.isFinite && width > 0 && width < 100 && height > 0 && height <= 40
     }
 
+    /// macOS 26 hosts status-item windows in Control Center, so the hit window
+    /// is never Barline's own. Accept it as the control only when Control Center
+    /// owns it and it corresponds to the button the way the installed journey
+    /// documents: the hosted window is about 2pt narrower and 9pt taller, with
+    /// exact center correspondence. Anything else, including an overlapping
+    /// window from another app, fails closed.
+    public static func isHostedControlWindow(
+        ownerBundleIdentifier: String?,
+        windowFrame: MenuBarRect?,
+        controlFrame: MenuBarRect?
+    ) -> Bool {
+        guard ownerBundleIdentifier == "com.apple.controlcenter",
+              let windowFrame, let controlFrame,
+              isPlausibleExactButtonFrame(width: controlFrame.width, height: controlFrame.height),
+              windowFrame.width > 0, windowFrame.height > 0, windowFrame.height < 80
+        else { return false }
+        let windowMidX = windowFrame.x + windowFrame.width / 2
+        let windowMidY = windowFrame.y + windowFrame.height / 2
+        let controlMidX = controlFrame.x + controlFrame.width / 2
+        let controlMidY = controlFrame.y + controlFrame.height / 2
+        return abs(windowMidX - controlMidX) <= 1 &&
+            abs(windowMidY - controlMidY) <= 1 &&
+            abs(windowFrame.width - controlFrame.width) <= 2
+    }
+
     /// Registers a globally observed mouse-down.
     ///
     /// Returns `true` when the caller should schedule a delayed fallback. If the

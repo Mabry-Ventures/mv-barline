@@ -191,6 +191,9 @@ extension HIDEventManager {
         guard let click = event.cgEvent,
               let control = appState.menuBarManager.controlItem(withName: .visible) else { return }
         let exactButtonHit = control.containsEventLocation(click.unflippedLocation)
+        let hitWindowNumber = NSWindow.windowNumber(at: click.unflippedLocation, belowWindowWithWindowNumber: 0)
+        let ownsHitWindow = control.ownsWindowNumber(hitWindowNumber)
+        let hostedOwnershipIsPossible: Bool = if #available(macOS 27.0, *) { false } else { true }
         guard
             isMouseInsideMenuBar(
                 appState: appState,
@@ -206,28 +209,50 @@ extension HIDEventManager {
                     )
                 }(),
                 eventLocationIsInsideExactButtonFrame: exactButtonHit,
-                eventTargetsAccessibleControl: topmostWindowIsPrimaryControl(
-                    at: click.unflippedLocation,
-                    control: control
-                )
+                // A scene-backed button's frame can overlap another app's menu.
+                // Use the window AppKit would deliver the mouse-down to rather
+                // than hit-testing our own Accessibility server mid-event.
+                eventTargetsAccessibleControl: ownsHitWindow || hostedOwnershipIsPossible
             )
         else { return }
 
-        control.schedulePrimaryActionRecovery(
-            sequence: mouseDownSequence,
-            eventTimestamp: event.timestamp,
-            modifierFlags: event.modifierFlags
-        )
-    }
-
-    /// A scene-backed button's frame can overlap another app's menu. Use the
-    /// window that AppKit would actually deliver a mouse-down to, rather than
-    /// synchronously asking our own Accessibility server to hit-test while it
-    /// is processing that same mouse-down. An unknown window fails closed.
-    private func topmostWindowIsPrimaryControl(at point: CGPoint, control: ControlItem) -> Bool {
-        guard #available(macOS 27.0, *) else { return true }
-        let hitWindowNumber = NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0)
-        return control.ownsWindowNumber(hitWindowNumber)
+        let sequence = mouseDownSequence
+        let timestamp = event.timestamp
+        let modifierFlags = event.modifierFlags
+        if ownsHitWindow {
+            control.schedulePrimaryActionRecovery(
+                sequence: sequence,
+                eventTimestamp: timestamp,
+                modifierFlags: modifierFlags
+            )
+            return
+        }
+        // macOS 26 hosts the status window in Control Center. Ask the helper
+        // which window is on top there and accept it only with the button's
+        // exact geometry; an unknown or overlapping window fails closed.
+        // An unknown mouse-down target cannot later prove the stack is unchanged.
+        guard hitWindowNumber > 0 else { return }
+        let location = click.location
+        let appKitLocation = click.unflippedLocation
+        Task {
+            guard let context = try? await BarlineMenuService.Connection.shared.pointContext(at: location),
+                  // The helper queue can be busy for seconds; a late answer must
+                  // not toggle a section long after the click.
+                  ProcessInfo.processInfo.systemUptime - timestamp <= 0.5,
+                  isEnabled, // monitoring may have stopped while waiting
+                  sequence == mouseDownSequence, // a later click supersedes this one
+                  // The helper samples windows after the click. If the window on
+                  // top at mouse-down (e.g. another app's menu) has since
+                  // dismissed, its answer describes a different target.
+                  NSWindow.windowNumber(at: appKitLocation, belowWindowWithWindowNumber: 0) == hitWindowNumber,
+                  control.isHostedControlWindow(in: context)
+            else { return }
+            control.schedulePrimaryActionRecovery(
+                sequence: sequence,
+                eventTimestamp: timestamp,
+                modifierFlags: modifierFlags
+            )
+        }
     }
 
     // MARK: Handle Show On Click

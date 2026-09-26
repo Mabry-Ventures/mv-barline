@@ -722,15 +722,25 @@ final class WindowServerClient: @unchecked Sendable {
             window.isOnScreen && window.bounds.contains(location) &&
                 !MenuBarClickArbitrationPolicy.isLayoutSeparator(title: window.title)
         }
-        let window = WindowInfo.createWindows(option: .onScreen)
-            .filter { $0.layer < CGWindowLevelForKey(.cursorWindow) }
-            .first { $0.bounds.contains(location) && $0.title?.isEmpty == false }
+        let windowsAtPoint = WindowInfo.createWindows(option: .onScreen)
+            .filter { $0.layer < CGWindowLevelForKey(.cursorWindow) && $0.bounds.contains(location) }
+        let window = windowsAtPoint.first { $0.title?.isEmpty == false }
         let application = window?.owningApplication
+        let hitWindow = windowsAtPoint.first
         return MenuBarPointContext(
             isInsideMenuBarItem: isInsideItem,
             applicationBundleIdentifier: application?.bundleIdentifier,
             applicationIsActive: application?.isActive ?? false,
-            applicationUsesRegularActivationPolicy: application?.activationPolicy == .regular
+            applicationUsesRegularActivationPolicy: application?.activationPolicy == .regular,
+            hitWindowOwnerBundleIdentifier: hitWindow?.owningApplication?.bundleIdentifier,
+            hitWindowFrame: hitWindow.map {
+                MenuBarRect(
+                    x: $0.bounds.minX,
+                    y: $0.bounds.minY,
+                    width: $0.bounds.width,
+                    height: $0.bounds.height
+                )
+            }
         )
     }
 

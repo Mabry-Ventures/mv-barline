@@ -23,16 +23,10 @@ later changes.
   Spaces, and actual permission changes require their own runtime evidence.
   Synthetic tests alone do not certify those configurations.
 
-- On macOS 26, Barline's delayed recovery for a missed icon click does not
-  confirm that its own status window received the click. macOS 26.6 hosts
-  status-item windows in Control Center rather than in the owning app, so the
-  macOS 27 window-ownership check cannot be applied there without disabling
-  recovery. An overlapping window inside the icon's frame could therefore
-  trigger an unwanted recovery action. Unchanged since 1.0.48.
-- On macOS 27, an item whose placement you edit takes its rank from the current
-  menu bar order while untouched items keep their saved ranks, so a newly
-  edited item's position in the Barline Bar can differ from the order you
-  expect until you reorder it once.
+- On macOS 26, delayed recovery for a missed icon click accepts a Control
+  Center-hosted status window only when its frame matches Barline's control
+  button exactly (unreleased; covered by Core tests, pending runtime evidence on
+  a macOS 26 host).
 
 ## Features in qualification
 

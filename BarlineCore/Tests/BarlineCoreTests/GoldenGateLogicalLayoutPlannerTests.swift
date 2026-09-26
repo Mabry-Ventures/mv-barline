@@ -247,8 +247,87 @@ struct GoldenGateLogicalLayoutPlannerTests {
         let byID = Dictionary(uniqueKeysWithValues: assignments.map { ($0.itemID, $0) })
 
         #expect(byID[id(1)] == saved[id(1)])
+        #expect(byID[id(3)]?.rank == 1)
+        #expect(byID[id(2)]?.rank == 2)
+    }
+
+    @Test("An edited item joins the saved order instead of a separate rank space")
+    func editedItemRankIsConsistentWithSavedRanks() {
+        // Saved ranks come from an older numbering (5, 9); the live menu bar
+        // shows the newly hidden item 3 between them.
+        let saved = [
+            id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .hidden, rank: 5),
+            id(2): GoldenGateLogicalAssignment(itemID: id(2), section: .hidden, rank: 9),
+        ]
+        let runtime = snapshot([
+            item(1, section: .hidden, order: 0),
+            item(3, section: .hidden, order: 1),
+            item(2, section: .hidden, order: 2),
+        ])
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: runtime,
+            preserving: saved,
+            editing: [id(3)],
+            barlineBundleIdentifier: "com.mabryventures.Barline",
+            maximumCount: 10
+        )
+        let byID = Dictionary(uniqueKeysWithValues: assignments.map { ($0.itemID, $0) })
+
+        // Before this fix item 3 got live index 1, which sorted it ahead of both.
+        #expect(byID[id(1)]?.rank == 0)
+        #expect(byID[id(3)]?.rank == 1)
+        #expect(byID[id(2)]?.rank == 2)
+        #expect(assignments.allSatisfy { $0.section == .hidden })
+    }
+
+    @Test("An edited item follows its nearest live neighbour, not the last saved one")
+    func editedItemFollowsNearestLivePredecessor() {
+        // Saved order A(1), B(2); the live bar shows B, A, then the edited X.
+        let saved = [
+            id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .hidden, rank: 0),
+            id(2): GoldenGateLogicalAssignment(itemID: id(2), section: .hidden, rank: 1),
+        ]
+        let runtime = snapshot([
+            item(2, section: .hidden, order: 0),
+            item(1, section: .hidden, order: 1),
+            item(3, section: .hidden, order: 2),
+        ])
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: runtime,
+            preserving: saved,
+            editing: [id(3)],
+            barlineBundleIdentifier: "com.mabryventures.Barline",
+            maximumCount: 10
+        )
+        let byID = Dictionary(uniqueKeysWithValues: assignments.map { ($0.itemID, $0) })
+
+        #expect(byID[id(1)]?.rank == 0)
+        #expect(byID[id(3)]?.rank == 1)
+        #expect(byID[id(2)]?.rank == 2)
+    }
+
+    @Test("Edited items with no untouched predecessor lead the section in live order")
+    func editedItemsWithoutPredecessorLead() {
+        let saved = [
+            id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .hidden, rank: 4),
+        ]
+        let runtime = snapshot([
+            item(3, section: .hidden, order: 0),
+            item(2, section: .hidden, order: 1),
+            item(1, section: .hidden, order: 2),
+        ])
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: runtime,
+            preserving: saved,
+            editing: [id(2), id(3)],
+            barlineBundleIdentifier: "com.mabryventures.Barline",
+            maximumCount: 10
+        )
+        let byID = Dictionary(uniqueKeysWithValues: assignments.map { ($0.itemID, $0) })
+
         #expect(byID[id(3)]?.rank == 0)
         #expect(byID[id(2)]?.rank == 1)
+        #expect(byID[id(1)]?.rank == 2)
     }
 
     @Test("Editing the previously hidden group intentionally replaces its intent")

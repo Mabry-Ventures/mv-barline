@@ -532,21 +532,44 @@ final class ControlItem {
     /// cached frame. A scene-backed button's window can span the whole menu bar
     /// on macOS 27, so the window frame is not proof that the control was hit.
     func containsEventLocation(_ location: CGPoint) -> Bool {
-        if let button = statusItem.button, let window = button.window {
-            let candidateFrames = [
-                button.accessibilityFrame(),
-                window.convertToScreen(button.convert(button.bounds, to: nil)),
-            ]
-            if let exactFrame = candidateFrames.first(where: {
-                StatusItemActionRecoveryCoordinator.isPlausibleExactButtonFrame(
-                    width: $0.width,
-                    height: $0.height
-                )
-            }) {
-                return exactFrame.contains(location)
-            }
-        }
-        return false
+        exactButtonScreenFrame()?.contains(location) ?? false
+    }
+
+    /// The button's own screen frame in AppKit coordinates, or `nil` when only
+    /// a scene/container frame is available.
+    private func exactButtonScreenFrame() -> CGRect? {
+        guard let button = statusItem.button, let window = button.window else { return nil }
+        let candidateFrames = [
+            button.accessibilityFrame(),
+            window.convertToScreen(button.convert(button.bounds, to: nil)),
+        ]
+        return candidateFrames.first(where: {
+            StatusItemActionRecoveryCoordinator.isPlausibleExactButtonFrame(
+                width: $0.width,
+                height: $0.height
+            )
+        })
+    }
+
+    /// macOS 26 hosts status-item windows in Control Center. Treat the helper's
+    /// hit window as this control only when Control Center owns it and its
+    /// frame matches the button's exact frame; an overlapping window fails closed.
+    func isHostedControlWindow(in context: MenuBarPointContext) -> Bool {
+        guard let controlFrame = exactButtonScreenFrame(),
+              let primaryHeight = NSScreen.screens.first?.frame.height
+        else { return false }
+        // The helper reports top-left-origin coordinates; AppKit's are bottom-left.
+        let control = MenuBarRect(
+            x: controlFrame.minX,
+            y: primaryHeight - controlFrame.maxY,
+            width: controlFrame.width,
+            height: controlFrame.height
+        )
+        return StatusItemActionRecoveryCoordinator.isHostedControlWindow(
+            ownerBundleIdentifier: context.hitWindowOwnerBundleIdentifier,
+            windowFrame: context.hitWindowFrame,
+            controlFrame: control
+        )
     }
 
     /// Performs the control item's action.

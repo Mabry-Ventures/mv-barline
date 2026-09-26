@@ -147,7 +147,83 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
                 }
                 return $0.itemID.description < $1.itemID.description
             }
-        return Array((current + retained).prefix(maximumCount))
+        let ranks = consistentRanks(
+            current: current,
+            retained: retained,
+            editedItemIDs: editedItemIDs,
+            snapshotPositions: Dictionary(
+                snapshot.items.enumerated().map { ($1.id, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+        )
+        return Array((current + retained).map { assignment in
+            GoldenGateLogicalAssignment(
+                itemID: assignment.itemID,
+                section: assignment.section,
+                rank: ranks[assignment.itemID] ?? assignment.rank
+            )
+        }.prefix(maximumCount))
+    }
+
+    /// Saved ranks and live snapshot positions are different numbering spaces.
+    /// Within each section, keep untouched items in their saved order, place
+    /// each edited item after the untouched item that precedes it in the live
+    /// menu bar, then renumber the section from zero. Sections never change.
+    private func consistentRanks(
+        current: [GoldenGateLogicalAssignment],
+        retained: [GoldenGateLogicalAssignment],
+        editedItemIDs: Set<MenuBarItemID>,
+        snapshotPositions: [MenuBarItemID: Int]
+    ) -> [MenuBarItemID: Int] {
+        var ranks = [MenuBarItemID: Int]()
+        for section in MenuBarSection.allCases {
+            let members = (current + retained).filter { $0.section == section }
+            let edited = members
+                .filter { editedItemIDs.contains($0.itemID) }
+                .sorted { (snapshotPositions[$0.itemID] ?? .max) < (snapshotPositions[$1.itemID] ?? .max) }
+            var ordered = members
+                .filter { !editedItemIDs.contains($0.itemID) }
+                .sorted {
+                    if $0.rank != $1.rank {
+                        return $0.rank < $1.rank
+                    }
+                    let lhs = snapshotPositions[$0.itemID] ?? .max
+                    let rhs = snapshotPositions[$1.itemID] ?? .max
+                    return lhs == rhs ? $0.itemID.description < $1.itemID.description : lhs < rhs
+                }
+                .map(\.itemID)
+            var insertedAtFront = 0
+            for assignment in edited {
+                guard let position = snapshotPositions[assignment.itemID] else {
+                    ordered.append(assignment.itemID)
+                    continue
+                }
+                // The untouched item closest before this one in the live menu
+                // bar, chosen by live position rather than saved order.
+                let predecessorID = ordered
+                    .filter { !editedItemIDs.contains($0) }
+                    .compactMap { candidate in
+                        snapshotPositions[candidate].flatMap { $0 < position ? (candidate, $0) : nil }
+                    }
+                    .max { $0.1 < $1.1 }?.0
+                let predecessor = predecessorID.flatMap { ordered.firstIndex(of: $0) }
+                if let predecessor {
+                    var index = predecessor + 1
+                    // Keep edited items that share a predecessor in live order.
+                    while index < ordered.count, editedItemIDs.contains(ordered[index]) {
+                        index += 1
+                    }
+                    ordered.insert(assignment.itemID, at: index)
+                } else {
+                    ordered.insert(assignment.itemID, at: insertedAtFront)
+                    insertedAtFront += 1
+                }
+            }
+            for (rank, itemID) in ordered.enumerated() {
+                ranks[itemID] = rank
+            }
+        }
+        return ranks
     }
 
     /// Reconciles a saved target with the current inventory while enforcing
