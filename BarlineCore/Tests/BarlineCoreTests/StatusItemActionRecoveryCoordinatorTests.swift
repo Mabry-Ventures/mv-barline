@@ -42,7 +42,13 @@ struct StatusItemActionRecoveryCoordinatorTests {
         let control = MenuBarRect(x: 1400, y: 1093, width: 28, height: 24)
         #expect(StatusItemActionRecoveryCoordinator.isHostedControlWindow(
             ownerBundleIdentifier: "com.apple.controlcenter",
-            windowFrame: MenuBarRect(x: 1400.5, y: 1093, width: 29.5, height: 24),
+            windowFrame: MenuBarRect(x: 1399.5, y: 1093, width: 29.5, height: 24),
+            controlFrame: control
+        ))
+        // macOS 26's real hosted geometry: 2pt narrower, 9pt taller, same center.
+        #expect(StatusItemActionRecoveryCoordinator.isHostedControlWindow(
+            ownerBundleIdentifier: "com.apple.controlcenter",
+            windowFrame: MenuBarRect(x: 1401, y: 1088.5, width: 26, height: 33),
             controlFrame: control
         ))
         // Another app's window covering the icon is not the control.

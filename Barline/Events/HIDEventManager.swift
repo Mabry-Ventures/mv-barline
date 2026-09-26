@@ -233,6 +233,7 @@ extension HIDEventManager {
         let location = click.location
         Task {
             guard let context = try? await BarlineMenuService.Connection.shared.pointContext(at: location),
+                  sequence == mouseDownSequence, // a later click supersedes this one
                   control.isHostedControlWindow(in: context)
             else { return }
             control.schedulePrimaryActionRecovery(

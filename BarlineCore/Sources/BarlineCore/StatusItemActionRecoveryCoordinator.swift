@@ -37,8 +37,9 @@ public struct StatusItemActionRecoveryCoordinator: Sendable {
 
     /// macOS 26 hosts status-item windows in Control Center, so the hit window
     /// is never Barline's own. Accept it as the control only when Control Center
-    /// owns it and its screen frame matches the button's exact frame (origin
-    /// within 1pt, size within 2pt). Anything else, including an overlapping
+    /// owns it and it corresponds to the button the way the installed journey
+    /// documents: the hosted window is about 2pt narrower and 9pt taller, with
+    /// exact center correspondence. Anything else, including an overlapping
     /// window from another app, fails closed.
     public static func isHostedControlWindow(
         ownerBundleIdentifier: String?,
@@ -47,12 +48,16 @@ public struct StatusItemActionRecoveryCoordinator: Sendable {
     ) -> Bool {
         guard ownerBundleIdentifier == "com.apple.controlcenter",
               let windowFrame, let controlFrame,
-              isPlausibleExactButtonFrame(width: controlFrame.width, height: controlFrame.height)
+              isPlausibleExactButtonFrame(width: controlFrame.width, height: controlFrame.height),
+              windowFrame.width > 0, windowFrame.height > 0, windowFrame.height < 80
         else { return false }
-        return abs(windowFrame.x - controlFrame.x) <= 1 &&
-            abs(windowFrame.y - controlFrame.y) <= 1 &&
-            abs(windowFrame.width - controlFrame.width) <= 2 &&
-            abs(windowFrame.height - controlFrame.height) <= 2
+        let windowMidX = windowFrame.x + windowFrame.width / 2
+        let windowMidY = windowFrame.y + windowFrame.height / 2
+        let controlMidX = controlFrame.x + controlFrame.width / 2
+        let controlMidY = controlFrame.y + controlFrame.height / 2
+        return abs(windowMidX - controlMidX) <= 1 &&
+            abs(windowMidY - controlMidY) <= 1 &&
+            abs(windowFrame.width - controlFrame.width) <= 2
     }
 
     /// Registers a globally observed mouse-down.

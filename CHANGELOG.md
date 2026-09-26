@@ -11,8 +11,9 @@
 ### macOS 26
 
 - Recovery for a missed click on the Barline icon now checks that the click
-  really landed on the icon. A window from another app covering the icon can
-  no longer trigger it.
+  landed on the icon, so a window from another app covering the icon should no
+  longer trigger it. This is covered by automated tests but has not yet been
+  confirmed on a macOS 26 Mac.
 
 ## 1.0.64 (build 141) — September 25, 2026
 

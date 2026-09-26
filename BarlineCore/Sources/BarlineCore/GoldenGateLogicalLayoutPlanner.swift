@@ -198,11 +198,15 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
                     ordered.append(assignment.itemID)
                     continue
                 }
-                // The nearest untouched item before this one in the live menu bar.
-                let predecessor = ordered.lastIndex { candidate in
-                    !editedItemIDs.contains(candidate) &&
-                        (snapshotPositions[candidate] ?? .max) < position
-                }
+                // The untouched item closest before this one in the live menu
+                // bar, chosen by live position rather than saved order.
+                let predecessorID = ordered
+                    .filter { !editedItemIDs.contains($0) }
+                    .compactMap { candidate in
+                        snapshotPositions[candidate].flatMap { $0 < position ? (candidate, $0) : nil }
+                    }
+                    .max { $0.1 < $1.1 }?.0
+                let predecessor = predecessorID.flatMap { ordered.firstIndex(of: $0) }
                 if let predecessor {
                     var index = predecessor + 1
                     // Keep edited items that share a predecessor in live order.
