@@ -30,6 +30,28 @@ barline_list_barline_processes() {
     ' <<<"$snapshot"
 }
 
+# Prints the app name of each other running menu bar manager. They move a
+# local build's control item off the visible menu bar (reported by macOS 27
+# at y=1105 while Bartender 7 ran), so runtime smokes cannot find it.
+barline_competing_menu_bar_managers() {
+    local snapshot
+    if [[ -n "${BARLINE_PROCESS_SNAPSHOT+x}" ]]; then
+        snapshot="$BARLINE_PROCESS_SNAPSHOT"
+    else
+        snapshot="$(/bin/ps -axo pid=,comm= 2>/dev/null || true)"
+    fi
+    /usr/bin/awk '
+        match($0, /\/(Bartender[^\/]*|Ice|Thaw|Pelmet|Barbee|Hidden Bar|Dozer|Vanilla)\.app\/Contents\/MacOS\//) {
+            app = substr($0, RSTART + 1, RLENGTH - 1)
+            sub(/\.app\/Contents\/MacOS\/$/, "", app)
+            if (!(app in seen)) {
+                seen[app] = 1
+                print app
+            }
+        }
+    ' <<<"$snapshot"
+}
+
 barline_is_installed_app_path() {
     [[ "$1" == "$BARLINE_INSTALLED_APP/Contents/MacOS/Barline" ||
         "$1" == "$BARLINE_INSTALLED_APP/Contents/XPCServices/BarlineMenuService.xpc/Contents/MacOS/BarlineMenuService" ]]

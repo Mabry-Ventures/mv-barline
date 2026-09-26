@@ -179,6 +179,17 @@ ci_exit() {
 
 trap ci_exit EXIT
 
+# Check before publishing a pending status, so a rejected run never leaves the
+# required context pending. nonfocus runs the fixture UI qualification too.
+case "$MODE" in
+    nonfocus|full|release|xcode27|soak)
+        competing_managers="$(barline_competing_menu_bar_managers | /usr/bin/paste -sd ',' - | /usr/bin/sed 's/,/, /g')"
+        [[ -z "$competing_managers" ]] ||
+            barline_die "quit other menu bar managers before $MODE runtime gates: $competing_managers"
+        ;;
+    *) ;;
+esac
+
 if "$PUBLISH_STATUS"; then
     [[ "$MODE" == full || "$MODE" == xcode27 ]] || barline_die "--publish-status is supported only for full and xcode27"
     [[ "$DIRTY" == false ]] || barline_die "status publishing requires a clean working tree"
