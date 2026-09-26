@@ -340,6 +340,9 @@ run_nonfocus() {
 # The installed-candidate lane validates that running copy, so leave it alone.
 case "$MODE" in
     full|release|xcode27|soak)
+        competing_managers="$(barline_competing_menu_bar_managers | /usr/bin/paste -sd ',' - | /usr/bin/sed 's/,/, /g')"
+        [[ -z "$competing_managers" ]] ||
+            barline_die "quit other menu bar managers before $MODE runtime gates: $competing_managers"
         "$INSTALLED_CANDIDATE" || barline_pause_installed_app
         ;;
     *) ;;

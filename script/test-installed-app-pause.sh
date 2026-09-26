@@ -51,4 +51,18 @@ BARLINE_INSTALLED_APP_PAUSED=false
 BARLINE_PROCESS_SNAPSHOT="  101 /Applications/Barline.app/Contents/MacOS/Barline"
 barline_restore_installed_app || fail "restore without a pause must be a no-op"
 
-printf 'Installed-app pause: exact-path matching passed 10 positive/negative cases without stopping processes.\n'
+BARLINE_PROCESS_SNAPSHOT="$(cat <<'SNAPSHOT'
+  601 /Applications/Bartender 7.app/Contents/MacOS/Bartender 7
+  602 /usr/bin/perl /Applications/Bartender 7.app/Contents/Resources/NotchBar_BartenderMusic.bundle/Contents/Resources/x
+  603 /Applications/Ice.app/Contents/MacOS/Ice
+  604 /Applications/Barline.app/Contents/MacOS/Barline
+  605 /Applications/Icebox.app/Contents/MacOS/Icebox
+  606 /Applications/Hidden Bar.app/Contents/MacOS/Hidden Bar
+SNAPSHOT
+)"
+[[ "$(joined barline_competing_menu_bar_managers)" == "Bartender 7 Ice Hidden Bar " ]] ||
+    fail "menu bar managers match: $(joined barline_competing_menu_bar_managers)"
+BARLINE_PROCESS_SNAPSHOT="  604 /Applications/Barline.app/Contents/MacOS/Barline"
+[[ -z "$(barline_competing_menu_bar_managers)" ]] || fail "Barline alone was reported as a competing manager"
+
+printf 'Installed-app pause: exact-path matching passed 12 positive/negative cases without stopping processes.\n'
