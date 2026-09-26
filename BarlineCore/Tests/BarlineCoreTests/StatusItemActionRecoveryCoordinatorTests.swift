@@ -37,6 +37,44 @@ struct StatusItemActionRecoveryCoordinatorTests {
         ))
     }
 
+    @Test("a Control Center window counts only when it matches the control frame")
+    func hostedControlWindowRequiresExactGeometry() {
+        let control = MenuBarRect(x: 1400, y: 1093, width: 28, height: 24)
+        #expect(StatusItemActionRecoveryCoordinator.isHostedControlWindow(
+            ownerBundleIdentifier: "com.apple.controlcenter",
+            windowFrame: MenuBarRect(x: 1400.5, y: 1093, width: 29.5, height: 24),
+            controlFrame: control
+        ))
+        // Another app's window covering the icon is not the control.
+        #expect(!StatusItemActionRecoveryCoordinator.isHostedControlWindow(
+            ownerBundleIdentifier: "com.example.overlay",
+            windowFrame: control,
+            controlFrame: control
+        ))
+        // A different Control Center status window, or the whole bar.
+        #expect(!StatusItemActionRecoveryCoordinator.isHostedControlWindow(
+            ownerBundleIdentifier: "com.apple.controlcenter",
+            windowFrame: MenuBarRect(x: 1440, y: 1093, width: 28, height: 24),
+            controlFrame: control
+        ))
+        #expect(!StatusItemActionRecoveryCoordinator.isHostedControlWindow(
+            ownerBundleIdentifier: "com.apple.controlcenter",
+            windowFrame: MenuBarRect(x: 0, y: 1093, width: 1728, height: 24),
+            controlFrame: control
+        ))
+        // Unknown owner, unknown frames, or a scene-sized control fail closed.
+        #expect(!StatusItemActionRecoveryCoordinator.isHostedControlWindow(
+            ownerBundleIdentifier: nil, windowFrame: control, controlFrame: control
+        ))
+        #expect(!StatusItemActionRecoveryCoordinator.isHostedControlWindow(
+            ownerBundleIdentifier: "com.apple.controlcenter", windowFrame: nil, controlFrame: control
+        ))
+        let scene = MenuBarRect(x: 0, y: 1093, width: 1728, height: 24)
+        #expect(!StatusItemActionRecoveryCoordinator.isHostedControlWindow(
+            ownerBundleIdentifier: "com.apple.controlcenter", windowFrame: scene, controlFrame: scene
+        ))
+    }
+
     @Test("scene-sized and invalid frames are rejected")
     func onlyStatusItemSizedFramesArePlausible() {
         #expect(StatusItemActionRecoveryCoordinator.isPlausibleExactButtonFrame(

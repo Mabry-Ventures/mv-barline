@@ -225,9 +225,16 @@ extension HIDEventManager {
     /// synchronously asking our own Accessibility server to hit-test while it
     /// is processing that same mouse-down. An unknown window fails closed.
     private func topmostWindowIsPrimaryControl(at point: CGPoint, control: ControlItem) -> Bool {
-        guard #available(macOS 27.0, *) else { return true }
         let hitWindowNumber = NSWindow.windowNumber(at: point, belowWindowWithWindowNumber: 0)
-        return control.ownsWindowNumber(hitWindowNumber)
+        if control.ownsWindowNumber(hitWindowNumber) {
+            return true
+        }
+        if #available(macOS 27.0, *) {
+            return false
+        }
+        // macOS 26 hosts the status window in Control Center; accept it only
+        // with the button's exact geometry.
+        return control.isHostedControlWindow(hitWindowNumber)
     }
 
     // MARK: Handle Show On Click

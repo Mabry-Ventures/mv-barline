@@ -532,21 +532,53 @@ final class ControlItem {
     /// cached frame. A scene-backed button's window can span the whole menu bar
     /// on macOS 27, so the window frame is not proof that the control was hit.
     func containsEventLocation(_ location: CGPoint) -> Bool {
-        if let button = statusItem.button, let window = button.window {
-            let candidateFrames = [
-                button.accessibilityFrame(),
-                window.convertToScreen(button.convert(button.bounds, to: nil)),
-            ]
-            if let exactFrame = candidateFrames.first(where: {
-                StatusItemActionRecoveryCoordinator.isPlausibleExactButtonFrame(
-                    width: $0.width,
-                    height: $0.height
-                )
-            }) {
-                return exactFrame.contains(location)
-            }
+        exactButtonScreenFrame()?.contains(location) ?? false
+    }
+
+    /// The button's own screen frame in AppKit coordinates, or `nil` when only
+    /// a scene/container frame is available.
+    private func exactButtonScreenFrame() -> CGRect? {
+        guard let button = statusItem.button, let window = button.window else { return nil }
+        let candidateFrames = [
+            button.accessibilityFrame(),
+            window.convertToScreen(button.convert(button.bounds, to: nil)),
+        ]
+        return candidateFrames.first(where: {
+            StatusItemActionRecoveryCoordinator.isPlausibleExactButtonFrame(
+                width: $0.width,
+                height: $0.height
+            )
+        })
+    }
+
+    /// macOS 26 hosts status-item windows in Control Center. Treat such a hit
+    /// window as this control only when its WindowServer frame matches the
+    /// button's exact frame; an overlapping window fails closed.
+    func isHostedControlWindow(_ number: Int) -> Bool {
+        guard number > 0,
+              let controlFrame = exactButtonScreenFrame(),
+              let primaryHeight = NSScreen.screens.first?.frame.height,
+              let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(number))
+                  as? [[String: Any]])?.first,
+              let ownerPID = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
+              let boundsInfo = info[kCGWindowBounds as String] as? NSDictionary,
+              let cgBounds = CGRect(dictionaryRepresentation: boundsInfo)
+        else { return false }
+        // WindowServer reports top-left-origin coordinates; AppKit's are bottom-left.
+        let windowFrame = CGRect(
+            x: cgBounds.minX,
+            y: primaryHeight - cgBounds.maxY,
+            width: cgBounds.width,
+            height: cgBounds.height
+        )
+        func rect(_ frame: CGRect) -> MenuBarRect {
+            MenuBarRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height)
         }
-        return false
+        return StatusItemActionRecoveryCoordinator.isHostedControlWindow(
+            ownerBundleIdentifier: NSRunningApplication(processIdentifier: ownerPID)?.bundleIdentifier,
+            windowFrame: rect(windowFrame),
+            controlFrame: rect(controlFrame)
+        )
     }
 
     /// Performs the control item's action.
