@@ -231,9 +231,15 @@ extension HIDEventManager {
         // which window is on top there and accept it only with the button's
         // exact geometry; an unknown or overlapping window fails closed.
         let location = click.location
+        let appKitLocation = click.unflippedLocation
         Task {
             guard let context = try? await BarlineMenuService.Connection.shared.pointContext(at: location),
+                  isEnabled, // monitoring may have stopped while waiting
                   sequence == mouseDownSequence, // a later click supersedes this one
+                  // The helper samples windows after the click. If the window on
+                  // top at mouse-down (e.g. another app's menu) has since
+                  // dismissed, its answer describes a different target.
+                  NSWindow.windowNumber(at: appKitLocation, belowWindowWithWindowNumber: 0) == hitWindowNumber,
                   control.isHostedControlWindow(in: context)
             else { return }
             control.schedulePrimaryActionRecovery(
