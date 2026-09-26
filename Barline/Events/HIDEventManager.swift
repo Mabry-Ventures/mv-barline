@@ -230,10 +230,15 @@ extension HIDEventManager {
         // macOS 26 hosts the status window in Control Center. Ask the helper
         // which window is on top there and accept it only with the button's
         // exact geometry; an unknown or overlapping window fails closed.
+        // An unknown mouse-down target cannot later prove the stack is unchanged.
+        guard hitWindowNumber > 0 else { return }
         let location = click.location
         let appKitLocation = click.unflippedLocation
         Task {
             guard let context = try? await BarlineMenuService.Connection.shared.pointContext(at: location),
+                  // The helper queue can be busy for seconds; a late answer must
+                  // not toggle a section long after the click.
+                  ProcessInfo.processInfo.systemUptime - timestamp <= 0.5,
                   isEnabled, // monitoring may have stopped while waiting
                   sequence == mouseDownSequence, // a later click supersedes this one
                   // The helper samples windows after the click. If the window on
