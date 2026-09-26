@@ -183,8 +183,8 @@ if "$PUBLISH_STATUS"; then
     [[ "$MODE" == full || "$MODE" == xcode27 ]] || barline_die "--publish-status is supported only for full and xcode27"
     [[ "$DIRTY" == false ]] || barline_die "status publishing requires a clean working tree"
     barline_require_command gh
-    # Check only the account gh will use; a stale secondary login must not abort the gate.
-    gh auth status --active >/dev/null
+    # Check only the github.com account gh will use; stale logins must not abort the gate.
+    gh auth status --active --hostname github.com >/dev/null
     publish_commit_status pending "$MODE local validation started"
 fi
 
