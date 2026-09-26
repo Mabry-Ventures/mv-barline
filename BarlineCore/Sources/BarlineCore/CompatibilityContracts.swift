@@ -188,17 +188,26 @@ public struct MenuBarPointContext: Codable, Equatable, Sendable {
     public let applicationBundleIdentifier: String?
     public let applicationIsActive: Bool
     public let applicationUsesRegularActivationPolicy: Bool
+    /// Owner of the topmost on-screen window at the point, titled or not.
+    /// Only the owner's bundle identifier and frame cross XPC, never its window.
+    public let hitWindowOwnerBundleIdentifier: String?
+    /// That window's frame in WindowServer (top-left origin) coordinates.
+    public let hitWindowFrame: MenuBarRect?
 
     public init(
         isInsideMenuBarItem: Bool,
         applicationBundleIdentifier: String?,
         applicationIsActive: Bool,
-        applicationUsesRegularActivationPolicy: Bool
+        applicationUsesRegularActivationPolicy: Bool,
+        hitWindowOwnerBundleIdentifier: String? = nil,
+        hitWindowFrame: MenuBarRect? = nil
     ) {
         self.isInsideMenuBarItem = isInsideMenuBarItem
         self.applicationBundleIdentifier = applicationBundleIdentifier
         self.applicationIsActive = applicationIsActive
         self.applicationUsesRegularActivationPolicy = applicationUsesRegularActivationPolicy
+        self.hitWindowOwnerBundleIdentifier = hitWindowOwnerBundleIdentifier
+        self.hitWindowFrame = hitWindowFrame
     }
 }
 

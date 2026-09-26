@@ -551,33 +551,24 @@ final class ControlItem {
         })
     }
 
-    /// macOS 26 hosts status-item windows in Control Center. Treat such a hit
-    /// window as this control only when its WindowServer frame matches the
-    /// button's exact frame; an overlapping window fails closed.
-    func isHostedControlWindow(_ number: Int) -> Bool {
-        guard number > 0,
-              let controlFrame = exactButtonScreenFrame(),
-              let primaryHeight = NSScreen.screens.first?.frame.height,
-              let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow], CGWindowID(number))
-                  as? [[String: Any]])?.first,
-              let ownerPID = (info[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value,
-              let boundsInfo = info[kCGWindowBounds as String] as? NSDictionary,
-              let cgBounds = CGRect(dictionaryRepresentation: boundsInfo)
+    /// macOS 26 hosts status-item windows in Control Center. Treat the helper's
+    /// hit window as this control only when Control Center owns it and its
+    /// frame matches the button's exact frame; an overlapping window fails closed.
+    func isHostedControlWindow(in context: MenuBarPointContext) -> Bool {
+        guard let controlFrame = exactButtonScreenFrame(),
+              let primaryHeight = NSScreen.screens.first?.frame.height
         else { return false }
-        // WindowServer reports top-left-origin coordinates; AppKit's are bottom-left.
-        let windowFrame = CGRect(
-            x: cgBounds.minX,
-            y: primaryHeight - cgBounds.maxY,
-            width: cgBounds.width,
-            height: cgBounds.height
+        // The helper reports top-left-origin coordinates; AppKit's are bottom-left.
+        let control = MenuBarRect(
+            x: controlFrame.minX,
+            y: primaryHeight - controlFrame.maxY,
+            width: controlFrame.width,
+            height: controlFrame.height
         )
-        func rect(_ frame: CGRect) -> MenuBarRect {
-            MenuBarRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height)
-        }
         return StatusItemActionRecoveryCoordinator.isHostedControlWindow(
-            ownerBundleIdentifier: NSRunningApplication(processIdentifier: ownerPID)?.bundleIdentifier,
-            windowFrame: rect(windowFrame),
-            controlFrame: rect(controlFrame)
+            ownerBundleIdentifier: context.hitWindowOwnerBundleIdentifier,
+            windowFrame: context.hitWindowFrame,
+            controlFrame: control
         )
     }
 

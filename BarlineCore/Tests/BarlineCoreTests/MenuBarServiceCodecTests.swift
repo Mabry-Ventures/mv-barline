@@ -103,7 +103,9 @@ struct MenuBarServiceCodecTests {
             isInsideMenuBarItem: true,
             applicationBundleIdentifier: "com.example.status",
             applicationIsActive: true,
-            applicationUsesRegularActivationPolicy: true
+            applicationUsesRegularActivationPolicy: true,
+            hitWindowOwnerBundleIdentifier: "com.apple.controlcenter",
+            hitWindowFrame: MenuBarRect(x: 1400, y: 0, width: 28, height: 24)
         )
         let revealUUID = try #require(UUID(uuidString: "11111111-2222-3333-4444-555555555555"))
         let revealToken = MenuBarRevealObservationToken(value: revealUUID)
@@ -229,5 +231,17 @@ struct MenuBarServiceCodecTests {
             displayIDs: [displayID],
             activeSpaceIsValid: true
         )
+    }
+
+    @Test("a point context from before the hit-window fields still decodes")
+    func legacyPointContextDecodes() throws {
+        let legacy = Data("""
+        {"isInsideMenuBarItem":true,"applicationBundleIdentifier":null,\
+        "applicationIsActive":false,"applicationUsesRegularActivationPolicy":false}
+        """.utf8)
+        let context = try JSONDecoder().decode(MenuBarPointContext.self, from: legacy)
+        #expect(context.isInsideMenuBarItem)
+        #expect(context.hitWindowOwnerBundleIdentifier == nil)
+        #expect(context.hitWindowFrame == nil)
     }
 }
