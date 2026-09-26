@@ -112,38 +112,74 @@ final class BarlineUITests: XCTestCase {
         // versions despite a valid on-screen frame. Use the exact discovered
         // element's coordinate, never an assumed/global location or AXPress.
         item.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
-        let delivered = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        // The fixture's receipt is the target-process witness. Every wait below
+        // is on a concrete receipt or element state, never on elapsed time.
+        let currentReceipt = { () -> [String: Any]? in
             guard let data = try? Data(contentsOf: receiptURL),
-                  let receipt = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { return false }
-            return receipt["session"] as? String == session &&
-                (receipt["activations"] as? Int ?? 0) > 0
-        }, object: nil)
-        guard XCTWaiter.wait(for: [delivered], timeout: 3) == .completed else {
+                  let receipt = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  receipt["session"] as? String == session
+            else { return nil }
+            return receipt
+        }
+        let describe = { (receipt: [String: Any]?) -> String in
+            guard let receipt else { return "no receipt" }
+            let fields = ["activations", "opens", "actions", "closes"].map { "\($0)=\(receipt[$0] as? Int ?? -1)" }
+            return (fields + ["visible=\(receipt["visible"] as? Bool ?? false)"]).joined(separator: " ")
+        }
+        let waitForReceipt = { (timeout: TimeInterval, condition: @escaping ([String: Any]) -> Bool) -> Bool in
+            let expectation = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+                currentReceipt().map(condition) ?? false
+            }, object: nil)
+            return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
+        }
+        guard waitForReceipt(3, { ($0["activations"] as? Int ?? 0) > 0 }) else {
             XCTFail("Host XCTest status-item event produced no target-process receipt. Event-delivery gate failed; menu behavior is not established.")
+            return
+        }
+        // The fixture publishes its activation before NSMenu.popUp or
+        // NSPopover.show runs. Wait for AppKit's own open delegate callback, so
+        // the action is looked up only after the menu or popover is attached.
+        let isOpen = { (receipt: [String: Any]) -> Bool in
+            receipt["button"] as? String == "left" &&
+                receipt["activations"] as? Int == 1 &&
+                receipt["opens"] as? Int == 1 &&
+                receipt["closes"] as? Int == 0 &&
+                receipt["actions"] as? Int == 0 &&
+                receipt["visible"] as? Bool == true
+        }
+        guard waitForReceipt(5, isOpen) else {
+            XCTFail("The fixture received the status-item click but did not report its menu/popover open: \(describe(currentReceipt()))")
             return
         }
         let action = target == "BF Popover"
             ? app.buttons["fixture-journey-action"] : app.menuItems["Fixture Receipt Action"]
-        let completedReceipt = {
-            guard let data = try? Data(contentsOf: receiptURL),
-                  let receipt = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { return false }
-            return receipt["session"] as? String == session &&
-                receipt["button"] as? String == "left" &&
+        let actionDeadline = Date().addingTimeInterval(5)
+        while !onScreen(action), Date() < actionDeadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        guard onScreen(action) else {
+            XCTFail("The fixture did not expose its actual menu/popover action on screen: \(describe(currentReceipt()))")
+            return
+        }
+        guard let beforeAction = currentReceipt(), isOpen(beforeAction) else {
+            XCTFail("The menu/popover closed before the action was clicked: \(describe(currentReceipt()))")
+            return
+        }
+        // Click the discovered action's coordinate rather than calling
+        // XCUIElement.click(). For a menu item, click() hovers the item and then
+        // re-resolves it; on macOS 26 the highlighted menu can drop out of the
+        // accessibility tree between the two, so XCTest either reports no
+        // matching Menu or clicks after the menu is gone. A coordinate click
+        // delivers move, down and up at the item, as the installed journey does.
+        action.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).click()
+        let completed = waitForReceipt(5) { receipt in
+            receipt["button"] as? String == "left" &&
+                receipt["activations"] as? Int == 1 &&
                 receipt["actions"] as? Int == 1 &&
                 receipt["opens"] as? Int == 1 &&
                 receipt["closes"] as? Int == 1 &&
                 receipt["visible"] as? Bool == false
         }
-        guard action.waitForExistence(timeout: 5) else {
-            XCTFail("The fixture did not expose its actual menu/popover action")
-            return
-        }
-        action.click()
-        let observed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
-            completedReceipt()
-        }, object: nil)
-        XCTAssertEqual(XCTWaiter.wait(for: [observed], timeout: 5), .completed)
+        XCTAssertTrue(completed, "The action click did not produce exactly one action and closure: \(describe(currentReceipt()))")
     }
 }
