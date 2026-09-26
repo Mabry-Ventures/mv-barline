@@ -1,5 +1,17 @@
 # Barline execution plan
 
+## Barline 1.0.64 published — September 25, 2026
+
+Barline 1.0.64 (build 141), tag `v1.0.64` at `9386c1b`, is the public latest
+release and the Sparkle feed serves it. It supersedes the unpublished
+1.0.49–1.0.63 candidates. Evidence on that exact source: the macOS 26 full
+gate; a stress tool that crashed 1.0.62 at cycle 918 while a source-identical
+fixed build survived 2,000 cycles and the release artifact 1,000; a Sparkle
+upgrade from public 1.0.48 on macOS 27 with preferences and layout preserved;
+a clean macOS 27 install through the first-run walkthrough; and installed move
+and Barline Bar checks on three macOS 27 Macs. Open items are recorded in
+`docs/KNOWN_LIMITATIONS.md`. The site links v1.0.64.
+
 ## Barline 1.0.54 move diagnostic — September 23, 2026
 
 Build 131 is a private diagnostic candidate, not a release. The exact signed
