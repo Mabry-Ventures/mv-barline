@@ -1,5 +1,19 @@
 # Changelog
 
+## Unreleased
+
+### macOS 27
+
+- Items you move now keep a sensible position in the Barline Bar. A newly
+  edited item is placed next to its neighbours in the order you already saved,
+  instead of jumping ahead of them until you reorder it once.
+
+### macOS 26
+
+- Recovery for a missed click on the Barline icon now checks that the click
+  really landed on the icon. A window from another app covering the icon can
+  no longer trigger it.
+
 ## 1.0.64 (build 141) — September 25, 2026
 
 Candidates 1.0.49 through 1.0.63 were built and tested internally but never
