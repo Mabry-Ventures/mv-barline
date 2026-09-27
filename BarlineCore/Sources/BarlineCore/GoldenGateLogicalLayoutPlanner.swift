@@ -192,31 +192,33 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
                     return lhs == rhs ? $0.itemID.description < $1.itemID.description : lhs < rhs
                 }
                 .map(\.itemID)
-            var insertedAtFront = 0
             for assignment in edited {
                 guard let position = snapshotPositions[assignment.itemID] else {
                     ordered.append(assignment.itemID)
                     continue
                 }
-                // The untouched item closest before this one in the live menu
-                // bar, chosen by live position rather than saved order.
-                let predecessorID = ordered
+                // Untouched neighbours with a live position. A concealed or
+                // absent item has none and cannot anchor placement.
+                let liveNeighbours = ordered
                     .filter { !editedItemIDs.contains($0) }
-                    .compactMap { candidate in
-                        snapshotPositions[candidate].flatMap { $0 < position ? (candidate, $0) : nil }
-                    }
-                    .max { $0.1 < $1.1 }?.0
-                let predecessor = predecessorID.flatMap { ordered.firstIndex(of: $0) }
-                if let predecessor {
+                    .compactMap { candidate in snapshotPositions[candidate].map { (candidate, $0) } }
+                if let predecessorID = liveNeighbours.filter({ $0.1 < position }).max(by: { $0.1 < $1.1 })?.0,
+                   let predecessor = ordered.firstIndex(of: predecessorID)
+                {
                     var index = predecessor + 1
                     // Keep edited items that share a predecessor in live order.
                     while index < ordered.count, editedItemIDs.contains(ordered[index]) {
                         index += 1
                     }
                     ordered.insert(assignment.itemID, at: index)
+                } else if let successorID = liveNeighbours.filter({ $0.1 > position })
+                    .min(by: { $0.1 < $1.1 })?.0,
+                    let successor = ordered.firstIndex(of: successorID)
+                {
+                    ordered.insert(assignment.itemID, at: successor)
                 } else {
-                    ordered.insert(assignment.itemID, at: insertedAtFront)
-                    insertedAtFront += 1
+                    // No live anchor: follow the saved items rather than jump ahead.
+                    ordered.append(assignment.itemID)
                 }
             }
             for (rank, itemID) in ordered.enumerated() {

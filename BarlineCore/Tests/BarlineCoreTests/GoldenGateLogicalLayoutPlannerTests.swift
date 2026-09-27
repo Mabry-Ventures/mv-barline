@@ -306,6 +306,30 @@ struct GoldenGateLogicalLayoutPlannerTests {
         #expect(byID[id(2)]?.rank == 2)
     }
 
+    @Test("With no live neighbour, an edited item follows saved items")
+    func editedItemFollowsConcealedSavedItems() {
+        // 1Password (id 1) was hidden earlier and is concealed, so it is absent
+        // from the live snapshot. Hiding Stats (id 2) must not jump ahead of it.
+        let saved = [
+            id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .hidden, rank: 0),
+        ]
+        let runtime = snapshot([
+            item(2, section: .hidden, order: 0),
+            item(3, section: .visible, order: 1),
+        ])
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: runtime,
+            preserving: saved,
+            editing: [id(2)],
+            barlineBundleIdentifier: "com.mabryventures.Barline",
+            maximumCount: 10
+        )
+        let byID = Dictionary(uniqueKeysWithValues: assignments.map { ($0.itemID, $0) })
+
+        #expect(byID[id(1)]?.rank == 0)
+        #expect(byID[id(2)]?.rank == 1)
+    }
+
     @Test("Edited items with no untouched predecessor lead the section in live order")
     func editedItemsWithoutPredecessorLead() {
         let saved = [
