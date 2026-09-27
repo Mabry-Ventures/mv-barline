@@ -344,6 +344,44 @@ struct GoldenGateLogicalLayoutPlannerTests {
         #expect(byID[id(2)]?.rank == 1)
     }
 
+    @Test("Re-hiding an item left of already hidden items keeps physical order")
+    func rehidingLeftItemPrecedesHiddenNeighbours() {
+        // Device case: the absent fixture (ids 8, 9) and Stats (id 2) are saved
+        // hidden; 1Password (id 1), physically left of Stats, is hidden again.
+        let saved = [
+            id(8): GoldenGateLogicalAssignment(itemID: id(8), section: .hidden, rank: 0),
+            id(9): GoldenGateLogicalAssignment(itemID: id(9), section: .hidden, rank: 1),
+            id(2): GoldenGateLogicalAssignment(itemID: id(2), section: .hidden, rank: 2),
+        ]
+        func framed(_ value: Int, _ section: MenuBarSection, order: Int, x: Double) -> MenuBarItemDescriptor {
+            MenuBarItemDescriptor(
+                id: id(value),
+                section: section,
+                order: order,
+                displayID: MenuBarDisplayID("display"),
+                displayName: "Item \(value)",
+                bounds: MenuBarRect(x: x, y: 0, width: 30, height: 24),
+                isMovable: true,
+                canBeHidden: true
+            )
+        }
+        let runtime = snapshot([
+            framed(3, .visible, order: 0, x: 1700),
+            framed(1, .hidden, order: 1, x: 1384),
+            framed(2, .hidden, order: 2, x: 1462),
+        ])
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: runtime,
+            preserving: saved,
+            editing: [id(1)],
+            barlineBundleIdentifier: "com.mabryventures.Barline",
+            maximumCount: 10
+        )
+        let byID = Dictionary(uniqueKeysWithValues: assignments.map { ($0.itemID, $0) })
+
+        #expect((byID[id(1)]?.rank ?? 99) < (byID[id(2)]?.rank ?? -1))
+    }
+
     @Test("With no live neighbour, an edited item follows saved items")
     func editedItemFollowsConcealedSavedItems() {
         // 1Password (id 1) was hidden earlier and is concealed, so it is absent
