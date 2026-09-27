@@ -772,7 +772,9 @@ actor GoldenGateAXSnapshotProvider {
                       item.id == operation.itemID
                 else { return nil }
                 return item.id
-            })
+            }),
+            // The user chose this order; physical position must not override it.
+            rankOrder: .snapshot
         )
         guard commitPersistence(persistence) else {
             throw MenuBarBackendError.mutationNotStarted
@@ -1058,7 +1060,8 @@ actor GoldenGateAXSnapshotProvider {
 
     private func preparePersistence(
         from snapshot: MenuBarSnapshot,
-        requiredItemIDs: Set<MenuBarItemID>
+        requiredItemIDs: Set<MenuBarItemID>,
+        rankOrder: GoldenGateLogicalLayoutPlanner.RankOrder = .physical
     ) throws -> PreparedPersistence {
         let assignmentCandidates = logicalLayoutPlanner.assignmentsForPersistence(
             from: snapshot,
@@ -1066,7 +1069,8 @@ actor GoldenGateAXSnapshotProvider {
             editing: requiredItemIDs,
             barlineBundleIdentifier: Bundle.main.bundleIdentifier
                 ?? "com.mabryventures.Barline",
-            maximumCount: Self.maximumRememberedAssignments * 2
+            maximumCount: Self.maximumRememberedAssignments * 2,
+            rankOrder: rankOrder
         )
         .sorted(by: Self.persistencePriority)
         let requiredAssignmentIndices = Set(assignmentCandidates.indices.filter { index in
