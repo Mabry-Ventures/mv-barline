@@ -1,5 +1,19 @@
 # Barline execution plan
 
+## Barline 1.0.65 candidate — September 27, 2026
+
+Build 142 is a prepared, unpublished candidate carrying #41 (runtime gates stop
+early when another menu bar manager runs), #42 (macOS 26 click recovery accepts
+a Control Center-hosted window only when it matches the control's center and
+width, resolved through the helper; macOS 27 edited-item ranks in one numbering
+space) and #43 (macOS 27 ranks follow physical menu bar position; explicit
+shelf drags keep their order). A notarized build of the #43 source was
+installed on CPLCODEX01 (macOS 27.0): hide order, moves, Barline Bar timing and
+a 500-cycle open/close storm passed. Before publication the exact release SHA
+still needs its full gate, a notarized candidate, and the upgrade check. The
+macOS 26 recovery change has no runtime evidence: no macOS 26 host is available.
+Keep the public v1.0.64 feed until those pass.
+
 ## Barline 1.0.64 published — September 25, 2026
 
 Barline 1.0.64 (build 141), tag `v1.0.64` at `9386c1b`, is the public latest
