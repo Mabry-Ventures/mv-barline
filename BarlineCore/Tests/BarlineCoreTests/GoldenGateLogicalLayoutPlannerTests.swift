@@ -306,6 +306,44 @@ struct GoldenGateLogicalLayoutPlannerTests {
         #expect(byID[id(2)]?.rank == 2)
     }
 
+    @Test("Physical position wins over a display-ordered snapshot")
+    func physicalPositionOrdersEditedItem() {
+        // Device case on macOS 27: 1Password (id 1) is already hidden, so the
+        // display snapshot lists it after every visible item, but physically it
+        // sits left of Stats (id 2), which is being hidden now.
+        let saved = [
+            id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .hidden, rank: 0),
+        ]
+        func framed(_ value: Int, _ section: MenuBarSection, order: Int, x: Double) -> MenuBarItemDescriptor {
+            MenuBarItemDescriptor(
+                id: id(value),
+                section: section,
+                order: order,
+                displayID: MenuBarDisplayID("display"),
+                displayName: "Item \(value)",
+                bounds: MenuBarRect(x: x, y: 0, width: 30, height: 24),
+                isMovable: true,
+                canBeHidden: true
+            )
+        }
+        let runtime = snapshot([
+            framed(2, .hidden, order: 0, x: 1462),
+            framed(3, .visible, order: 1, x: 1700),
+            framed(1, .hidden, order: 2, x: 1384),
+        ])
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: runtime,
+            preserving: saved,
+            editing: [id(2)],
+            barlineBundleIdentifier: "com.mabryventures.Barline",
+            maximumCount: 10
+        )
+        let byID = Dictionary(uniqueKeysWithValues: assignments.map { ($0.itemID, $0) })
+
+        #expect(byID[id(1)]?.rank == 0)
+        #expect(byID[id(2)]?.rank == 1)
+    }
+
     @Test("With no live neighbour, an edited item follows saved items")
     func editedItemFollowsConcealedSavedItems() {
         // 1Password (id 1) was hidden earlier and is concealed, so it is absent

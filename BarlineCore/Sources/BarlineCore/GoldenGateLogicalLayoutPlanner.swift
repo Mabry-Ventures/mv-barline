@@ -151,10 +151,7 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
             current: current,
             retained: retained,
             editedItemIDs: editedItemIDs,
-            snapshotPositions: Dictionary(
-                snapshot.items.enumerated().map { ($1.id, $0) },
-                uniquingKeysWith: { first, _ in first }
-            )
+            snapshotPositions: Self.physicalPositions(in: snapshot)
         )
         return Array((current + retained).map { assignment in
             GoldenGateLogicalAssignment(
@@ -165,6 +162,21 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
         }.prefix(maximumCount))
     }
 
+    /// Left-to-right menu bar positions. The snapshot passed in may already be
+    /// in display order (concealed items after visible ones, sorted by saved
+    /// rank), so use each item's physical frame when every item has one; macOS
+    /// 27 keeps a concealed item's source frame in the menu bar. Otherwise fall
+    /// back to snapshot order for all items, never a mix of the two.
+    static func physicalPositions(in snapshot: MenuBarSnapshot) -> [MenuBarItemID: Double] {
+        let framed = snapshot.items.allSatisfy {
+            $0.bounds.width > 0 && $0.bounds.x.isFinite && $0.bounds.y.isFinite
+        }
+        let pairs = snapshot.items.enumerated().map { index, item in
+            (item.id, framed ? item.bounds.x : Double(index))
+        }
+        return Dictionary(pairs, uniquingKeysWith: { first, _ in first })
+    }
+
     /// Saved ranks and live snapshot positions are different numbering spaces.
     /// Within each section, keep untouched items in their saved order, place
     /// each edited item after the untouched item that precedes it in the live
@@ -173,22 +185,22 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
         current: [GoldenGateLogicalAssignment],
         retained: [GoldenGateLogicalAssignment],
         editedItemIDs: Set<MenuBarItemID>,
-        snapshotPositions: [MenuBarItemID: Int]
+        snapshotPositions: [MenuBarItemID: Double]
     ) -> [MenuBarItemID: Int] {
         var ranks = [MenuBarItemID: Int]()
         for section in MenuBarSection.allCases {
             let members = (current + retained).filter { $0.section == section }
             let edited = members
                 .filter { editedItemIDs.contains($0.itemID) }
-                .sorted { (snapshotPositions[$0.itemID] ?? .max) < (snapshotPositions[$1.itemID] ?? .max) }
+                .sorted { (snapshotPositions[$0.itemID] ?? .infinity) < (snapshotPositions[$1.itemID] ?? .infinity) }
             var ordered = members
                 .filter { !editedItemIDs.contains($0.itemID) }
                 .sorted {
                     if $0.rank != $1.rank {
                         return $0.rank < $1.rank
                     }
-                    let lhs = snapshotPositions[$0.itemID] ?? .max
-                    let rhs = snapshotPositions[$1.itemID] ?? .max
+                    let lhs = snapshotPositions[$0.itemID] ?? .infinity
+                    let rhs = snapshotPositions[$1.itemID] ?? .infinity
                     return lhs == rhs ? $0.itemID.description < $1.itemID.description : lhs < rhs
                 }
                 .map(\.itemID)
