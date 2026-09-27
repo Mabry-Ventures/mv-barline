@@ -382,6 +382,63 @@ struct GoldenGateLogicalLayoutPlannerTests {
         #expect((byID[id(1)]?.rank ?? 99) < (byID[id(2)]?.rank ?? -1))
     }
 
+    @Test("One frameless retained item does not discard physical positions")
+    func framelessItemKeepsOthersPhysical() {
+        let saved = [
+            id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .hidden, rank: 0),
+            id(7): GoldenGateLogicalAssignment(itemID: id(7), section: .hidden, rank: 1),
+        ]
+        func framed(_ value: Int, _ section: MenuBarSection, order: Int, x: Double) -> MenuBarItemDescriptor {
+            MenuBarItemDescriptor(
+                id: id(value), section: section, order: order,
+                displayID: MenuBarDisplayID("display"), displayName: "Item \(value)",
+                bounds: MenuBarRect(x: x, y: 0, width: x > 0 ? 30 : 0, height: 24),
+                isMovable: true, canBeHidden: true
+            )
+        }
+        // Display order puts hidden 1Password (1) and the frameless retained
+        // item (7) after Stats (2); physically 1Password is left of Stats.
+        let runtime = snapshot([
+            framed(2, .hidden, order: 0, x: 1462),
+            framed(1, .hidden, order: 1, x: 1384),
+            framed(7, .hidden, order: 2, x: 0),
+        ])
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: runtime, preserving: saved, editing: [id(2)],
+            barlineBundleIdentifier: "com.mabryventures.Barline", maximumCount: 10
+        )
+        let byID = Dictionary(uniqueKeysWithValues: assignments.map { ($0.itemID, $0) })
+
+        #expect((byID[id(1)]?.rank ?? 99) < (byID[id(2)]?.rank ?? -1))
+    }
+
+    @Test("An explicit shelf reorder keeps the requested order")
+    func shelfReorderKeepsRequestedOrder() {
+        let saved = [
+            id(1): GoldenGateLogicalAssignment(itemID: id(1), section: .hidden, rank: 0),
+            id(2): GoldenGateLogicalAssignment(itemID: id(2), section: .hidden, rank: 1),
+        ]
+        func framed(_ value: Int, order: Int, x: Double) -> MenuBarItemDescriptor {
+            MenuBarItemDescriptor(
+                id: id(value), section: .hidden, order: order,
+                displayID: MenuBarDisplayID("display"), displayName: "Item \(value)",
+                bounds: MenuBarRect(x: x, y: 0, width: 30, height: 24),
+                isMovable: true, canBeHidden: true
+            )
+        }
+        // The user dragged 2 before 1, although 1 is physically to the left.
+        let candidate = snapshot([framed(2, order: 0, x: 1462), framed(1, order: 1, x: 1384)])
+        let assignments = GoldenGateLogicalLayoutPlanner().assignmentsForPersistence(
+            from: candidate, preserving: saved, editing: [id(1), id(2)],
+            barlineBundleIdentifier: "com.mabryventures.Barline", maximumCount: 10,
+            rankOrder: .snapshot
+        )
+        let byID = Dictionary(uniqueKeysWithValues: assignments.map { ($0.itemID, $0) })
+
+        #expect(byID[id(2)]?.rank == 0)
+        #expect(byID[id(1)]?.rank == 1)
+    }
+
     @Test("With no live neighbour, an edited item follows saved items")
     func editedItemFollowsConcealedSavedItems() {
         // 1Password (id 1) was hidden earlier and is concealed, so it is absent

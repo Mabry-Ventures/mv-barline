@@ -16,6 +16,14 @@ public struct GoldenGateLogicalAssignment: Codable, Equatable, Sendable {
 /// The caller remains responsible for committing the resulting complete state
 /// through the native concealment controller before persisting it.
 public struct GoldenGateLogicalLayoutPlanner: Sendable {
+    /// How an edit's items are placed relative to each other.
+    public enum RankOrder: Sendable {
+        /// Visibility changes: follow each item's physical menu bar position.
+        case physical
+        /// Explicit shelf reorders: keep the order the user requested.
+        case snapshot
+    }
+
     public init() {}
 
     public func applying(
@@ -108,7 +116,8 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
         preserving existing: [MenuBarItemID: GoldenGateLogicalAssignment],
         editing editedItemIDs: Set<MenuBarItemID>,
         barlineBundleIdentifier: String,
-        maximumCount: Int
+        maximumCount: Int,
+        rankOrder: RankOrder = .physical
     ) -> [GoldenGateLogicalAssignment] {
         guard maximumCount > 0 else { return [] }
         let observedIDs = Set(snapshot.items.map(\.id))
@@ -151,7 +160,9 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
             current: current,
             retained: retained,
             editedItemIDs: editedItemIDs,
-            snapshotPositions: Self.physicalPositions(in: snapshot)
+            snapshotPositions: rankOrder == .physical
+                ? Self.physicalPositions(in: snapshot)
+                : Self.snapshotPositions(in: snapshot)
         )
         return Array((current + retained).map { assignment in
             GoldenGateLogicalAssignment(
@@ -162,19 +173,26 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
         }.prefix(maximumCount))
     }
 
-    /// Left-to-right menu bar positions. The snapshot passed in may already be
-    /// in display order (concealed items after visible ones, sorted by saved
-    /// rank), so use each item's physical frame when every item has one; macOS
-    /// 27 keeps a concealed item's source frame in the menu bar. Otherwise fall
-    /// back to snapshot order for all items, never a mix of the two.
+    /// Left-to-right menu bar positions. The snapshot may already be in
+    /// display order (concealed items after visible ones, sorted by saved rank),
+    /// so use each item's physical frame; macOS 27 keeps a concealed item's
+    /// source frame in the menu bar. A frameless item (for example a retained
+    /// descriptor for an AX-absent item) gets no position and cannot anchor
+    /// placement. Snapshot order is used only when no item has a frame.
     static func physicalPositions(in snapshot: MenuBarSnapshot) -> [MenuBarItemID: Double] {
-        let framed = snapshot.items.allSatisfy {
-            $0.bounds.width > 0 && $0.bounds.x.isFinite && $0.bounds.y.isFinite
+        func isFramed(_ item: MenuBarItemDescriptor) -> Bool {
+            item.bounds.width > 0 && item.bounds.x.isFinite && item.bounds.y.isFinite
         }
-        let pairs = snapshot.items.enumerated().map { index, item in
-            (item.id, framed ? item.bounds.x : Double(index))
-        }
+        guard snapshot.items.contains(where: isFramed) else { return snapshotPositions(in: snapshot) }
+        let pairs = snapshot.items.filter(isFramed).map { ($0.id, $0.bounds.x) }
         return Dictionary(pairs, uniquingKeysWith: { first, _ in first })
+    }
+
+    static func snapshotPositions(in snapshot: MenuBarSnapshot) -> [MenuBarItemID: Double] {
+        Dictionary(
+            snapshot.items.enumerated().map { ($1.id, Double($0)) },
+            uniquingKeysWith: { first, _ in first }
+        )
     }
 
     /// Saved ranks and live snapshot positions are different numbering spaces.
