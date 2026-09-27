@@ -25,8 +25,8 @@ later changes.
 
 - On macOS 26, delayed recovery for a missed icon click accepts a Control
   Center-hosted status window only when its frame matches Barline's control
-  button exactly (unreleased; covered by Core tests, pending runtime evidence on
-  a macOS 26 host).
+  button's center and width (1.0.65; covered by Core tests, pending runtime
+  evidence on a macOS 26 host).
 
 ## Features in qualification
 

@@ -1,12 +1,13 @@
 # Changelog
 
-## Unreleased
+## 1.0.65 (build 142) — September 27, 2026
 
 ### macOS 27
 
-- Items you move now keep a sensible position in the Barline Bar. A newly
-  edited item is placed next to its neighbours in the order you already saved,
-  instead of jumping ahead of them until you reorder it once.
+- Hidden items keep the order they have in your menu bar. When you hide an
+  item, the Barline Bar places it next to its neighbours by where they actually
+  sit, instead of putting it ahead of items you hid earlier until you reorder it.
+- Reordering items by dragging in the Barline Bar keeps the order you chose.
 
 ### macOS 26
 
@@ -14,6 +15,11 @@
   landed on the icon, so a window from another app covering the icon should no
   longer trigger it. This is covered by automated tests but has not yet been
   confirmed on a macOS 26 Mac.
+
+### Both
+
+- Local release checks now stop early, with a clear message, when another menu
+  bar manager is running, instead of failing after a long run.
 
 ## 1.0.64 (build 141) — September 25, 2026
 
