@@ -1,18 +1,27 @@
 # Barline execution plan
 
-## Barline 1.0.65 candidate — September 27, 2026
+## Barline 1.0.65 published — September 27, 2026
 
-Build 142 is a prepared, unpublished candidate carrying #41 (runtime gates stop
-early when another menu bar manager runs), #42 (macOS 26 click recovery accepts
-a Control Center-hosted window only when it matches the control's center and
-width, resolved through the helper; macOS 27 edited-item ranks in one numbering
-space) and #43 (macOS 27 ranks follow physical menu bar position; explicit
-shelf drags keep their order). A notarized build of the #43 source was
-installed on CPLCODEX01 (macOS 27.0): hide order, moves, Barline Bar timing and
-a 500-cycle open/close storm passed. Before publication the exact release SHA
-still needs its full gate, a notarized candidate, and the upgrade check. The
-macOS 26 recovery change has no runtime evidence: no macOS 26 host is available.
-Keep the public v1.0.64 feed until those pass.
+Barline 1.0.65 (build 142), tag `v1.0.65` at `887d335`, is the public latest
+release and the Sparkle feed serves it. It carries #41 (runtime gates stop early
+when another menu bar manager runs), #42 (macOS 26 click recovery accepts a
+Control Center-hosted window only when it matches the control's center and
+width, resolved through the helper) and #42/#43 (macOS 27 ranks follow physical
+menu bar position; explicit shelf drags keep their order).
+
+Evidence on that exact source:
+- the full gate passed on macOS 27.0;
+- the build is notarized and stapled, and Gatekeeper accepts it;
+- on CPLCODEX01 (macOS 27.0), a disk-image upgrade from public 1.0.64 kept all
+  79 preference keys, left the saved layout unchanged, and passed the hide-order,
+  move, Barline Bar timing and 300-cycle open/close storm checks;
+- also on CPLCODEX01, a real Sparkle update from 1.0.64 through the pre-release
+  appcast installed the release binary and relaunched;
+- the public appcast serves 1.0.65, and the downloaded disk image matches
+  `SHA256SUMS`.
+
+The site links v1.0.65. The macOS 26 recovery change has no runtime evidence
+yet; no macOS 26 host is available.
 
 ## Barline 1.0.64 published — September 25, 2026
 
