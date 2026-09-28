@@ -229,6 +229,15 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
         try await concealmentController.configure(configuration)
     }
 
+    func pressSystemClockIfConcealed(at point: MenuBarPoint) async throws -> Bool {
+        guard revealObservations.canAdmitOperations else { throw MenuBarBackendError.interrupted }
+        let location = CGPoint(x: point.x, y: point.y)
+        guard GoldenGateAXInventory.systemClock(containing: location) != nil else { return false }
+        return try await concealmentController.pressSystemClockLiftingConcealment {
+            GoldenGateAXInventory.systemClock(containing: location).map(AXHelpers.press) ?? false
+        }
+    }
+
     func nativeDrag(
         _: MenuBarNativeDragTransaction
     ) async throws -> MenuBarNativeDragReceipt {

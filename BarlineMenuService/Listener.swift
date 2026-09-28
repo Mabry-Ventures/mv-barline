@@ -240,6 +240,17 @@ final class Listener: @unchecked Sendable {
                         }
                     }
                 return .revealObservation(result ?? .failure(.timedOut))
+            case let .pressSystemClockIfConcealed(point):
+                let result: BarlineMenuService.ServiceResult<Bool>? = AsyncRequestBridge.run {
+                    do {
+                        return try await .success(self.backend.pressSystemClockIfConcealed(at: point))
+                    } catch let error as MenuBarBackendError {
+                        return .failure(error)
+                    } catch {
+                        return .failure(.operationFailed(error.localizedDescription))
+                    }
+                }
+                return .boolean(result ?? .failure(.timedOut))
             case let .revealObservationIsVisible(token):
                 let result: BarlineMenuService.ServiceResult<Bool>? = AsyncRequestBridge.run {
                     do {

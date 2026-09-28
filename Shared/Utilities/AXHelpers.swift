@@ -152,6 +152,10 @@ enum AXHelpers {
         return element
     }
 
+    static func press(_ element: UIElement) -> Bool {
+        run(on: element.element) { (try? element.performAction(.press)) != nil }
+    }
+
     static func isEnabled(_ element: UIElement) -> Bool {
         run(on: element.element) { try? element.attribute(.enabled) } ?? false
     }

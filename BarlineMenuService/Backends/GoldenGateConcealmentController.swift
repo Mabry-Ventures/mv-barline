@@ -67,6 +67,39 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         }
     }
 
+    /// macOS 27 Assessment Mode, which provides native concealment, stops the
+    /// clock from opening Notification Center even when the clock is allowed.
+    /// Lift the committed assertion just long enough to press the clock, then
+    /// re-apply the same state; Notification Center stays open once presented.
+    /// Returns false without lifting anything when no assertion is held, so the
+    /// user's own click opens Notification Center natively.
+    func pressSystemClockLiftingConcealment(
+        _ press: @escaping @Sendable () -> Bool
+    ) async throws -> Bool {
+        try await transactionGate.withLock { [self] in
+            guard let controller = controller(createIfNeeded: false),
+                  let applied = appliedResolution,
+                  !applied.concealedBundleIdentifiers.isEmpty ||
+                  applied.allowedSystemItemIdentifiers != GoldenGateConcealmentPolicy.allSystemItemIdentifiers
+            else { return false }
+            BLNGoldenGateAssessmentInvalidate(controller)
+            appliedResolution = nil
+            // Give MenuBarAgent a moment to leave assessment mode.
+            try? await Task.sleep(for: .milliseconds(80))
+            let pressed = press()
+            // Let Notification Center begin presenting before concealment returns.
+            try? await Task.sleep(for: .milliseconds(150))
+            do {
+                try await applyCurrentState()
+            } catch {
+                logger.error("Concealment could not be re-applied after the clock press")
+                throw error
+            }
+            logger.notice("Clock pressed with concealment lifted: pressed=\(pressed, privacy: .public)")
+            return pressed
+        }
+    }
+
     func invalidate() async {
         // Restart cleanup must complete even when its caller is cancelled.
         // Enqueue it behind any accepted state change without inheriting the

@@ -40,6 +40,7 @@ extension BarlineMenuService {
         case environment
         case configureCursorInBackground(Bool)
         case configureConcealment(MenuBarConcealmentConfiguration)
+        case pressSystemClockIfConcealed(MenuBarPoint)
         case nativeDrag(MenuBarNativeDragTransaction, deadlineUptimeNanoseconds: UInt64)
         case pointContext(MenuBarPoint)
         case shelfPresentationObservation(MenuBarShelfPresentationProbe)

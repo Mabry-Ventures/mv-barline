@@ -63,6 +63,7 @@ final class HIDEventManager: ObservableObject {
             )
             handleShowOnClick(with: event, appState: appState, screen: screen)
             handleSmartRehide(with: event, appState: appState, screen: screen)
+            handleSystemClockClick(with: event, appState: appState, screen: screen)
         case .rightMouseDown:
             handleSecondaryContextMenu(appState: appState, screen: screen)
         default:
@@ -252,6 +253,24 @@ extension HIDEventManager {
                 eventTimestamp: timestamp,
                 modifierFlags: modifierFlags
             )
+        }
+    }
+
+    /// On macOS 27, native concealment runs in Assessment Mode, which stops
+    /// the clock from opening Notification Center while anything is hidden.
+    /// Let the helper open it for a menu bar click on the clock; it does
+    /// nothing when the click is elsewhere or nothing blocks the clock.
+    private func handleSystemClockClick(with event: NSEvent, appState: AppState, screen: NSScreen) {
+        guard #available(macOS 27.0, *),
+              let click = event.cgEvent,
+              event.modifierFlags.isDisjoint(with: .deviceIndependentFlagsMask),
+              isMouseInsideMenuBar(appState: appState, screen: screen, location: click.unflippedLocation),
+              appState.menuBarManager.controlItem(withName: .visible)?
+                  .containsEventLocation(click.unflippedLocation) != true
+        else { return }
+        let location = click.location
+        Task {
+            _ = try? await BarlineMenuService.Connection.shared.pressSystemClockIfConcealed(at: location)
         }
     }
 

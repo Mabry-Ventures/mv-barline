@@ -1,3 +1,4 @@
+@preconcurrency import AXSwift
 import AppKit
 import BarlineCore
 import CryptoKit
@@ -69,6 +70,29 @@ enum GoldenGateAXInventory {
             state = (capturedAt: now, observations: observations)
         }
         return observations
+    }
+
+    private static let systemClockIdentifier = "com.apple.menuextra.clock"
+
+    /// The system clock menu extra when `point` (top-left origin) is inside
+    /// it. MenuBarAgent hosts it one level below its extras bar.
+    static func systemClock(containing point: CGPoint) -> UIElement? {
+        guard AXHelpers.isProcessTrusted(),
+              let agent = NSWorkspace.shared.runningApplications.first(where: {
+                  $0.bundleIdentifier == menuBarAgentBundleIdentifier && !$0.isTerminated
+              }),
+              let application = AXHelpers.application(for: agent),
+              let extrasMenuBar = AXHelpers.extrasMenuBar(for: application)
+        else { return nil }
+        for child in AXHelpers.children(for: extrasMenuBar) {
+            for candidate in [child] + AXHelpers.children(for: child)
+                where AXHelpers.identifier(for: candidate) == systemClockIdentifier
+            {
+                guard let frame = AXHelpers.frame(for: candidate), frame.contains(point) else { return nil }
+                return candidate
+            }
+        }
+        return nil
     }
 
     static func invalidateCache() {
