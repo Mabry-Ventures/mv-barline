@@ -28,6 +28,12 @@ later changes.
   button's center and width (1.0.65; covered by Core tests, pending runtime
   evidence on a macOS 26 host).
 
+- On macOS 27, Barline hides items with a system Assessment Mode assertion,
+  which stops the clock from opening Notification Center. Barline lifts the
+  assertion for about a quarter of a second to open it, so hidden items can
+  briefly appear. Effects of the assertion on volume and brightness indicators
+  have not been checked.
+
 ## Features in qualification
 
 Saved layouts, import/export, transactional activation, recovery, native Focus
