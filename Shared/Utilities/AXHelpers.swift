@@ -152,6 +152,10 @@ enum AXHelpers {
         return element
     }
 
+    static func parent(of element: UIElement) -> UIElement? {
+        run(on: element.element) { try? element.attribute(.parent) }
+    }
+
     static func press(_ element: UIElement) -> Bool {
         run(on: element.element) { (try? element.performAction(.press)) != nil }
     }

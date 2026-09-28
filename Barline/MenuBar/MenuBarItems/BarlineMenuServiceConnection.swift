@@ -226,9 +226,15 @@ extension BarlineMenuService {
 
         /// See `MenuBarBackend.pressSystemClockIfConcealed(at:)`. The point is in
         /// WindowServer (top-left origin) coordinates.
-        func pressSystemClockIfConcealed(at point: CGPoint) async throws -> Bool {
+        func pressSystemClockIfConcealed(
+            at point: CGPoint,
+            deadlineUptimeNanoseconds: UInt64
+        ) async throws -> Bool {
             guard case let .boolean(result) = await send(
-                .pressSystemClockIfConcealed(MenuBarPoint(x: point.x, y: point.y))
+                .pressSystemClockIfConcealed(
+                    MenuBarPoint(x: point.x, y: point.y),
+                    deadlineUptimeNanoseconds: deadlineUptimeNanoseconds
+                )
             ) else {
                 throw MenuBarBackendError.interrupted
             }

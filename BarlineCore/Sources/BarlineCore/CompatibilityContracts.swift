@@ -424,7 +424,10 @@ public protocol MenuBarBackend: Sendable {
     /// Opens Notification Center when `point` is on the system clock and
     /// native concealment is blocking it. Returns false when the click was not
     /// on the clock or nothing blocks it, so the native click proceeds.
-    func pressSystemClockIfConcealed(at point: MenuBarPoint) async throws -> Bool
+    func pressSystemClockIfConcealed(
+        at point: MenuBarPoint,
+        deadlineUptimeNanoseconds: UInt64
+    ) async throws -> Bool
     func nativeDrag(_ transaction: MenuBarNativeDragTransaction) async throws -> MenuBarNativeDragReceipt
     func beginRevealObservation(_ item: MenuBarItemID) async throws -> MenuBarRevealObservationToken
     func revealObservationIsVisible(_ token: MenuBarRevealObservationToken) async throws -> Bool
@@ -455,7 +458,10 @@ public extension MenuBarBackend {
         throw MenuBarBackendError.unavailableCapability("native concealment")
     }
 
-    func pressSystemClockIfConcealed(at _: MenuBarPoint) async throws -> Bool {
+    func pressSystemClockIfConcealed(
+        at _: MenuBarPoint,
+        deadlineUptimeNanoseconds _: UInt64
+    ) async throws -> Bool {
         false
     }
 

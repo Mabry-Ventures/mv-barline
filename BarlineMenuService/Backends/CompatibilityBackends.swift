@@ -229,11 +229,17 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
         try await concealmentController.configure(configuration)
     }
 
-    func pressSystemClockIfConcealed(at point: MenuBarPoint) async throws -> Bool {
+    func pressSystemClockIfConcealed(
+        at point: MenuBarPoint,
+        deadlineUptimeNanoseconds: UInt64
+    ) async throws -> Bool {
         guard revealObservations.canAdmitOperations else { throw MenuBarBackendError.interrupted }
+        guard DispatchTime.now().uptimeNanoseconds < deadlineUptimeNanoseconds else { return false }
         let location = CGPoint(x: point.x, y: point.y)
         guard GoldenGateAXInventory.systemClock(containing: location) != nil else { return false }
-        return try await concealmentController.pressSystemClockLiftingConcealment {
+        return try await concealmentController.pressSystemClockLiftingConcealment(
+            deadlineUptimeNanoseconds: deadlineUptimeNanoseconds
+        ) {
             GoldenGateAXInventory.systemClock(containing: location).map(AXHelpers.press) ?? false
         }
     }

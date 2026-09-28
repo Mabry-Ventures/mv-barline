@@ -260,17 +260,27 @@ extension HIDEventManager {
     /// the clock from opening Notification Center while anything is hidden.
     /// Let the helper open it for a menu bar click on the clock; it does
     /// nothing when the click is elsewhere or nothing blocks the clock.
-    private func handleSystemClockClick(with event: NSEvent, appState: AppState, screen: NSScreen) {
+    private func handleSystemClockClick(with event: NSEvent, appState: AppState, screen _: NSScreen) {
         guard #available(macOS 27.0, *),
               let click = event.cgEvent,
-              event.modifierFlags.isDisjoint(with: .deviceIndependentFlagsMask),
-              isMouseInsideMenuBar(appState: appState, screen: screen, location: click.unflippedLocation),
+              !MouseHelpers.hasActivePointerModifiers(event.modifierFlags),
+              // The clock may be on any display's menu bar, not only the main one.
+              let clickScreen = NSScreen.screens.first(where: { $0.frame.contains(click.unflippedLocation) }),
+              isMouseInsideMenuBar(appState: appState, screen: clickScreen, location: click.unflippedLocation),
               appState.menuBarManager.controlItem(withName: .visible)?
                   .containsEventLocation(click.unflippedLocation) != true
         else { return }
         let location = click.location
+        // Bound the request to this click: a busy helper must not open or close
+        // Notification Center for a stale or superseded click.
+        let deadline = DispatchTime.now().uptimeNanoseconds + 600_000_000
+        let sequence = mouseDownSequence
         Task {
-            _ = try? await BarlineMenuService.Connection.shared.pressSystemClockIfConcealed(at: location)
+            guard isEnabled, sequence == mouseDownSequence else { return }
+            _ = try? await BarlineMenuService.Connection.shared.pressSystemClockIfConcealed(
+                at: location,
+                deadlineUptimeNanoseconds: deadline
+            )
         }
     }
 

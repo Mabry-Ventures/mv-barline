@@ -71,13 +71,15 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     /// clock from opening Notification Center even when the clock is allowed.
     /// Lift the committed assertion just long enough to press the clock, then
     /// re-apply the same state; Notification Center stays open once presented.
-    /// Returns false without lifting anything when no assertion is held, so the
-    /// user's own click opens Notification Center natively.
+    /// Returns false without lifting anything when no assertion is held or the
+    /// click is too old, so a native or superseded click is left alone.
     func pressSystemClockLiftingConcealment(
+        deadlineUptimeNanoseconds: UInt64,
         _ press: @escaping @Sendable () -> Bool
     ) async throws -> Bool {
         try await transactionGate.withLock { [self] in
-            guard let controller = controller(createIfNeeded: false),
+            guard DispatchTime.now().uptimeNanoseconds < deadlineUptimeNanoseconds,
+                  let controller = controller(createIfNeeded: false),
                   let applied = appliedResolution,
                   !applied.concealedBundleIdentifiers.isEmpty ||
                   applied.allowedSystemItemIdentifiers != GoldenGateConcealmentPolicy.allSystemItemIdentifiers
@@ -89,14 +91,45 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             let pressed = press()
             // Let Notification Center begin presenting before concealment returns.
             try? await Task.sleep(for: .milliseconds(150))
-            do {
-                try await applyCurrentState()
-            } catch {
-                logger.error("Concealment could not be re-applied after the clock press")
-                throw error
-            }
+            try await reapplyAfterLift()
             logger.notice("Clock pressed with concealment lifted: pressed=\(pressed, privacy: .public)")
             return pressed
+        }
+    }
+
+    /// The lift must never become the authoritative state. Retry with backoff;
+    /// if every attempt fails, keep retrying in the background until the
+    /// desired state is applied or replaced by a newer configuration.
+    private func reapplyAfterLift() async throws {
+        for delay in [0, 100, 300, 700] {
+            if delay > 0 { try? await Task.sleep(for: .milliseconds(delay)) }
+            do {
+                try await applyCurrentState()
+                return
+            } catch {
+                logger.error("Concealment re-apply after the clock press failed; retrying")
+            }
+        }
+        scheduleBackgroundReapply()
+        throw MenuBarBackendError.mutationRecoveryFailed
+    }
+
+    private func scheduleBackgroundReapply() {
+        Task.detached { [self] in
+            for _ in 0 ..< 30 {
+                try? await Task.sleep(for: .seconds(1))
+                let done = (try? await transactionGate.withLock { [self] () async throws -> Bool in
+                    // A newer configure/reveal already applied state.
+                    if appliedResolution != nil { return true }
+                    try await applyCurrentState()
+                    return true
+                }) ?? false
+                if done {
+                    logger.notice("Concealment restored after a failed clock-press re-apply")
+                    return
+                }
+            }
+            logger.error("Concealment could not be restored after the clock press")
         }
     }
 

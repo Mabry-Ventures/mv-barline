@@ -74,23 +74,20 @@ enum GoldenGateAXInventory {
 
     private static let systemClockIdentifier = "com.apple.menuextra.clock"
 
-    /// The system clock menu extra when `point` (top-left origin) is inside
-    /// it. MenuBarAgent hosts it one level below its extras bar.
+    /// The system clock menu extra when it is the live hit target at `point`
+    /// (top-left origin). A menu or overlay covering the clock resolves to a
+    /// different element, so its click is never turned into a clock press.
     static func systemClock(containing point: CGPoint) -> UIElement? {
-        guard AXHelpers.isProcessTrusted(),
-              let agent = NSWorkspace.shared.runningApplications.first(where: {
-                  $0.bundleIdentifier == menuBarAgentBundleIdentifier && !$0.isTerminated
-              }),
-              let application = AXHelpers.application(for: agent),
-              let extrasMenuBar = AXHelpers.extrasMenuBar(for: application)
-        else { return nil }
-        for child in AXHelpers.children(for: extrasMenuBar) {
-            for candidate in [child] + AXHelpers.children(for: child)
-                where AXHelpers.identifier(for: candidate) == systemClockIdentifier
-            {
-                guard let frame = AXHelpers.frame(for: candidate), frame.contains(point) else { return nil }
+        guard AXHelpers.isProcessTrusted(), var candidate = AXHelpers.element(at: point) else { return nil }
+        for _ in 0 ..< 3 {
+            if AXHelpers.identifier(for: candidate) == systemClockIdentifier {
+                guard let pid = AXHelpers.pid(for: candidate),
+                      NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == menuBarAgentBundleIdentifier
+                else { return nil }
                 return candidate
             }
+            guard let parent = AXHelpers.parent(of: candidate) else { return nil }
+            candidate = parent
         }
         return nil
     }
