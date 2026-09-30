@@ -426,7 +426,9 @@ public protocol MenuBarBackend: Sendable {
     /// on the clock or nothing blocks it, so the native click proceeds.
     func pressSystemClockIfConcealed(
         at point: MenuBarPoint,
-        deadlineUptimeNanoseconds: UInt64
+        deadlineUptimeNanoseconds: UInt64,
+        eventUptimeNanoseconds: UInt64,
+        pointerStamp: MenuBarPointerEventStamp
     ) async throws -> Bool
     func nativeDrag(_ transaction: MenuBarNativeDragTransaction) async throws -> MenuBarNativeDragReceipt
     func beginRevealObservation(_ item: MenuBarItemID) async throws -> MenuBarRevealObservationToken
@@ -460,7 +462,9 @@ public extension MenuBarBackend {
 
     func pressSystemClockIfConcealed(
         at _: MenuBarPoint,
-        deadlineUptimeNanoseconds _: UInt64
+        deadlineUptimeNanoseconds _: UInt64,
+        eventUptimeNanoseconds _: UInt64,
+        pointerStamp _: MenuBarPointerEventStamp
     ) async throws -> Bool {
         false
     }

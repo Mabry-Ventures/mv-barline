@@ -228,12 +228,16 @@ extension BarlineMenuService {
         /// WindowServer (top-left origin) coordinates.
         func pressSystemClockIfConcealed(
             at point: CGPoint,
-            deadlineUptimeNanoseconds: UInt64
+            deadlineUptimeNanoseconds: UInt64,
+            eventUptimeNanoseconds: UInt64,
+            pointerStamp: MenuBarPointerEventStamp
         ) async throws -> Bool {
             guard case let .boolean(result) = await send(
                 .pressSystemClockIfConcealed(
                     MenuBarPoint(x: point.x, y: point.y),
-                    deadlineUptimeNanoseconds: deadlineUptimeNanoseconds
+                    deadlineUptimeNanoseconds: deadlineUptimeNanoseconds,
+                    eventUptimeNanoseconds: eventUptimeNanoseconds,
+                    pointerStamp: pointerStamp
                 )
             ) else {
                 throw MenuBarBackendError.interrupted

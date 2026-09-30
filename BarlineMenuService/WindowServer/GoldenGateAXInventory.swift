@@ -1,5 +1,5 @@
-@preconcurrency import AXSwift
 import AppKit
+@preconcurrency import AXSwift
 import BarlineCore
 import CryptoKit
 import Foundation
@@ -48,15 +48,18 @@ enum GoldenGateAXInventory {
         initialState: MenuBarOwnerProbePolicy()
     )
     private static let cache = OSAllocatedUnfairLock(
-        initialState: (capturedAt: UInt64?.none, observations: [Observation]())
+        initialState: (completedAt: UInt64?.none, observations: [Observation]())
     )
 
     static func collect() throws -> [Observation] {
         let now = DispatchTime.now().uptimeNanoseconds
         if let cached = cache.withLock({ state -> [Observation]? in
-            guard let capturedAt = state.capturedAt,
-                  now >= capturedAt,
-                  now - capturedAt < cacheLifetimeNanoseconds
+            guard let completedAt = state.completedAt,
+                  MenuBarInventoryCachePolicy.isReusable(
+                      completedAt: completedAt,
+                      now: now,
+                      lifetimeNanoseconds: cacheLifetimeNanoseconds
+                  )
             else {
                 return nil
             }
@@ -66,8 +69,10 @@ enum GoldenGateAXInventory {
         }
 
         let observations = try collectFresh()
+        // A slow AX scan must not consume its own reuse window.
+        let completedAt = DispatchTime.now().uptimeNanoseconds
         cache.withLock { state in
-            state = (capturedAt: now, observations: observations)
+            state = (completedAt: completedAt, observations: observations)
         }
         return observations
     }
@@ -77,16 +82,18 @@ enum GoldenGateAXInventory {
     /// The system clock menu extra when it is the live hit target at `point`
     /// (top-left origin). A menu or overlay covering the clock resolves to a
     /// different element, so its click is never turned into a clock press.
-    static func systemClock(containing point: CGPoint) -> UIElement? {
-        guard AXHelpers.isProcessTrusted(), var candidate = AXHelpers.element(at: point) else { return nil }
+    static func systemClock(containing point: CGPoint, deadline: UInt64) -> UIElement? {
+        guard AXHelpers.isProcessTrusted(),
+              var candidate = AXHelpers.clockElement(at: point, deadline: deadline)
+        else { return nil }
         for _ in 0 ..< 3 {
-            if AXHelpers.identifier(for: candidate) == systemClockIdentifier {
+            if AXHelpers.clockIdentifier(for: candidate, deadline: deadline) == systemClockIdentifier {
                 guard let pid = AXHelpers.pid(for: candidate),
                       NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == menuBarAgentBundleIdentifier
                 else { return nil }
                 return candidate
             }
-            guard let parent = AXHelpers.parent(of: candidate) else { return nil }
+            guard let parent = AXHelpers.clockParent(of: candidate, deadline: deadline) else { return nil }
             candidate = parent
         }
         return nil
@@ -94,7 +101,7 @@ enum GoldenGateAXInventory {
 
     static func invalidateCache() {
         cache.withLock { state in
-            state = (capturedAt: nil, observations: [])
+            state = (completedAt: nil, observations: [])
         }
         ownerProbePolicy.withLock { $0.invalidate() }
     }

@@ -7,6 +7,9 @@ import Foundation
 
 public enum GoldenGateTiming {
     public static let clockLiftSettleNanoseconds: UInt64 = 80_000_000
+    /// Leave room inside the helper's 500ms cancellation grace. Further
+    /// activation attempts run under a revocable background recovery lease.
+    public static let clockRestoreBudget = Duration.milliseconds(250)
 
     /// Admission must leave time for the assessment assertion to settle.
     public static func admitsClockPress(now: UInt64, deadline: UInt64, beforeLift: Bool) -> Bool {

@@ -13,12 +13,16 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     )
     private var temporaryRevealLedger = TemporaryRevealLedger()
     private var appliedResolution: GoldenGateResolvedConcealment?
+    // Access is serialized by transactionGate, including worker admission.
+    private var recoveryLease = GoldenGateRecoveryLease()
+    private var recoveryTask: Task<Void, Never>?
 
     init() {
         opaqueController = BLNGoldenGateAssessmentCreate()
     }
 
     deinit {
+        recoveryTask?.cancel()
         controllerLock.lock()
         let controller = opaqueController
         opaqueController = nil
@@ -39,6 +43,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             desiredConfiguration = configuration
             do {
                 try await applyCurrentState()
+                cancelBackgroundRecovery()
             } catch {
                 desiredConfiguration = previousConfiguration
                 throw error
@@ -53,6 +58,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             let candidateLedger = temporaryRevealLedger.beginning(item)
             try await applyCurrentState(temporaryRevealLedger: candidateLedger)
             temporaryRevealLedger = candidateLedger
+            cancelBackgroundRecovery()
             logger.notice("Temporary reveal began: activeItemCount=\(candidateLedger.visibleItemIDs.count, privacy: .public)")
             return true
         }
@@ -63,6 +69,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             guard let candidateLedger = temporaryRevealLedger.ending(item) else { return }
             try await applyCurrentState(temporaryRevealLedger: candidateLedger)
             temporaryRevealLedger = candidateLedger
+            cancelBackgroundRecovery()
             logger.notice("Temporary reveal ended: activeItemCount=\(candidateLedger.visibleItemIDs.count, privacy: .public)")
         }
     }
@@ -75,6 +82,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     /// click is too old, so a native or superseded click is left alone.
     func pressSystemClockLiftingConcealment(
         deadlineUptimeNanoseconds: UInt64,
+        isCurrent: @escaping @Sendable () -> Bool,
         _ press: @escaping @Sendable () -> Bool
     ) async throws -> Bool {
         try await transactionGate.withLock { [self] in
@@ -84,74 +92,77 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
                       deadline: deadlineUptimeNanoseconds,
                       beforeLift: true
                   ),
-                  let controller = controller(createIfNeeded: false),
+                  controller(createIfNeeded: false) != nil,
                   let applied = appliedResolution,
                   !applied.concealedBundleIdentifiers.isEmpty ||
                   applied.allowedSystemItemIdentifiers != GoldenGateConcealmentPolicy.allSystemItemIdentifiers
             else { return false }
-            BLNGoldenGateAssessmentInvalidate(controller)
-            appliedResolution = nil
-            // Give MenuBarAgent a moment to leave assessment mode.
-            try? await Task.sleep(nanoseconds: GoldenGateTiming.clockLiftSettleNanoseconds)
-            // A request may expire or be cancelled while assessment settles.
-            // Once lifted, always restore concealment, including this path.
-            let pressed = !Task.isCancelled && GoldenGateTiming.admitsClockPress(
-                now: DispatchTime.now().uptimeNanoseconds,
+            let pressed = try await GoldenGateClockTransaction.run(
                 deadline: deadlineUptimeNanoseconds,
-                beforeLift: false
-            ) && press()
-            // Let Notification Center begin presenting before concealment returns.
-            if pressed {
-                try? await Task.sleep(for: .milliseconds(150))
-            }
-            // Restoration is mandatory even when the requesting task was
-            // cancelled. Keep the transaction gate held until it completes.
-            try await Task.detached { [self] in
-                try await reapplyAfterLift()
-            }.value
+                now: { DispatchTime.now().uptimeNanoseconds },
+                isCurrent: isCurrent,
+                lift: { [self] in
+                    if let controller = controller(createIfNeeded: false) {
+                        BLNGoldenGateAssessmentInvalidate(controller)
+                    }
+                    appliedResolution = nil
+                },
+                press: press,
+                restore: { [self] in try await reapplyAfterLift() }
+            )
             logger.notice("Clock pressed with concealment lifted: pressed=\(pressed, privacy: .public)")
             return pressed
         }
     }
 
-    /// The lift must never become the authoritative state. Retry with backoff;
-    /// if every attempt fails, keep retrying in the background until the
-    /// desired state is applied or replaced by a newer configuration.
+    /// Bound cooperative activation work. The synchronous native Begin/Commit
+    /// calls cannot be interrupted here; session cancellation remains the
+    /// outer watchdog if the operating system stops responding.
+    /// On failure, transfer remaining work to a lifecycle-owned worker instead
+    /// of holding the foreground queue through four three-second attempts.
     private func reapplyAfterLift() async throws {
-        for delay in [0, 100, 300, 700] {
-            if delay > 0 {
-                try? await Task.sleep(for: .milliseconds(delay))
-            }
-            do {
-                try await applyCurrentState()
-                return
-            } catch {
-                logger.error("Concealment re-apply after the clock press failed; retrying")
-            }
+        do {
+            try await applyCurrentState(timeout: GoldenGateTiming.clockRestoreBudget)
+            cancelBackgroundRecovery()
+        } catch {
+            logger.error("Concealment re-apply after the clock press failed; scheduling recovery")
+            scheduleBackgroundReapply()
+            throw MenuBarBackendError.mutationRecoveryFailed
         }
-        scheduleBackgroundReapply()
-        throw MenuBarBackendError.mutationRecoveryFailed
     }
 
     private func scheduleBackgroundReapply() {
-        Task.detached { [self] in
+        cancelBackgroundRecovery()
+        let lease = recoveryLease.begin()
+        recoveryTask = Task.detached { [weak self] in
             for _ in 0 ..< 30 {
-                try? await Task.sleep(for: .seconds(1))
-                let done = await (try? transactionGate.withLock { [self] () async throws -> Bool in
-                    // A newer configure/reveal already applied state.
-                    if appliedResolution != nil {
+                do {
+                    try await Task.sleep(for: .seconds(1))
+                    guard let self else { return }
+                    let done = try await transactionGate.withLock { [self] in
+                        guard recoveryLease.contains(lease), !Task.isCancelled else { return true }
+                        try await applyCurrentState()
+                        recoveryLease.invalidate()
+                        recoveryTask = nil
                         return true
                     }
-                    try await applyCurrentState()
-                    return true
-                }) ?? false
-                if done {
-                    logger.notice("Concealment restored after a failed clock-press re-apply")
-                    return
+                    if done {
+                        return
+                    }
+                } catch {
+                    if Task.isCancelled {
+                        return
+                    }
                 }
             }
-            logger.error("Concealment could not be restored after the clock press")
+            self?.logger.error("Concealment could not be restored after the clock press")
         }
+    }
+
+    private func cancelBackgroundRecovery() {
+        recoveryLease.invalidate()
+        recoveryTask?.cancel()
+        recoveryTask = nil
     }
 
     func invalidate() async {
@@ -160,17 +171,20 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         // caller's cancellation state.
         await Task.detached { [self] in
             try? await transactionGate.withLock { [self] in
+                cancelBackgroundRecovery()
                 if let controller = controller(createIfNeeded: false) {
                     BLNGoldenGateAssessmentInvalidate(controller)
                 }
                 temporaryRevealLedger = TemporaryRevealLedger()
                 appliedResolution = nil
+                desiredConfiguration = MenuBarConcealmentConfiguration(visibleItemIDs: [], concealedItemIDs: [])
             }
         }.value
     }
 
     private func applyCurrentState(
-        temporaryRevealLedger: TemporaryRevealLedger? = nil
+        temporaryRevealLedger: TemporaryRevealLedger? = nil,
+        timeout: Duration = .seconds(3)
     ) async throws {
         guard let opaqueController = controller() else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
@@ -202,6 +216,8 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         }
         let bundles = resolved.concealedBundleIdentifiers.sorted() as CFArray
         let systemItems = resolved.allowedSystemItemIdentifiers.sorted().map(NSNumber.init) as CFArray
+        // Synchronous bridge setup must consume the activation budget too.
+        let deadline = ContinuousClock.now.advanced(by: timeout)
         let transaction = BLNGoldenGateAssessmentBegin(opaqueController, bundles, systemItems)
         guard transaction != 0 else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
@@ -213,7 +229,6 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             }
         }
         do {
-            let deadline = ContinuousClock.now.advanced(by: .seconds(3))
             while ContinuousClock.now < deadline {
                 try Task.checkCancellation()
                 switch BLNGoldenGateAssessmentActivationState(opaqueController, transaction) {

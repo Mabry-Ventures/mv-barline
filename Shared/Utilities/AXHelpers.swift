@@ -160,6 +160,88 @@ enum AXHelpers {
         run(on: element.element) { (try? element.performAction(.press)) != nil }
     }
 
+    /// The clock bridge must not inherit the system's multi-second AX timeout.
+    /// Each operation is admitted against the remaining click budget. A timeout
+    /// set on a system-wide handle is process-global, so scope that query on the
+    /// shared barrier and restore the default before admitting other AX work.
+    static func clockElement(at point: CGPoint, deadline: UInt64) -> UIElement? {
+        systemRead(deadline: deadline, maximumTimeout: 0.05) { system in
+            var hit: AXUIElement?
+            guard AXUIElementCopyElementAtPosition(
+                system.element, Float(point.x), Float(point.y), &hit
+            ) == .success, let hit else { return nil }
+            return UIElement(hit)
+        }
+    }
+
+    static func focusedElement() -> AXUIElement? {
+        systemRead(maximumTimeout: 0.05) { system in
+            var focused: CFTypeRef?
+            guard AXUIElementCopyAttributeValue(
+                system.element, kAXFocusedUIElementAttribute as CFString, &focused
+            ) == .success, let focused, CFGetTypeID(focused) == AXUIElementGetTypeID()
+            else { return nil }
+            return unsafeDowncast(focused, to: AXUIElement.self)
+        }
+    }
+
+    private static func systemRead<T>(
+        deadline: UInt64 = .max,
+        maximumTimeout: Double,
+        _ operation: (UIElement) -> T?
+    ) -> T? {
+        queue.sync(flags: .barrier) {
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard !Task.isCancelled, now < deadline else { return nil }
+            let system = UIElement(AXUIElementCreateSystemWide())
+            let timeout = Float(min(Double(deadline - now) / 1_000_000_000, maximumTimeout))
+            guard AXUIElementSetMessagingTimeout(system.element, timeout) == .success else { return nil }
+            defer { _ = AXUIElementSetMessagingTimeout(system.element, 0) }
+            let value = operation(system)
+            return DispatchTime.now().uptimeNanoseconds < deadline ? value : nil
+        }
+    }
+
+    static func clockIdentifier(for element: UIElement, deadline: UInt64) -> String? {
+        clockRead(on: element, deadline: deadline) { try? element.attribute(.identifier) }
+    }
+
+    static func clockParent(of element: UIElement, deadline: UInt64) -> UIElement? {
+        clockRead(on: element, deadline: deadline) { try? element.attribute(.parent) }
+    }
+
+    static func pressClock(
+        _ element: UIElement,
+        deadline: UInt64,
+        isCurrent: () -> Bool
+    ) -> Bool {
+        clockRead(on: element, deadline: deadline, rejectLateResult: false) {
+            // Resolution may have consumed the remaining budget or a newer
+            // physical click may have arrived. Check at the action, not before
+            // the potentially blocking live hit-test.
+            guard isCurrent(), !Task.isCancelled,
+                  DispatchTime.now().uptimeNanoseconds < deadline else { return false }
+            return (try? element.performAction(.press)) != nil
+        } ?? false
+    }
+
+    private static func clockRead<T>(
+        on element: UIElement,
+        deadline: UInt64,
+        rejectLateResult: Bool = true,
+        _ operation: () -> T?
+    ) -> T? {
+        run(on: element.element) {
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard !Task.isCancelled, now < deadline else { return nil }
+            let timeout = Float(min(Double(deadline - now) / 1_000_000_000, 0.05))
+            guard AXUIElementSetMessagingTimeout(element.element, timeout) == .success else { return nil }
+            let value = operation()
+            guard !rejectLateResult || DispatchTime.now().uptimeNanoseconds < deadline else { return nil }
+            return value
+        }
+    }
+
     static func isEnabled(_ element: UIElement) -> Bool {
         run(on: element.element) { try? element.attribute(.enabled) } ?? false
     }

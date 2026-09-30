@@ -3,13 +3,32 @@
 //  Barline
 //
 
-import BarlineCore
 import AppKit
+import BarlineCore
 import CoreGraphics
 import OSLog
 
 /// A namespace for mouse helper operations.
 enum MouseHelpers {
+    /// Read-only Quartz witness; the helper independently observes later
+    /// clicks even while the app's serial request queue is occupied.
+    static var pointerEventStamp: MenuBarPointerEventStamp {
+        MenuBarPointerEventStamp(
+            leftDown: CGEventSource.counterForEventType(.combinedSessionState, eventType: .leftMouseDown),
+            rightDown: CGEventSource.counterForEventType(.combinedSessionState, eventType: .rightMouseDown),
+            otherDown: CGEventSource.counterForEventType(.combinedSessionState, eventType: .otherMouseDown)
+        )
+    }
+
+    static var latestPointerDownAgeNanoseconds: UInt64 {
+        let seconds = [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown].map {
+            CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0)
+        }.min() ?? 0
+        let nanoseconds = seconds * 1_000_000_000
+        guard nanoseconds.isFinite, nanoseconds >= 0 else { return 0 }
+        return nanoseconds < Double(UInt64.max) ? UInt64(nanoseconds) : .max
+    }
+
     /// Device and toggle flags such as Numeric Pad and Caps Lock remain set
     /// while no key is physically held. Only modifiers that can change a menu
     /// bar pointer action should keep an item transaction waiting.

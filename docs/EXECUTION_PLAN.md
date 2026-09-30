@@ -1,5 +1,12 @@
 # Barline execution plan
 
+## Codex macOS 27 takeover — September 30, 2026
+
+The Claude clock/concealment work is being hardened in an isolated worktree;
+the public release and Claude's checkout remain unchanged. Candidate 1.0.66
+(build 143) is not distribution-qualified. See
+[the takeover findings and qualification contract](MACOS27_TAKEOVER.md).
+
 ## Barline 1.0.65 published — September 27, 2026
 
 Barline 1.0.65 (build 142), tag `v1.0.65` at `887d335`, is the public latest

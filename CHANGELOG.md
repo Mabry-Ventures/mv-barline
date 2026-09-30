@@ -7,6 +7,15 @@
 - Clicking the clock opens Notification Center again while Barline is hiding
   items. macOS blocks the clock during Barline's native hiding, so Barline
   briefly lifts it to open the panel and hides your items again straight away.
+- Delayed or superseded clock clicks expire against their original input time.
+  Concealment restoration survives cancellation, and obsolete recovery work
+  cannot reapply an old layout after a restart or replacement.
+- Inventory reuse starts when collection completes, preventing a slow scan
+  from immediately triggering another scan.
+- Short clock and focused-element Accessibility queries no longer leave the
+  helper's process-wide messaging timeout changed.
+
+These changes are an internal qualification candidate, not a published release.
 
 ## 1.0.65 (build 142) — September 27, 2026
 

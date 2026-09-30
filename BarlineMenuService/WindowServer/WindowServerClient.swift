@@ -410,13 +410,13 @@ final class WindowServerClient: @unchecked Sendable {
                 placement = .right
             }
             let target = classified[targetIndex].window
-            let anchorKind: String = switch target.title {
+            let anchorKind = switch target.title {
             case "Barline.ControlItem.Hidden": "hidden_control"
             case "Barline.ControlItem.AlwaysHidden": "always_hidden_control"
             case "Barline.ControlItem.Visible": "visible_control"
             default: "ordinary"
             }
-            let side: String = switch placement {
+            let side = switch placement {
             case .left: "left"
             case .right: "right"
             }
@@ -1059,13 +1059,7 @@ final class WindowServerClient: @unchecked Sendable {
     }
 
     private func focusedTransientInterfaceIsVisible() -> Bool {
-        let system = AXUIElementCreateSystemWide()
-        AXUIElementSetMessagingTimeout(system, 0.05)
-        var focused: CFTypeRef?
-        guard AXUIElementCopyAttributeValue(system, kAXFocusedUIElementAttribute as CFString, &focused) == .success,
-              let focused, CFGetTypeID(focused) == AXUIElementGetTypeID()
-        else { return false }
-        var element = unsafeDowncast(focused, to: AXUIElement.self)
+        guard var element = AXHelpers.focusedElement() else { return false }
         for _ in 0 ..< 6 {
             AXUIElementSetMessagingTimeout(element, 0.05)
             var role: CFTypeRef?

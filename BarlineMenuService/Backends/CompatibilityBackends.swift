@@ -231,16 +231,46 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
 
     func pressSystemClockIfConcealed(
         at point: MenuBarPoint,
-        deadlineUptimeNanoseconds: UInt64
+        deadlineUptimeNanoseconds: UInt64,
+        eventUptimeNanoseconds: UInt64,
+        pointerStamp: MenuBarPointerEventStamp
     ) async throws -> Bool {
         guard revealObservations.canAdmitOperations else { throw MenuBarBackendError.interrupted }
         guard DispatchTime.now().uptimeNanoseconds < deadlineUptimeNanoseconds else { return false }
+        let isCurrent: @Sendable () -> Bool = {
+            let sampleStartedAt = DispatchTime.now().uptimeNanoseconds
+            let seconds = [CGEventType.leftMouseDown, .rightMouseDown, .otherMouseDown].map {
+                CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0)
+            }.min() ?? 0
+            let sampleCompletedAt = DispatchTime.now().uptimeNanoseconds
+            let nanoseconds = seconds * 1_000_000_000
+            guard nanoseconds.isFinite, nanoseconds >= 0 else { return false }
+            let lastDownAge = nanoseconds < Double(UInt64.max) ? UInt64(nanoseconds) : UInt64.max
+            guard GoldenGateClockInputPolicy.isCurrent(
+                eventUptimeNanoseconds: eventUptimeNanoseconds,
+                sampleStartedAt: sampleStartedAt,
+                sampleCompletedAt: sampleCompletedAt,
+                latestDownAgeNanoseconds: lastDownAge
+            ) else { return false }
+            return pointerStamp == MenuBarPointerEventStamp(
+                leftDown: CGEventSource.counterForEventType(.combinedSessionState, eventType: .leftMouseDown),
+                rightDown: CGEventSource.counterForEventType(.combinedSessionState, eventType: .rightMouseDown),
+                otherDown: CGEventSource.counterForEventType(.combinedSessionState, eventType: .otherMouseDown)
+            )
+        }
+        guard isCurrent() else { return false }
         let location = CGPoint(x: point.x, y: point.y)
-        guard GoldenGateAXInventory.systemClock(containing: location) != nil else { return false }
+        guard GoldenGateAXInventory.systemClock(
+            containing: location, deadline: deadlineUptimeNanoseconds
+        ) != nil else { return false }
         return try await concealmentController.pressSystemClockLiftingConcealment(
-            deadlineUptimeNanoseconds: deadlineUptimeNanoseconds
+            deadlineUptimeNanoseconds: deadlineUptimeNanoseconds,
+            isCurrent: isCurrent
         ) {
-            GoldenGateAXInventory.systemClock(containing: location).map(AXHelpers.press) ?? false
+            guard let clock = GoldenGateAXInventory.systemClock(
+                containing: location, deadline: deadlineUptimeNanoseconds
+            ) else { return false }
+            return AXHelpers.pressClock(clock, deadline: deadlineUptimeNanoseconds, isCurrent: isCurrent)
         }
     }
 

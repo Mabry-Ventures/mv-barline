@@ -331,8 +331,11 @@ actor GoldenGateAXSnapshotProvider {
         if !forceRefresh,
            let cachedAt,
            let cachedSnapshot,
-           now >= cachedAt,
-           now - cachedAt < GoldenGateTiming.snapshotCacheLifetimeNanoseconds
+           MenuBarInventoryCachePolicy.isReusable(
+               completedAt: cachedAt,
+               now: now,
+               lifetimeNanoseconds: GoldenGateTiming.snapshotCacheLifetimeNanoseconds
+           )
         {
             // A cache hit is still a new backend observation. Reusing the
             // prior generation violates the coordinator's monotonic snapshot
@@ -464,7 +467,9 @@ actor GoldenGateAXSnapshotProvider {
                 commitRetainedInventory(prepared)
             }
         }
-        cachedAt = now
+        // Cache reuse starts after the successful scan and projection finish;
+        // the snapshot's capturedAt still describes the observation itself.
+        cachedAt = DispatchTime.now().uptimeNanoseconds
         cachedSnapshot = result
         Self.updateSnapshotDiagnostic(
             activeDisplayCount: activeDisplays.count,

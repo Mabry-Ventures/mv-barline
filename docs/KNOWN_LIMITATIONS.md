@@ -1,7 +1,9 @@
 # Known limitations and release status
 
-This page records the published Barline 1.0.31 boundary. Release evidence is
-bound to its exact source and signed binary; it is not blanket approval for
+The public latest release is Barline 1.0.65 (build 142), published September 27,
+2026 at `887d335`. See [execution history](EXECUTION_PLAN.md). The clock repair
+in 1.0.66 (build 143) is an internal candidate, not a qualified release. Evidence
+is bound to exact source and signed binary; it is not blanket approval for
 later changes.
 
 ## Compatibility
@@ -29,10 +31,16 @@ later changes.
   evidence on a macOS 26 host).
 
 - On macOS 27, Barline hides items with a system Assessment Mode assertion,
-  which stops the clock from opening Notification Center. Barline lifts the
-  assertion for about a quarter of a second to open it, so hidden items can
-  briefly appear. Effects of the assertion on volume and brightness indicators
-  have not been checked.
+  which stops the clock from opening Notification Center. The unpublished
+  clock repair lifts the assertion before pressing the clock, so hidden items
+  can briefly appear. Native activation latency is not a hard quarter-second
+  guarantee. Volume, brightness, capture indicators, Globe+N, multiple displays,
+  and every restoration failure mode need separate qualification.
+
+- Individual AX operations have timeouts, but the complete inventory crawl has
+  no aggregate deadline. Large or unresponsive inventories still need explicit
+  responsiveness qualification. Starting cache reuse at completion avoids
+  immediate redundant scans; it does not solve an unbounded first scan.
 
 ## Features in qualification
 
@@ -52,6 +60,15 @@ on-device interpretation and Spotlight behavior have separate availability and
 validation requirements; see [search architecture](SEARCH_AND_APPLE_INTELLIGENCE.md).
 
 ## Current reliability and distribution boundary
+
+The 1.0.65 release evidence is listed in [execution history](EXECUTION_PLAN.md).
+No macOS 26 runtime is currently available for the takeover candidate. Local
+Xcode 27 builds and pure tests on macOS 27 cannot certify macOS 26 behavior.
+The September 30 notarization preflight found the stored `barline-notary`
+profile, but Apple rejected authentication with HTTP 401. No new candidate is
+notarized or distribution-ready on that evidence.
+
+### Historical 1.0.31 evidence
 
 Barline 1.0.31 (build 108) was published on September 17, 2026. Tag `v1.0.31`
 points to source `0e6ddd1823baa07247b5f7efdd7baf2114c95987`. Its exact

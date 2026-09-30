@@ -194,7 +194,11 @@ extension HIDEventManager {
         let exactButtonHit = control.containsEventLocation(click.unflippedLocation)
         let hitWindowNumber = NSWindow.windowNumber(at: click.unflippedLocation, belowWindowWithWindowNumber: 0)
         let ownsHitWindow = control.ownsWindowNumber(hitWindowNumber)
-        let hostedOwnershipIsPossible: Bool = if #available(macOS 27.0, *) { false } else { true }
+        let hostedOwnershipIsPossible = if #available(macOS 27.0, *) {
+            false
+        } else {
+            true
+        }
         guard
             isMouseInsideMenuBar(
                 appState: appState,
@@ -266,20 +270,35 @@ extension HIDEventManager {
               !MouseHelpers.hasActivePointerModifiers(event.modifierFlags),
               // The clock may be on any display's menu bar, not only the main one.
               let clickScreen = NSScreen.screens.first(where: { $0.frame.contains(click.unflippedLocation) }),
-              isMouseInsideMenuBar(appState: appState, screen: clickScreen, location: click.unflippedLocation),
+              // Do not infer this display's visibility from a control item on
+              // another display. The helper's live clock hit-test is authority.
+              click.unflippedLocation.y >= clickScreen.frame.maxY - max(40, clickScreen.safeAreaInsets.top),
               appState.menuBarManager.controlItem(withName: .visible)?
-                  .containsEventLocation(click.unflippedLocation) != true
+              .containsEventLocation(click.unflippedLocation) != true
         else { return }
         let location = click.location
         // Bound the request to this click: a busy helper must not open or close
         // Notification Center for a stale or superseded click.
-        let deadline = DispatchTime.now().uptimeNanoseconds + 600_000_000
+        let eventUptime = click.timestamp
+        let sampleStartedAt = DispatchTime.now().uptimeNanoseconds
+        let lastDownAge = MouseHelpers.latestPointerDownAgeNanoseconds
+        let sampleCompletedAt = DispatchTime.now().uptimeNanoseconds
+        guard GoldenGateClockInputPolicy.isCurrent(
+            eventUptimeNanoseconds: eventUptime,
+            sampleStartedAt: sampleStartedAt,
+            sampleCompletedAt: sampleCompletedAt,
+            latestDownAgeNanoseconds: lastDownAge
+        ) else { return }
+        let deadline = GoldenGateClockInputPolicy.deadline(eventUptimeNanoseconds: eventUptime)
         let sequence = mouseDownSequence
+        let pointerStamp = MouseHelpers.pointerEventStamp
         Task {
             guard isEnabled, sequence == mouseDownSequence else { return }
             _ = try? await BarlineMenuService.Connection.shared.pressSystemClockIfConcealed(
                 at: location,
-                deadlineUptimeNanoseconds: deadline
+                deadlineUptimeNanoseconds: deadline,
+                eventUptimeNanoseconds: eventUptime,
+                pointerStamp: pointerStamp
             )
         }
     }
