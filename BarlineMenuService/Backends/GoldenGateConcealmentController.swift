@@ -78,7 +78,12 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         _ press: @escaping @Sendable () -> Bool
     ) async throws -> Bool {
         try await transactionGate.withLock { [self] in
-            guard DispatchTime.now().uptimeNanoseconds < deadlineUptimeNanoseconds,
+            guard !Task.isCancelled,
+                  GoldenGateTiming.admitsClockPress(
+                      now: DispatchTime.now().uptimeNanoseconds,
+                      deadline: deadlineUptimeNanoseconds,
+                      beforeLift: true
+                  ),
                   let controller = controller(createIfNeeded: false),
                   let applied = appliedResolution,
                   !applied.concealedBundleIdentifiers.isEmpty ||
@@ -87,11 +92,23 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             BLNGoldenGateAssessmentInvalidate(controller)
             appliedResolution = nil
             // Give MenuBarAgent a moment to leave assessment mode.
-            try? await Task.sleep(for: .milliseconds(80))
-            let pressed = press()
+            try? await Task.sleep(nanoseconds: GoldenGateTiming.clockLiftSettleNanoseconds)
+            // A request may expire or be cancelled while assessment settles.
+            // Once lifted, always restore concealment, including this path.
+            let pressed = !Task.isCancelled && GoldenGateTiming.admitsClockPress(
+                now: DispatchTime.now().uptimeNanoseconds,
+                deadline: deadlineUptimeNanoseconds,
+                beforeLift: false
+            ) && press()
             // Let Notification Center begin presenting before concealment returns.
-            try? await Task.sleep(for: .milliseconds(150))
-            try await reapplyAfterLift()
+            if pressed {
+                try? await Task.sleep(for: .milliseconds(150))
+            }
+            // Restoration is mandatory even when the requesting task was
+            // cancelled. Keep the transaction gate held until it completes.
+            try await Task.detached { [self] in
+                try await reapplyAfterLift()
+            }.value
             logger.notice("Clock pressed with concealment lifted: pressed=\(pressed, privacy: .public)")
             return pressed
         }
@@ -102,7 +119,9 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     /// desired state is applied or replaced by a newer configuration.
     private func reapplyAfterLift() async throws {
         for delay in [0, 100, 300, 700] {
-            if delay > 0 { try? await Task.sleep(for: .milliseconds(delay)) }
+            if delay > 0 {
+                try? await Task.sleep(for: .milliseconds(delay))
+            }
             do {
                 try await applyCurrentState()
                 return
@@ -118,9 +137,11 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         Task.detached { [self] in
             for _ in 0 ..< 30 {
                 try? await Task.sleep(for: .seconds(1))
-                let done = (try? await transactionGate.withLock { [self] () async throws -> Bool in
+                let done = await (try? transactionGate.withLock { [self] () async throws -> Bool in
                     // A newer configure/reveal already applied state.
-                    if appliedResolution != nil { return true }
+                    if appliedResolution != nil {
+                        return true
+                    }
                     try await applyCurrentState()
                     return true
                 }) ?? false
@@ -165,8 +186,10 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             configuration,
             barlineBundleIdentifier: "com.mabryventures.Barline"
         )
+        let desiredVisibleCount = desiredConfiguration.visibleItemIDs.count
+        let desiredHiddenCount = desiredConfiguration.concealedItemIDs.count
         logger.notice(
-            "Concealment state: desiredVisible=\(self.desiredConfiguration.visibleItemIDs.count, privacy: .public) desiredHidden=\(self.desiredConfiguration.concealedItemIDs.count, privacy: .public) temporaryVisible=\(temporarilyVisible.count, privacy: .public) concealedBundles=\(resolved.concealedBundleIdentifiers.count, privacy: .public)"
+            "Concealment state: desiredVisible=\(desiredVisibleCount, privacy: .public) desiredHidden=\(desiredHiddenCount, privacy: .public) temporaryVisible=\(temporarilyVisible.count, privacy: .public) concealedBundles=\(resolved.concealedBundleIdentifiers.count, privacy: .public)"
         )
         // Assessment-mode assertions are stateful. Replacing a healthy
         // assertion with an identical one on every shelf click can be rejected

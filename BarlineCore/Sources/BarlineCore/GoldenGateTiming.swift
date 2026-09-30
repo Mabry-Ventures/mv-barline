@@ -6,6 +6,14 @@
 import Foundation
 
 public enum GoldenGateTiming {
+    public static let clockLiftSettleNanoseconds: UInt64 = 80_000_000
+
+    /// Admission must leave time for the assessment assertion to settle.
+    public static func admitsClockPress(now: UInt64, deadline: UInt64, beforeLift: Bool) -> Bool {
+        guard now < deadline else { return false }
+        return !beforeLift || deadline - now > clockLiftSettleNanoseconds
+    }
+
     public static let snapshotCacheLifetimeMilliseconds: Int64 = 100
     public static let concealmentSyncDebounceBufferMilliseconds: Int64 = 25
     public static let snapshotCacheLifetimeNanoseconds = UInt64(snapshotCacheLifetimeMilliseconds) * 1_000_000

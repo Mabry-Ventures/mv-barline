@@ -70,6 +70,17 @@ private actor ManualDebounceSleeper {
 
 @Suite("Golden Gate timing")
 struct GoldenGateTimingTests {
+    @Test("Clock admission reserves the settle window and rejects expired presses")
+    func clockAdmission() {
+        let settle = GoldenGateTiming.clockLiftSettleNanoseconds
+        #expect(!GoldenGateTiming.admitsClockPress(now: 100, deadline: 100, beforeLift: false))
+        #expect(!GoldenGateTiming.admitsClockPress(now: 101, deadline: 100, beforeLift: false))
+        #expect(!GoldenGateTiming.admitsClockPress(now: 100, deadline: 100 + settle, beforeLift: true))
+        #expect(GoldenGateTiming.admitsClockPress(now: 100, deadline: 101 + settle, beforeLift: true))
+        #expect(GoldenGateTiming.admitsClockPress(now: 100, deadline: 101, beforeLift: false))
+        #expect(GoldenGateTiming.admitsClockPress(now: UInt64.max - settle - 1, deadline: UInt64.max, beforeLift: true))
+    }
+
     @Test("Concealment synchronization starts outside the snapshot cache window")
     func debounceExceedsSnapshotCacheLifetime() {
         #expect(GoldenGateTiming.concealmentSyncDebounceBufferMilliseconds > 0)
