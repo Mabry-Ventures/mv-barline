@@ -4,6 +4,25 @@
 //
 
 public enum MenuBarClickArbitrationPolicy {
+    /// An asynchronous hit test describes the current window stack, not the
+    /// stack that received mouse-down. Never reinterpret a dismissed popup's
+    /// click as a new empty-space request or carry it into a newer presentation.
+    public static func canCommitDeferredEmptySpaceClick(
+        eventAge: Double,
+        isCurrentInput: Bool,
+        isCurrentPresentation: Bool,
+        monitoringEnabled: Bool,
+        featureEnabled: Bool,
+        nativeInterfaceActive: Bool,
+        hitWindowAtMouseDown: Int,
+        hitWindowAtCommit: Int
+    ) -> Bool {
+        eventAge.isFinite && (0 ... 0.5).contains(eventAge) &&
+            isCurrentInput && isCurrentPresentation && monitoringEnabled && featureEnabled &&
+            !nativeInterfaceActive && hitWindowAtMouseDown > 0 &&
+            hitWindowAtMouseDown == hitWindowAtCommit
+    }
+
     /// Stretching layout separators occupy window geometry but are not buttons.
     public static func isLayoutSeparator(title: String?) -> Bool {
         title == "Barline.ControlItem.Hidden" || title == "Barline.ControlItem.AlwaysHidden"

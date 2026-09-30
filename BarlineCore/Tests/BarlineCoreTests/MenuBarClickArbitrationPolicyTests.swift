@@ -142,4 +142,76 @@ struct MenuBarClickArbitrationPolicyTests {
             )
         )
     }
+
+    @Test("A fresh deferred gap click commits against the same positive window", arguments: [0.0, 0.125, 0.5])
+    func freshDeferredGapClick(_ eventAge: Double) {
+        #expect(canCommitDeferredGapClick(eventAge: eventAge))
+    }
+
+    @Test("Deferred gap clicks reject expired, negative, and nonfinite ages", arguments: [
+        -Double.leastNonzeroMagnitude,
+        -1.0,
+        Double(0.5).nextUp,
+        Double.infinity,
+        -Double.infinity,
+        Double.nan,
+    ])
+    func invalidDeferredClickAge(_ eventAge: Double) {
+        #expect(canCommitDeferredGapClick(eventAge: eventAge) == false)
+    }
+
+    @Test("A replaced or absent hit window cannot commit a deferred gap click")
+    func deferredGapClickRequiresSamePositiveWindow() {
+        for (mouseDownWindow, commitWindow) in [
+            (41, 42), (0, 41), (41, 0), (0, 0), (-1, 41), (41, -1), (-1, -1),
+        ] {
+            #expect(canCommitDeferredGapClick(
+                hitWindowAtMouseDown: mouseDownWindow,
+                hitWindowAtCommit: commitWindow
+            ) == false)
+        }
+    }
+
+    @Test("A superseded click cannot commit a previously observed gap")
+    func supersededDeferredGapClick() {
+        #expect(canCommitDeferredGapClick(isCurrentInput: false) == false)
+    }
+
+    @Test("A presentation epoch change invalidates a deferred gap click")
+    func changedPresentationInvalidatesDeferredGapClick() {
+        #expect(canCommitDeferredGapClick(isCurrentPresentation: false) == false)
+    }
+
+    @Test("Disabling monitoring or the feature invalidates a deferred gap click")
+    func disabledDeferredGapClick() {
+        #expect(canCommitDeferredGapClick(monitoringEnabled: false) == false)
+        #expect(canCommitDeferredGapClick(featureEnabled: false) == false)
+    }
+
+    @Test("An active native interface prevents a deferred gap click from committing")
+    func nativeInterfaceOwnsDeferredGapClick() {
+        #expect(canCommitDeferredGapClick(nativeInterfaceActive: true) == false)
+    }
+
+    private func canCommitDeferredGapClick(
+        eventAge: Double = 0.125,
+        isCurrentInput: Bool = true,
+        isCurrentPresentation: Bool = true,
+        monitoringEnabled: Bool = true,
+        featureEnabled: Bool = true,
+        nativeInterfaceActive: Bool = false,
+        hitWindowAtMouseDown: Int = 41,
+        hitWindowAtCommit: Int = 41
+    ) -> Bool {
+        MenuBarClickArbitrationPolicy.canCommitDeferredEmptySpaceClick(
+            eventAge: eventAge,
+            isCurrentInput: isCurrentInput,
+            isCurrentPresentation: isCurrentPresentation,
+            monitoringEnabled: monitoringEnabled,
+            featureEnabled: featureEnabled,
+            nativeInterfaceActive: nativeInterfaceActive,
+            hitWindowAtMouseDown: hitWindowAtMouseDown,
+            hitWindowAtCommit: hitWindowAtCommit
+        )
+    }
 }

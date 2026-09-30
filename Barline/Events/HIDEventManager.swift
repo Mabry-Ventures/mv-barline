@@ -316,6 +316,7 @@ extension HIDEventManager {
         )
         guard
             appState.settings.general.showOnClick,
+            !appState.itemManager.hasActiveNativeInterface,
             let click = event.cgEvent,
             isMouseInsideEmptyMenuBarSpace(
                 appState: appState,
@@ -330,16 +331,28 @@ extension HIDEventManager {
         }
 
         let clickLocation = click.location
+        let appKitLocation = click.unflippedLocation
+        let hitWindowAtMouseDown = NSWindow.windowNumber(at: appKitLocation, belowWindowWithWindowNumber: 0)
+        guard hitWindowAtMouseDown > 0 else { return }
         let clickModifiers = event.modifierFlags
         let requestSequence = mouseDownSequence
+        let timestamp = event.timestamp
+        let presentationLease = shelf.dismissalLease
         Task {
             // A cached gap is only a candidate. System status items may have
             // moved since the last snapshot; failed lookup is not empty-space proof.
             guard let context = try? await BarlineMenuService.Connection.shared.pointContext(at: clickLocation),
                   !context.isInsideMenuBarItem,
-                  isEnabled,
-                  appState.settings.general.showOnClick,
-                  requestSequence == mouseDownSequence
+                  MenuBarClickArbitrationPolicy.canCommitDeferredEmptySpaceClick(
+                      eventAge: ProcessInfo.processInfo.systemUptime - timestamp,
+                      isCurrentInput: requestSequence == mouseDownSequence,
+                      isCurrentPresentation: shelf.ownsDismissal(presentationLease),
+                      monitoringEnabled: isEnabled,
+                      featureEnabled: appState.settings.general.showOnClick,
+                      nativeInterfaceActive: appState.itemManager.hasActiveNativeInterface,
+                      hitWindowAtMouseDown: hitWindowAtMouseDown,
+                      hitWindowAtCommit: NSWindow.windowNumber(at: appKitLocation, belowWindowWithWindowNumber: 0)
+                  )
             else { return }
             if clickModifiers == .control {
                 handleSecondaryContextMenu(appState: appState, screen: screen)

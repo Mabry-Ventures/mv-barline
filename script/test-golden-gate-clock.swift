@@ -176,24 +176,36 @@ private enum GoldenGateClockJourney {
     static func main() {
         NSApplication.shared.setActivationPolicy(.accessory)
         let environment = ProcessInfo.processInfo.environment
+        let structuralDiagnostic = environment["BARLINE_CLOCK_STRUCTURAL_DIAGNOSTIC"] == "1"
         var receipt: [String: Any] = [
             "schemaVersion": 1, "journey": "golden-gate-clock-hid",
             "osVersion": ProcessInfo.processInfo.operatingSystemVersionString,
             "notarizationQualified": false,
             "inputPath": "marker-correlated-synthetic-hid-explicit-uptime",
             "recordedAt": ISO8601DateFormatter().string(from: Date()),
+            // AX structure alone cannot establish panel visibility, even when
+            // its count is zero. A diagnostic never becomes release signoff.
+            "initialClosedVerified": false,
+            "notificationCenterVisibilityQualified": false,
+            "structuralDiagnostic": structuralDiagnostic,
         ]
+        let originalPointer = CGEvent(source: nil)?.location
         var openedByProbe = false
         do {
+            guard originalPointer != nil else {
+                throw ClockJourneyError.rejected("original_pointer_unavailable")
+            }
+            guard AXIsProcessTrusted() else {
+                throw ClockJourneyError.rejected("harness_accessibility_unverified")
+            }
             guard ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27,
-                  AXIsProcessTrusted(), CGPreflightScreenCaptureAccess(),
                   let rawPID = environment["BARLINE_EXPECTED_PID"], let pid = Int32(rawPID),
                   let appPath = environment["BARLINE_CANDIDATE_APP"], appPath.hasPrefix("/"),
                   let sourceSHA = environment["BARLINE_SOURCE_SHA"], sourceSHA.count == 40,
                   let expectedHash = environment["BARLINE_EXECUTABLE_SHA256"], expectedHash.count == 64,
                   let running = NSRunningApplication(processIdentifier: pid),
                   running.bundleURL?.resolvingSymlinksInPath().path == URL(fileURLWithPath: appPath).resolvingSymlinksInPath().path
-            else { throw ClockJourneyError.rejected("candidate_or_permissions_unverified") }
+            else { throw ClockJourneyError.rejected("candidate_unverified") }
             let binary = URL(fileURLWithPath: appPath).appendingPathComponent("Contents/MacOS/Barline")
             let actualHash = try SHA256.hash(data: Data(contentsOf: binary)).map { String(format: "%02x", $0) }.joined()
             guard actualHash == expectedHash else { throw ClockJourneyError.rejected("candidate_binary_changed") }
@@ -211,9 +223,8 @@ private enum GoldenGateClockJourney {
             receipt["concealmentExpected"] = expectsConcealment
             receipt["helperProcessIdentifier"] = helperPID
             if environment["BARLINE_CLOCK_CALIBRATE_FIXTURE"] == "1", let fixturePID {
-                guard try notificationCenterCount() == 0 else {
-                    throw ClockJourneyError.rejected("notification_center_initially_open")
-                }
+                // Positive fixture hit ownership is the calibration. An
+                // unrelated persistent NC AX window cannot invalidate it.
                 var observations = [[String: Any]]()
                 for _ in 0 ..< 5 {
                     let observation = try fixtureWitness(fixturePID)
@@ -262,7 +273,16 @@ private enum GoldenGateClockJourney {
                 CFMachPortInvalidate(tap)
             }
             let baseline = try notificationCenterCount()
-            guard baseline == 0 else { throw ClockJourneyError.rejected("notification_center_initially_open") }
+            guard structuralDiagnostic || baseline == 0 else {
+                throw ClockJourneyError.rejected("notification_center_nonzero_baseline_visibility_unknown")
+            }
+            for _ in 0 ..< 5 {
+                pump(seconds: 0.1)
+                guard try notificationCenterCount() == baseline else {
+                    throw ClockJourneyError.rejected("notification_center_baseline_unstable")
+                }
+            }
+            receipt["stableBaselineElements"] = baseline
             var samples = [[String: Any]]()
             for cycle in 1 ... 3 {
                 if expectsConcealment, let fixturePID, try !fixtureIsConcealed(fixturePID) {
@@ -302,8 +322,8 @@ private enum GoldenGateClockJourney {
                     throw ClockJourneyError.rejected("notification_center_closed_without_second_click")
                 }
                 var observation: [String: Any] = [
-                    "cycle": cycle, "baselineElements": baseline, "openElements": opened,
-                    "openObservedMilliseconds": Double(observedAt - startedAt) / 1_000_000,
+                    "cycle": cycle, "baselineElements": baseline, "expandedElements": opened,
+                    "expansionObservedMilliseconds": Double(observedAt - startedAt) / 1_000_000,
                     "eventDeliveryMilliseconds": Double(delivery - eventTimestamp) / 1_000_000,
                 ]
                 if expectsConcealment, let fixturePID {
@@ -353,7 +373,7 @@ private enum GoldenGateClockJourney {
                     observation["closingEventDeliveryMilliseconds"] = Double(closingSample.deliveryUptime - closingSample.timestamp) / 1_000_000
                 }
                 openedByProbe = false
-                observation["closedElements"] = closed
+                observation["returnedBaselineElements"] = closed
                 if expectsConcealment, let fixturePID {
                     let restorationStartedAt = DispatchTime.now().uptimeNanoseconds
                     let restorationDeadline = Date().addingTimeInterval(3)
@@ -375,7 +395,8 @@ private enum GoldenGateClockJourney {
                 receipt["samples"] = samples
             }
             receipt["samples"] = samples
-            receipt["status"] = "pass"
+            // Both modes measure AX structure, not independent visual state.
+            receipt["status"] = "diagnostic-pass"
         } catch {
             receipt["status"] = "fail"
             receipt["error"] = String(describing: error)
@@ -388,8 +409,17 @@ private enum GoldenGateClockJourney {
             escape.post(tap: .cghidEventTap)
             release.post(tap: .cghidEventTap)
         }
+        if let originalPointer {
+            let restored = CGWarpMouseCursorPosition(originalPointer) == .success
+            receipt["originalPointerRestored"] = restored
+            if !restored {
+                receipt["status"] = "fail"
+                receipt["error"] = "original_pointer_restoration_failed"
+            }
+        }
         try? emit(receipt)
-        exit(receipt["status"] as? String == "pass" ? 0 : 1)
+        let status = receipt["status"] as? String
+        exit(status == "pass" || status == "diagnostic-pass" ? 0 : 1)
     }
 
     static func emit(_ receipt: [String: Any]) throws {

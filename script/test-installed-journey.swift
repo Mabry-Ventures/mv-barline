@@ -649,7 +649,15 @@ do {
     guard let action = targetAction(), let actionFrame = frame(action) else {
         throw JourneyError.failed("target_interface_action_unavailable")
     }
-    print("{\"stage\":\"visible_target_action_resolved\"}")
+    let actionGeometry: [String: Any] = [
+        "stage": "visible_target_action_resolved",
+        "fixtureActionFrame": [
+            "x": actionFrame.minX, "y": actionFrame.minY,
+            "width": actionFrame.width, "height": actionFrame.height,
+        ],
+        "observedAtUptime": ProcessInfo.processInfo.systemUptime,
+    ]
+    try print(String(decoding: JSONSerialization.data(withJSONObject: actionGeometry, options: [.sortedKeys]), as: UTF8.self))
     guard !shelfVisible() else {
         throw JourneyError.failed("shelf_reopened_over_target_interface")
     }
@@ -671,8 +679,28 @@ do {
             abs(restored.width - original.width) <= 2 &&
             journalEmpty(allowMissing: isGoldenGate) && !shelfVisible()
     }
-    try wait("item_not_rehidden_and_journal_not_cleared", seconds: 25) {
-        try restorationCommitted()
+    do {
+        try wait("item_not_rehidden_and_journal_not_cleared", seconds: 25) {
+            try restorationCommitted()
+        }
+    } catch {
+        // Only this explicitly selected synthetic target is described. Separate
+        // an actual concealment/journal failure from stale AX geometry.
+        let restored = targetFrame()
+        let hidden = hiddenFixtureFrame()
+        let diagnostic: [String: Any] = [
+            "stage": "restoration_postcondition_failure",
+            "targetFrameAvailable": restored != nil,
+            "hiddenFrameAvailable": hidden != nil,
+            "framesMatch": restored.flatMap { observed in hidden.map { sameFrame(observed, $0) } } ?? false,
+            "verticalGeometryMatches": restored.map { abs($0.midY - original.midY) <= 2 } ?? false,
+            "widthMatches": restored.map { abs($0.width - original.width) <= 2 } ?? false,
+            "journalEmpty": journalEmpty(allowMissing: isGoldenGate),
+            "shelfStillVisible": shelfVisible(),
+            "exactlyOneCompletedJourney": receipt().map(exactlyOneCompletedJourney) ?? false,
+        ]
+        try print(String(decoding: JSONSerialization.data(withJSONObject: diagnostic, options: [.sortedKeys]), as: UTF8.self))
+        throw error
     }
     // A transient native hide is not completion: give the coordinator time to
     // compensate before accepting the durable journal and layout postcondition.

@@ -27,6 +27,10 @@ final class MenuBarItemManager: ObservableObject {
 
     private var isRestoringItems = false
     private var visibleInterfaceTasks = [MenuBarRevealObservationToken: Task<Void, Never>]()
+
+    /// A target menu owns its input until its observation has finished. The
+    /// activation call returning does not mean the native interface is closed.
+    var hasActiveNativeInterface: Bool { !visibleInterfaceTasks.isEmpty }
     private let goldenGateConcealmentSyncDebouncer = GoldenGateConcealmentSyncDebouncer()
 
     deinit {
