@@ -33,9 +33,18 @@ later changes.
 - On macOS 27, Barline hides items with a system Assessment Mode assertion,
   which stops the clock from opening Notification Center. The unpublished
   clock repair lifts the assertion before pressing the clock, so hidden items
-  can briefly appear. Native activation latency is not a hard quarter-second
+  can briefly appear. The September 30 controlled fixture remained hit-testable
+  at an early 400 ms observation and was excluded at later sampled observations
+  while Notification Center remained open. Native activation latency is not a hard quarter-second
   guarantee. Volume, brightness, capture indicators, Globe+N, multiple displays,
   and every restoration failure mode need separate qualification.
+
+- The internal unnotarized 1.0.66 candidate's own control is not reachable under
+  a controlled concealment assertion on CPLCODEX01. The same candidate works
+  with an empty concealment configuration; notarized 1.0.65 retains its control
+  under the same fixture configuration. Source and trust both differ, so
+  notarization is a testable hypothesis, not a proven fix. See the
+  [takeover evidence and next comparison](MACOS27_TAKEOVER.md).
 
 - Individual AX operations have timeouts, but the complete inventory crawl has
   no aggregate deadline. Large or unresponsive inventories still need explicit

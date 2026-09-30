@@ -8,14 +8,22 @@ import Foundation
 
 private enum ClockJourneyError: Error { case rejected(String) }
 
-@MainActor
-private final class ClockEventWitness {
-    var timestamp: UInt64?
-    var deliveryUptime: UInt64?
+private final class ClockEventWitness: @unchecked Sendable {
+    let marker = Int64.random(in: 1 ... Int64.max)
+    private let lock = NSLock()
+    private var value: (timestamp: UInt64, deliveryUptime: UInt64)?
 
-    func observe(_ event: NSEvent) {
-        timestamp = event.cgEvent?.timestamp
-        deliveryUptime = DispatchTime.now().uptimeNanoseconds
+    func observe(_ event: CGEvent) {
+        guard event.getIntegerValueField(.eventSourceUserData) == marker else { return }
+        lock.withLock { value = (event.timestamp, DispatchTime.now().uptimeNanoseconds) }
+    }
+
+    func reset() {
+        lock.withLock { value = nil }
+    }
+
+    func sample() -> (timestamp: UInt64, deliveryUptime: UInt64)? {
+        lock.withLock { value }
     }
 }
 
@@ -105,23 +113,75 @@ private enum GoldenGateClockJourney {
         }
     }
 
-    static func click(_ point: CGPoint) throws {
+    static func click(_ point: CGPoint, marker: Int64) throws {
         for type in [CGEventType.mouseMoved, .leftMouseDown, .leftMouseUp] {
             guard let event = CGEvent(mouseEventSource: nil, mouseType: type, mouseCursorPosition: point, mouseButton: .left)
             else { throw ClockJourneyError.rejected("pointer_event_creation_failed") }
             event.flags = []
+            // Explicit creation timestamp models timely physical input. Some
+            // constructor-created synthetic events otherwise retain timestamp0.
+            event.timestamp = DispatchTime.now().uptimeNanoseconds
+            event.setIntegerValueField(.eventSourceUserData, value: marker)
             event.post(tap: .cghidEventTap)
             pump(seconds: 0.03)
         }
+    }
+
+    static func escape() throws {
+        guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: true),
+              let up = CGEvent(keyboardEventSource: nil, virtualKey: 53, keyDown: false)
+        else { throw ClockJourneyError.rejected("escape_event_creation_failed") }
+        down.flags = []
+        up.flags = []
+        down.post(tap: .cghidEventTap)
+        pump(seconds: 0.03)
+        up.post(tap: .cghidEventTap)
+        pump(seconds: 0.03)
+    }
+
+    static func fixtureWitness(_ pid: Int32) throws -> [String: Any] {
+        guard let rawBar = read(AXUIElementCreateApplication(pid), "AXExtrasMenuBar"),
+              CFGetTypeID(rawBar) == AXUIElementGetTypeID(),
+              let children = read(unsafeDowncast(rawBar, to: AXUIElement.self), kAXChildrenAttribute) as? [AXUIElement],
+              let item = children.first(where: { read($0, kAXTitleAttribute) as? String == "BF Native" }),
+              let rect = frame(item), rect.width > 0, rect.height > 0,
+              NSScreen.screens.contains(where: {
+                  guard let number = $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return false }
+                  let display = CGDisplayBounds(number.uint32Value)
+                  return display.contains(rect) && rect.midY <= display.minY + max(40, $0.safeAreaInsets.top)
+              })
+        else { throw ClockJourneyError.rejected("fixture_unreadable") }
+        let system = AXUIElementCreateSystemWide()
+        guard AXUIElementSetMessagingTimeout(system, 0.05) == .success else {
+            throw ClockJourneyError.rejected("fixture_hit_test_unavailable")
+        }
+        defer { _ = AXUIElementSetMessagingTimeout(system, 0) }
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(system, Float(rect.midX), Float(rect.midY), &hit) == .success,
+              let hit else { throw ClockJourneyError.rejected("fixture_hit_test_unavailable") }
+        var owner: Int32 = 0
+        guard AXUIElementGetPid(hit, &owner) == .success else {
+            throw ClockJourneyError.rejected("fixture_hit_test_unavailable")
+        }
+        return [
+            "ownerMatchesFixture": owner == pid,
+            "frame": ["x": rect.minX, "y": rect.minY, "width": rect.width, "height": rect.height],
+        ]
+    }
+
+    static func fixtureIsConcealed(_ pid: Int32) throws -> Bool {
+        try fixtureWitness(pid)["ownerMatchesFixture"] as? Bool == false
     }
 
     static func main() {
         NSApplication.shared.setActivationPolicy(.accessory)
         let environment = ProcessInfo.processInfo.environment
         var receipt: [String: Any] = [
-            "schemaVersion": 1, "journey": "golden-gate-clock-physical",
+            "schemaVersion": 1, "journey": "golden-gate-clock-hid",
             "osVersion": ProcessInfo.processInfo.operatingSystemVersionString,
             "notarizationQualified": false,
+            "inputPath": "marker-correlated-synthetic-hid-explicit-uptime",
+            "recordedAt": ISO8601DateFormatter().string(from: Date()),
         ]
         var openedByProbe = false
         do {
@@ -140,26 +200,86 @@ private enum GoldenGateClockJourney {
             receipt["sourceSHA"] = sourceSHA
             receipt["executableSHA256"] = actualHash
             receipt["processIdentifier"] = pid
-            // The caller must separately establish/record native concealment.
-            // A passing toggle alone does not prove that hidden items return.
-            receipt["concealmentExpected"] = environment["BARLINE_CLOCK_EXPECT_CONCEALED"] == "1"
+            let expectsConcealment = environment["BARLINE_CLOCK_EXPECT_CONCEALED"] == "1"
+            let fixturePID = environment["BARLINE_FIXTURE_PID"].flatMap(Int32.init)
+            let helperPID = environment["BARLINE_EXPECTED_HELPER_PID"].flatMap(Int32.init)
+            guard let helperPID, kill(helperPID, 0) == 0,
+                  !expectsConcealment || fixturePID != nil
+            else {
+                throw ClockJourneyError.rejected("helper_or_concealment_fixture_missing")
+            }
+            receipt["concealmentExpected"] = expectsConcealment
+            receipt["helperProcessIdentifier"] = helperPID
+            if environment["BARLINE_CLOCK_CALIBRATE_FIXTURE"] == "1", let fixturePID {
+                guard try notificationCenterCount() == 0 else {
+                    throw ClockJourneyError.rejected("notification_center_initially_open")
+                }
+                var observations = [[String: Any]]()
+                for _ in 0 ..< 5 {
+                    let observation = try fixtureWitness(fixturePID)
+                    observations.append(observation)
+                    receipt["fixtureObservations"] = observations
+                    guard observation["ownerMatchesFixture"] as? Bool == true else {
+                        throw ClockJourneyError.rejected("visible_fixture_calibration_failed")
+                    }
+                    pump(seconds: 0.1)
+                }
+                receipt["fixtureProcessIdentifier"] = fixturePID
+                receipt["mode"] = "visible-fixture-calibration"
+                receipt["status"] = "pass"
+                try emit(receipt)
+                exit(0)
+            }
+            if expectsConcealment {
+                guard let fixturePID, let calibrationPath = environment["BARLINE_CLOCK_FIXTURE_CALIBRATION"],
+                      let calibration = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: calibrationPath))) as? [String: Any],
+                      calibration["status"] as? String == "pass",
+                      calibration["mode"] as? String == "visible-fixture-calibration",
+                      calibration["fixtureProcessIdentifier"] as? Int32 == fixturePID,
+                      calibration["sourceSHA"] as? String == sourceSHA,
+                      calibration["executableSHA256"] as? String == actualHash
+                else { throw ClockJourneyError.rejected("visible_fixture_calibration_missing") }
+                receipt["fixtureVisibleCalibrationVerified"] = true
+            }
             let witness = ClockEventWitness()
-            guard let monitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown, handler: { witness.observe($0) })
+            // AppKit global monitors exclude the injecting process's own input.
+            // Listen only for our marked left-down through a Quartz tap instead.
+            guard let tap = CGEvent.tapCreate(
+                tap: .cghidEventTap, place: .tailAppendEventTap, options: .listenOnly,
+                eventsOfInterest: 1 << CGEventType.leftMouseDown.rawValue,
+                callback: { _, _, event, context in
+                    if let context {
+                        Unmanaged<ClockEventWitness>.fromOpaque(context).takeUnretainedValue().observe(event)
+                    }
+                    return Unmanaged.passUnretained(event)
+                }, userInfo: Unmanaged.passUnretained(witness).toOpaque()
+            ), let source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
             else { throw ClockJourneyError.rejected("event_monitor_unavailable") }
-            defer { NSEvent.removeMonitor(monitor) }
+            CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
+            CGEvent.tapEnable(tap: tap, enable: true)
+            defer {
+                CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
+                CFMachPortInvalidate(tap)
+            }
             let baseline = try notificationCenterCount()
+            guard baseline == 0 else { throw ClockJourneyError.rejected("notification_center_initially_open") }
             var samples = [[String: Any]]()
             for cycle in 1 ... 3 {
+                if expectsConcealment, let fixturePID, try !fixtureIsConcealed(fixturePID) {
+                    throw ClockJourneyError.rejected("fixture_not_concealed_before_click")
+                }
+                if expectsConcealment, let fixturePID {
+                    receipt["fixtureBeforeClick"] = try fixtureWitness(fixturePID)
+                }
                 guard let clock = clockFrame(), clock.width > 0, clock.height > 0,
                       NSScreen.screens.contains(where: {
                           guard let id = $0.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber else { return false }
                           return CGDisplayBounds(id.uint32Value).contains(CGPoint(x: clock.midX, y: clock.midY))
                       })
                 else { throw ClockJourneyError.rejected("clock_not_uniquely_reachable") }
-                witness.timestamp = nil
-                witness.deliveryUptime = nil
+                witness.reset()
                 let startedAt = DispatchTime.now().uptimeNanoseconds
-                try click(CGPoint(x: clock.midX, y: clock.midY))
+                try click(CGPoint(x: clock.midX, y: clock.midY), marker: witness.marker)
                 let openDeadline = Date().addingTimeInterval(2)
                 var opened = baseline
                 while Date() < openDeadline, opened <= baseline {
@@ -169,30 +289,90 @@ private enum GoldenGateClockJourney {
                 guard opened > baseline else { throw ClockJourneyError.rejected("notification_center_did_not_open") }
                 openedByProbe = true
                 let observedAt = DispatchTime.now().uptimeNanoseconds
-                guard let eventTimestamp = witness.timestamp, let delivery = witness.deliveryUptime,
-                      eventTimestamp > 0, delivery >= eventTimestamp, delivery - eventTimestamp < 600_000_000
+                guard let sample = witness.sample() else {
+                    throw ClockJourneyError.rejected("marked_pointer_event_not_observed")
+                }
+                let eventTimestamp = sample.timestamp
+                let delivery = sample.deliveryUptime
+                guard
+                    eventTimestamp > 0, delivery >= eventTimestamp, delivery - eventTimestamp < 600_000_000
                 else { throw ClockJourneyError.rejected("quartz_event_clock_origin_unverified") }
                 pump(seconds: 0.4)
                 guard try notificationCenterCount() > baseline else {
                     throw ClockJourneyError.rejected("notification_center_closed_without_second_click")
                 }
+                var observation: [String: Any] = [
+                    "cycle": cycle, "baselineElements": baseline, "openElements": opened,
+                    "openObservedMilliseconds": Double(observedAt - startedAt) / 1_000_000,
+                    "eventDeliveryMilliseconds": Double(delivery - eventTimestamp) / 1_000_000,
+                ]
+                if expectsConcealment, let fixturePID {
+                    // An open Notification Center can occlude a status item.
+                    // This is diagnostic only; assert the closed-state witness.
+                    observation["fixtureWhileOpen"] = try fixtureWitness(fixturePID)
+                }
+                receipt["currentObservation"] = observation
                 guard let closingClock = clockFrame() else { throw ClockJourneyError.rejected("clock_disappeared") }
-                try click(CGPoint(x: closingClock.midX, y: closingClock.midY))
+                witness.reset()
+                let dismissWithEscape = environment["BARLINE_CLOCK_DISMISS_WITH_ESCAPE"] == "1"
+                if dismissWithEscape, let fixturePID {
+                    var openObservations = [[String: Any]]()
+                    let holdStartedAt = DispatchTime.now().uptimeNanoseconds
+                    for elapsed in 1 ... 5 {
+                        pump(seconds: elapsed == 1 ? 0.6 : 1)
+                        guard try notificationCenterCount() > baseline else {
+                            throw ClockJourneyError.rejected("notification_center_closed_during_hold")
+                        }
+                        var sample = try fixtureWitness(fixturePID)
+                        sample["secondsHeld"] = elapsed
+                        sample["millisecondsSinceHoldStarted"] = Double(DispatchTime.now().uptimeNanoseconds - holdStartedAt) / 1_000_000
+                        openObservations.append(sample)
+                        observation["heldOpenFixtureObservations"] = openObservations
+                        receipt["currentObservation"] = observation
+                    }
+                    try escape()
+                    observation["dismissal"] = "escape-no-second-clock-transaction"
+                } else {
+                    try click(CGPoint(x: closingClock.midX, y: closingClock.midY), marker: witness.marker)
+                    observation["dismissal"] = "clock-click"
+                }
                 let closeDeadline = Date().addingTimeInterval(2)
                 var closed = opened
                 while Date() < closeDeadline, closed != baseline {
                     pump(seconds: 0.03)
                     closed = try notificationCenterCount()
                 }
-                guard closed == baseline, !running.isTerminated else {
+                guard closed == baseline, !running.isTerminated, kill(helperPID, 0) == 0 else {
                     throw ClockJourneyError.rejected("notification_center_did_not_close_once")
                 }
+                if !dismissWithEscape {
+                    guard let closingSample = witness.sample(), closingSample.timestamp > 0,
+                          closingSample.deliveryUptime >= closingSample.timestamp,
+                          closingSample.deliveryUptime - closingSample.timestamp < 600_000_000
+                    else { throw ClockJourneyError.rejected("closing_pointer_event_not_observed") }
+                    observation["closingEventDeliveryMilliseconds"] = Double(closingSample.deliveryUptime - closingSample.timestamp) / 1_000_000
+                }
                 openedByProbe = false
-                samples.append([
-                    "cycle": cycle, "baselineElements": baseline, "openElements": opened, "closedElements": closed,
-                    "openObservedMilliseconds": Double(observedAt - startedAt) / 1_000_000,
-                    "eventDeliveryMilliseconds": Double(delivery - eventTimestamp) / 1_000_000,
-                ])
+                observation["closedElements"] = closed
+                if expectsConcealment, let fixturePID {
+                    let restorationStartedAt = DispatchTime.now().uptimeNanoseconds
+                    let restorationDeadline = Date().addingTimeInterval(3)
+                    var concealed = try fixtureIsConcealed(fixturePID)
+                    while !concealed, Date() < restorationDeadline {
+                        pump(seconds: 0.05)
+                        concealed = try fixtureIsConcealed(fixturePID)
+                    }
+                    observation["fixtureAfterClose"] = try fixtureWitness(fixturePID)
+                    observation["restorationObservedMilliseconds"] = Double(DispatchTime.now().uptimeNanoseconds - restorationStartedAt) / 1_000_000
+                    receipt["currentObservation"] = observation
+                    guard concealed else { throw ClockJourneyError.rejected("fixture_not_reconcealed_after_close") }
+                    pump(seconds: 0.1)
+                    guard try fixtureIsConcealed(fixturePID) else {
+                        throw ClockJourneyError.rejected("fixture_concealment_not_stable")
+                    }
+                }
+                samples.append(observation)
+                receipt["samples"] = samples
             }
             receipt["samples"] = samples
             receipt["status"] = "pass"
@@ -208,11 +388,15 @@ private enum GoldenGateClockJourney {
             escape.post(tap: .cghidEventTap)
             release.post(tap: .cghidEventTap)
         }
-        if let data = try? JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys]),
-           let output = String(data: data, encoding: .utf8)
-        {
-            print(output)
-        }
+        try? emit(receipt)
         exit(receipt["status"] as? String == "pass" ? 0 : 1)
+    }
+
+    static func emit(_ receipt: [String: Any]) throws {
+        let data = try JSONSerialization.data(withJSONObject: receipt, options: [.sortedKeys])
+        guard let output = String(data: data, encoding: .utf8) else {
+            throw ClockJourneyError.rejected("receipt_encoding_failed")
+        }
+        print(output)
     }
 }

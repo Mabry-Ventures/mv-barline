@@ -516,8 +516,15 @@ private func click(at point: CGPoint) throws {
             throw ProbeError.unableToSynthesizeClick
         }
         let started = DispatchTime.now().uptimeNanoseconds
+        // A constructor-created event can carry timestamp 0 or inherit session
+        // modifier flags on macOS 27. Model a fresh unmodified pointer click;
+        // do not let test transport metadata masquerade as an app regression.
+        mouseDown.flags = []
+        mouseUp.flags = []
+        mouseDown.timestamp = DispatchTime.now().uptimeNanoseconds
         mouseDown.post(tap: .cghidEventTap)
         usleep(20000)
+        mouseUp.timestamp = DispatchTime.now().uptimeNanoseconds
         mouseUp.post(tap: .cghidEventTap)
         clickDispatchRecorder.record(
             startedNanoseconds: started,

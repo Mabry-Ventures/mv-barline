@@ -80,17 +80,71 @@ replace runtime proof.
 - Both actual OS lanes are required for cross-version release claims. Compiling
   with Xcode 26 on macOS 27 is not a macOS 26 runtime test.
 
-`script/test-golden-gate-clock.swift` is a real-pointer, candidate/hash-bound
-clock probe for an authorized GUI harness. It emits structural Notification
-Center counts and event timings, not notification contents. A passing probe
-does not by itself establish that native concealment returned; verify that
-separately against a controlled fixture.
+`script/test-golden-gate-clock.swift` is a synthetic HID-path, candidate/hash-bound
+clock probe for an authorized GUI harness. A listen-only Quartz tap correlates
+marked input; explicit synthetic uptime timestamps do not validate physical
+hardware timestamp provenance. It emits structural Notification Center counts,
+event timings, and controlled-fixture hit witnesses, not notification contents.
+Concealment runs require a same-fixture positive visible calibration first.
+Hit exclusion is not independent pixel proof. Test source/binary identity is
+recorded separately from the frozen app candidate.
+
+## September 30 device findings
+
+The app code remained frozen at `74b38e1` throughout these comparisons. Its
+Developer ID export is 1.0.66/build 143; main executable SHA-256 is
+`6517559b983b794e5ace8723fa1515227b441b96fe209d24afa0798c10aa4e42`.
+The harness-only follow-up changes do not retroactively rebind that binary to
+a newer app source SHA. Raw receipts and failed attempts are retained locally
+under `.artifacts/takeover-runtime-evidence`.
+
+- Clean fast gate: 681 Core tests across 70 suites, no failed steps. Xcode 27
+  Debug build, Developer ID archive/export, and deep strict signature passed.
+- Empty concealment: three clock open/close cycles passed. This is not proof of
+  restoring hidden items.
+- Controlled concealment: a single live Native fixture was positively hit-owned
+  in five visible calibration samples, then excluded before each test. Three
+  clock open/close cycles returned Notification Center's structural window
+  count from 0 to 8 to 0. After observed closure, stable fixture hit exclusion
+  returned in approximately 498–507 ms.
+- Longer hold: three additional cycles held Notification Center open for five
+  seconds, then dismissed it with Escape, without a second clock transaction.
+  The fixture was hit-owned at the early approximately 400 ms observation, but
+  excluded at every subsequent sampled observation from approximately one
+  through five seconds. Exclusion persisted after dismissal. This refutes an
+  indefinite open-Notification-Center override; it is consistent with delayed
+  native state settling, not proof of its precise mechanism or a universal bound.
+- Empty-configuration shelf: 20 opens passed with 0 timeouts, median 91 ms,
+  p95 145.1 ms, maximum 154.7 ms; rapid retry passed. The process was already
+  running, so the script's first-cycle `cold=true` label is not cold-launch proof.
+- **Concealed-configuration shelf is not qualified.** Under the unnotarized
+  candidate's controlled fixture assertion, Barline's own control rectangle
+  resolved to AX menu-bar background, not the candidate. With no concealment,
+  the same rectangle resolved to its AX menu-bar item. Timing tests could not
+  reach the control, and their failures are retained rather than counted as
+  shelf latency samples.
+- The installed notarized 1.0.65/build 142 passed Gatekeeper/staple checks and
+  retained its reachable control under the same fixture-only concealment.
+  This changes both source and trust state; it does **not** prove notarization
+  alone explains the difference. The independent
+  [Ice PR 1001](https://github.com/jordanbaird/Ice/pull/1001) reports a similar
+  own-control removal under Apple Development/unnotarized Developer ID builds,
+  with notarization explicitly untested. The decisive next comparison is the
+  **same 1.0.66 executable after notarization**, using the same fixture witnesses.
+
+Gemini Flash 3.8 High and GPT-6 Astra High retain a release HOLD. They do not
+identify another confirmed clock source defect, and the calibrated runtime
+findings do not justify more timer changes. The inaccessible-control comparison
+and production trust boundary must be resolved before concealed-shelf signoff.
 
 ## Open boundaries
 
 - Stored local notarization profile exists but Apple returned HTTP 401. The
   remote profile cannot currently be read because its default Keychain is
   locked. Do not reset other credentials or access a password vault.
+- Do not work around candidate control removal with speculative hit rectangles,
+  repeated reassertion, or source timing changes before the same-binary trust
+  comparison. A successful source gate cannot override this device failure.
 - No macOS 26 runtime is currently available.
 - Aggregate AX inventory deadlines, transient-owner retention/backoff, and
   redundant metadata reads remain performance workstreams. This cache fix must
