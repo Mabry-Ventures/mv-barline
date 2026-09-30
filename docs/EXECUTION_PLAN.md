@@ -4,7 +4,15 @@
 
 The Claude clock/concealment work is being hardened in an isolated worktree;
 the public release and Claude's checkout remain unchanged. Candidate 1.0.66
-(build 143) is not distribution-qualified. See
+(build 144, frozen app source `abf3107`) is notarized but not distribution-qualified.
+Its native-menu closing-click regression passes 24 repeated macOS 27 journeys,
+including after helper recovery, and concealed-shelf p95 feedback is 144.9 ms.
+The alternate-installation experiment exposed an installation-context confound;
+no speculative control-timing patch was retained. macOS 26 runtime, independent
+clock visibility, UI/update/lifecycle gates and remaining deferred-input
+ownership audit items remain open. The clean broader gate passed six Xcode
+unit/integration tests and 212 fixture checks, but failed UI runner
+initialization before any UI tests executed. See
 [the takeover findings and qualification contract](MACOS27_TAKEOVER.md).
 
 ## Barline 1.0.65 published — September 27, 2026
@@ -1368,7 +1376,11 @@ required before distribution.
 | 8. OS hardening | Lead | Shelf commit hardening implemented; exact-head full gate pending | M3–7 | Shelf presentation now sizes before ordering and requires two consecutive AppKit plus helper-owned WindowServer confirmations when that observer is available. A valid local AppKit presentation remains ordered when unrelated helper work delays WindowServer observation, so observer availability cannot roll back a user click; invalid local geometry still retries and fails closed. The semantic helper probe bypasses mutation serialization, never exports ephemeral window IDs, and cannot invalidate the shared session on its bounded timeout. The runtime harness has a real status-item click lane pinned to the exact app PID and window number. Exact-head full/candidate testing, physical scenario matrix, release soak, and macOS 27 remain pending. |
 | 9. Distribution readiness | Lead | Notarized 1.0.5 installed; replacement candidate validation in progress | M0–8 | Developer ID export, App Group profile validation, notarization, stapling, Gatekeeper, Sparkle signing, checksums, SBOM, and source archive passed for installed 1.0.5; exact-head evidence must be regenerated for the helper-independent shelf presentation correction. |
 
-## External boundaries currently known
+## Historical external boundaries from the original build milestones
+
+This subsection records the earlier build environment and qualifications. It
+does not describe build 144's current host or establish its UI authorization;
+use the September 30 takeover section and qualification contract above.
 
 - The local build host uses Xcode 26.6 with the macOS 26.5 SDK. macOS 27
   compilation does not depend on an unavailable Xcode 27 toolchain.
