@@ -28,9 +28,13 @@ final class MenuBarItemManager: ObservableObject {
     private var isRestoringItems = false
     private var visibleInterfaceTasks = [MenuBarRevealObservationToken: Task<Void, Never>]()
 
-    /// A target menu owns its input until its observation has finished. The
-    /// activation call returning does not mean the native interface is closed.
-    var hasActiveNativeInterface: Bool { !visibleInterfaceTasks.isEmpty }
+    /// Deferred gap clicks cannot borrow input from an activation, restoration,
+    /// or tracked native interface. Both native (27) and moved-item (26)
+    /// observations participate; token cleanup is not restoration proof.
+    var hasInputOwningItemInteraction: Bool {
+        isActivatingItem || isRestoringItems || !visibleInterfaceTasks.isEmpty ||
+            temporarilyShownItemContexts.contains { $0.revealObservation != nil }
+    }
     private let goldenGateConcealmentSyncDebouncer = GoldenGateConcealmentSyncDebouncer()
 
     deinit {

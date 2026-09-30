@@ -316,7 +316,7 @@ extension HIDEventManager {
         )
         guard
             appState.settings.general.showOnClick,
-            !appState.itemManager.hasActiveNativeInterface,
+            !appState.itemManager.hasInputOwningItemInteraction,
             let click = event.cgEvent,
             isMouseInsideEmptyMenuBarSpace(
                 appState: appState,
@@ -349,7 +349,7 @@ extension HIDEventManager {
                       isCurrentPresentation: shelf.ownsDismissal(presentationLease),
                       monitoringEnabled: isEnabled,
                       featureEnabled: appState.settings.general.showOnClick,
-                      nativeInterfaceActive: appState.itemManager.hasActiveNativeInterface,
+                      nativeInterfaceActive: appState.itemManager.hasInputOwningItemInteraction,
                       hitWindowAtMouseDown: hitWindowAtMouseDown,
                       hitWindowAtCommit: NSWindow.windowNumber(at: appKitLocation, belowWindowWithWindowNumber: 0)
                   )
