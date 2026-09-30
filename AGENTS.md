@@ -1,77 +1,17 @@
-# Barline engineering rules
+# Barline — Agent operating standard
 
-Barline is a GPLv3, Apple Silicon-only macOS utility derived from the exact Ice
-compatibility baseline recorded in `docs/PROVENANCE.md`. Preserve attribution,
-the `ice-upstream` and `ice-community` remotes, and the vendor tag. Never reuse
-an upstream bundle identifier, signing identity, Sparkle feed, or update key.
+## Shared operating rules
 
-## Canonical commands
+- Own the authorized outcome through implementation, verification, and a concise handoff: changes, evidence, blockers, next owner action. Preserve unrelated work.
+- The orchestrator must always be **Astra- or Fable-class unless Jared explicitly specifies otherwise**. Standard builders use **Sonnet 5.5 or GPT 6.1 Sol**. Use **GPT 6 Luna** for lower-complexity bounded coding, tests and mechanical fixes. **Haiku 4.5** is strictly for non-code summaries, status updates and documentation housekeeping; never use it to implement application code, tests, scripts or configuration. Resolve actual supported runtime identifiers; report unavailable models instead of silently substituting. This changes development routing, not runtime product AI or required independent reviewers.
+- Read the current issue/acceptance criteria, relevant canon and affected files; reconcile material drift. No portfolio-wide boot scan, mandatory guide fetch, cost ledger, or ceremony. Read the applicable sections of the product contract below; its constraints remain binding.
+- When delegation is authorized, use one owner per isolated branch/worktree, at most three builders by default; up to five only with disjoint files and no stricter repo cap. Pause dispatch when two completed branches await review. After two failed correction rounds, improve the brief before escalating.
+- Run affected checks locally; retain every required pre-publication, merge, coverage, security, reviewer, and release gate. Never weaken assertions, thresholds or exact-head evidence to get green. Reproduce repeated CI failures locally before pushing again.
+- Update affected canon with behavior changes. Keep Linear truthful at meaningful state changes within authorized scope. An optional short checkpoint records branch/base/head, blockers and next actions; it never overrides live evidence.
+- This standard grants no blanket authority to merge, deploy, spend, access credentials, change billing or invoke external agents. Existing product approvals and merge methods govern. Archived/deferred products stay inactive. No new infrastructure or speculative refactors.
 
-```bash
-./script/build_and_run.sh --verify
-swiftlint lint --strict --config .swiftlint.yml
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer \
-  xcodebuild -project Barline.xcodeproj -scheme Barline \
-  -configuration Debug -destination 'platform=macOS,arch=arm64' \
-  CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO build
-```
+## Product contract
 
-Once Milestone 4 lands, use `./script/ci.sh fast` during iteration and
-`./script/ci.sh full` before merging. macOS builds, tests, signing, notarization,
-and releases are local-only. GitHub Actions may run only the Linux repository
-hygiene workflow; never add `macos-*`, `self-hosted`, or
-`pull_request_target`.
+Preserve GPLv3 upstream provenance, Apple Silicon-only macOS scope, typed XPC isolation and transactional state. Apple build/test/signing/notarization/release are local-only; GitHub runs Linux hygiene only. No remote runtime AI, accounts, subscriptions or hidden payment gate. Read [provenance](docs/PROVENANCE.md) and [execution plan](docs/EXECUTION_PLAN.md). The lead owns shared project/configuration and final gates; coordinate file ownership before parallel work.
 
-## Architecture boundaries
-
-- Keep SwiftUI and domain state authoritative; use AppKit only for macOS
-  presentation or event behavior SwiftUI cannot express.
-- Keep private WindowServer symbols, raw event synthesis, and ephemeral window
-  references inside `BarlineMenuService` behind typed XPC messages.
-- Keep pure models, profile/state/search rules, and compatibility contracts in
-  `BarlineCore`; do not import AppKit there.
-- Use Swift 6, complete strict concurrency, explicit actor isolation, structured
-  cancellation, and warnings-as-errors for Barline-owned targets.
-- Do not put WindowServer work, screen capture, filesystem I/O, indexing, or
-  model inference on the main actor.
-- Treat snapshots as untrusted. Retain the last-known-good state when a response
-  is empty, incomplete, stale, or implausible.
-- Make mutations transactional and generation-checked. Never leave a partially
-  activated profile as authoritative state.
-- Keep the app useful in fallback mode: settings, profiles, metadata search,
-  diagnostics, import/export, and recovery remain reachable.
-
-## Product and privacy
-
-- One product and one feature set: no account, subscription, tier, analytics,
-  advertising, cloud service, remote AI, or hidden payment gate.
-- Request permissions contextually. Never show an Accessibility or Screen
-  Recording dialog the user did not ask for, and never make a permission a
-  condition of using the app. The first-run walkthrough may explain both
-  permissions and request each one only when the user clicks to allow it;
-  every step must be skippable.
-- Never log secrets, user content, screen images, usernames, full paths, raw
-  process inventories, signing identities, or private profile names.
-- Keep identity in `Config/*.xcconfig`. Keep credentials and
-  `Config/Local.xcconfig` out of Git.
-- Keep external links absent or explicitly placeholder-only until their
-  canonical Barline destinations exist.
-
-## Validation and evidence
-
-- Do not claim a behavior, OS lane, signature, notarization, accessibility pass,
-  or performance target without exact local evidence.
-- A changed source SHA invalidates earlier candidate-bound release evidence.
-- Preserve `.xcresult`, logs, machine-readable summaries, and measurements under
-  ignored `.artifacts/` paths.
-- macOS 27 compilation requires an explicit Xcode 27 path. macOS 27 runtime
-  support requires execution on a macOS 27 host.
-- Keep the worktree reviewable. Update `docs/EXECUTION_PLAN.md` and relevant
-  architecture/change documentation at milestone checkpoints.
-
-## Project ownership
-
-The lead integration agent owns `project.pbxproj`, shared schemes/test plans,
-xcconfig, entitlements, identifiers, dependencies, and final gates. Do not let
-parallel workers modify those files concurrently. Preserve unrelated user
-changes and inspect a dirty worktree before editing.
+The preserved [repository contract](REPO_CONTRACT.md) retain existing requirements; this entry point does not waive them. Nested AGENTS.md instructions remain applicable.
