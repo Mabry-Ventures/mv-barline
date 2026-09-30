@@ -245,6 +245,13 @@ pass. Reviews supplement runtime receipts; they do not certify OS parity.
 
 ## Open boundaries
 
+The later [extended build-144 installed test result](MACOS_27_BUILD_144_FULL_TEST_RESULT.md)
+adds 300-open stress, 30-minute resource, and helper-recovery evidence, while
+keeping full acceptance and publication on HOLD. It also records the physical
+layout test's partial result, the authentication obstruction, and verified
+restoration of the test host. It does not supersede failed or unexecuted lanes
+with a release pass.
+
 - The local notarization credential boundary is resolved. Remote credential
   access is unnecessary; no vault, unrelated TCC reset or Keychain reset was used.
 - Alternate-installation control behavior remains unqualified. Do not describe
