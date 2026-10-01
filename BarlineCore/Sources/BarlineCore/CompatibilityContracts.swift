@@ -465,6 +465,10 @@ public protocol MenuBarBackend: Sendable {
     /// caches ordinary snapshots must override this and bypass that cache;
     /// issuing a new generation for old inventory is not independent proof.
     func snapshotForVerification() async throws -> MenuBarSnapshot
+    /// One atomic response, not a separately awaited latest-evidence getter.
+    /// Cached adapters retain original scan identity and fresh requests bypass
+    /// their ordinary inventory cache. No scan context authorizes exclusions.
+    func authorityObservation(freshness: MenuBarObservationFreshness) async throws -> MenuBarAuthorityObservation
     func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult
     func reveal(_ item: MenuBarItemID) async throws -> MenuBarMutationResult
     func activate(_ item: MenuBarItemID, button: MenuBarMouseButton) async throws
@@ -499,6 +503,14 @@ public extension MenuBarBackend {
     /// adapters must implement the protocol requirement explicitly.
     func snapshotForVerification() async throws -> MenuBarSnapshot {
         try await snapshot()
+    }
+
+    func authorityObservation(freshness: MenuBarObservationFreshness) async throws -> MenuBarAuthorityObservation {
+        let observed = switch freshness {
+        case .cachedAllowed: try await snapshot()
+        case .freshRequired: try await snapshotForVerification()
+        }
+        return MenuBarAuthorityObservation(snapshot: observed)
     }
 
     func capture(_: [MenuBarItemID]) async throws -> [MenuBarCapturedImage] {

@@ -1,5 +1,27 @@
 # Barline execution plan
 
+## Atomic observation envelopes — October 1, 2026
+
+The backend now returns snapshot and scan context together through a protocol
+requirement. The non-Codable context records the actual scan identifier, monotonic
+start/end and unchanged helper receipt/scene. It associates with the complete
+final projected snapshot, permitting only generation rebasing. Cache reuse retains
+the original scan and observation time. Restart revokes prior context before
+awaiting the helper, and bare snapshot publications conservatively clear it.
+Archived snapshots and caller-supplied profiles cannot reconstruct runtime context.
+
+This is a zero-exclusion prerequisite. The existing AX inventory still schedules
+owners and may retain descriptors; scan association is neither complete native
+coverage nor an Apple signature witness. All layout/missing-item guards remain
+strict. Ten focused tests, all 806 Core tests, the dirty-source fast gate and
+Xcode 27 Debug compile pass, including restart-failure and overflow regressions.
+Astra approves the bounded source slice. Gemini's diff review invented unchecked
+recovery arithmetic; its recheck withdraws that finding. Its later generation
+objection contradicts the intentionally immutable original-scan contract, and
+an apparent `canUndo` compilation defect was an excerpt boundary. A final recheck
+will include separately labeled complete methods. No build is installed or
+published from this source. Installed 152 and public 142 remain unchanged.
+
 ## Live publisher verification and typed extras — October 1, 2026
 
 The runtime verifier now obtains a non-Codable, privately constructed witness

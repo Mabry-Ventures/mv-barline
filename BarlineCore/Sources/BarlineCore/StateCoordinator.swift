@@ -245,7 +245,15 @@ public actor MenuBarStateCoordinator {
         }
     }
 
-    public private(set) var currentSnapshot: MenuBarSnapshot?
+    public private(set) var currentSnapshot: MenuBarSnapshot? {
+        didSet {
+            // Synthetic/legacy publications cannot inherit a previous scan.
+            // Connected paths explicitly publish their own local envelope.
+            currentAuthorityObservation = nil
+        }
+    }
+
+    public private(set) var currentAuthorityObservation: MenuBarAuthorityObservation?
     public private(set) var lastKnownGoodSnapshot: MenuBarSnapshot?
     public private(set) var lastRejection: SnapshotRejectionReason?
     public private(set) var mutationGeneration: UInt64 = 0
@@ -466,7 +474,8 @@ public actor MenuBarStateCoordinator {
         for attempt in 0 ..< attemptCount {
             try Task.checkCancellation()
             do {
-                let candidate = try await normalizedBackendSnapshot(requiresFreshObservation: false)
+                let observation = try await normalizedBackendObservation(freshness: .cachedAllowed)
+                let candidate = observation.snapshot
                 switch validator.validate(candidate, previous: currentSnapshot, now: now ?? Date()) {
                 case let .success(snapshot):
                     if let currentSnapshot,
@@ -475,6 +484,7 @@ public actor MenuBarStateCoordinator {
                         activeProfileID = nil
                     }
                     currentSnapshot = snapshot
+                    currentAuthorityObservation = observation
                     lastKnownGoodSnapshot = snapshot
                     lastKnownGoodProfileID = activeProfileID
                     lastRejection = nil
@@ -1914,6 +1924,7 @@ public actor MenuBarStateCoordinator {
         let preservedLastKnownGoodProfileID = lastKnownGoodProfileID
         mutationGeneration &+= 1
         backendHealth = MenuBarBackendHealth(backendName: "XPC", state: .restarting)
+        currentAuthorityObservation = nil
         await backend.restart()
 
         do {
@@ -1924,7 +1935,8 @@ public actor MenuBarStateCoordinator {
             } else {
                 restoredLastKnownGood = false
             }
-            let raw = try await backend.snapshotForVerification()
+            let observation = try await backend.authorityObservation(freshness: .freshRequired)
+            let raw = observation.snapshot
             let priorGeneration = max(
                 preservedCurrent?.generation ?? 0,
                 preservedLastKnownGood?.generation ?? 0
@@ -1938,7 +1950,8 @@ public actor MenuBarStateCoordinator {
             } else {
                 backendGenerationOffset = 0
             }
-            let candidate = try normalizeGeneration(of: raw)
+            let normalizedObservation = try normalizeGeneration(of: observation)
+            let candidate = normalizedObservation.snapshot
             let continuityBaseline = preservedCurrent ?? preservedLastKnownGood
             let validationNow = now ?? Date()
             switch validator.validate(candidate, previous: continuityBaseline, now: validationNow) {
@@ -1951,6 +1964,7 @@ public actor MenuBarStateCoordinator {
                     activeProfileID = nil
                 }
                 currentSnapshot = snapshot
+                currentAuthorityObservation = normalizedObservation
                 lastKnownGoodSnapshot = snapshot
                 lastKnownGoodProfileID = restoredLastKnownGood
                     ? preservedLastKnownGoodProfileID
@@ -2823,41 +2837,37 @@ public actor MenuBarStateCoordinator {
 
     private func compensationSnapshot(restoring target: MenuBarSnapshot) async throws -> MenuBarSnapshot {
         let backend = backend
-        let snapshot = try await withCompensation {
+        let observation = try await withCompensation {
             _ = try await backend.restore(target)
-            return try await backend.snapshotForVerification()
+            return try await backend.authorityObservation(freshness: .freshRequired)
         }
-        return try normalizeGeneration(of: snapshot)
+        // Compensation publication remains unconnected, so do not transfer
+        // its context through a bare-snapshot return value.
+        return try normalizeGeneration(of: observation).snapshot
     }
 
     private func normalizedBackendSnapshot(
         requiresFreshObservation: Bool
     ) async throws -> MenuBarSnapshot {
-        let snapshot = if requiresFreshObservation {
-            try await backend.snapshotForVerification()
-        } else {
-            try await backend.snapshot()
-        }
-        return try normalizeGeneration(of: snapshot)
+        try await normalizedBackendObservation(
+            freshness: requiresFreshObservation ? .freshRequired : .cachedAllowed
+        ).snapshot
     }
 
-    private func normalizeGeneration(of snapshot: MenuBarSnapshot) throws -> MenuBarSnapshot {
-        let (generation, overflowed) = snapshot.generation.addingReportingOverflow(
+    private func normalizedBackendObservation(
+        freshness: MenuBarObservationFreshness
+    ) async throws -> MenuBarAuthorityObservation {
+        try await normalizeGeneration(of: backend.authorityObservation(freshness: freshness))
+    }
+
+    private func normalizeGeneration(of observation: MenuBarAuthorityObservation) throws -> MenuBarAuthorityObservation {
+        let (generation, overflowed) = observation.snapshot.generation.addingReportingOverflow(
             backendGenerationOffset
         )
         guard !overflowed else {
             throw MenuBarBackendError.operationFailed("helper generation normalization overflow")
         }
-        guard backendGenerationOffset != 0 else { return snapshot }
-        return MenuBarSnapshot(
-            generation: generation,
-            capturedAt: snapshot.capturedAt,
-            items: snapshot.items,
-            displayIDs: snapshot.displayIDs,
-            displayIdentities: snapshot.displayIdentities,
-            activeSpaceIsValid: snapshot.activeSpaceIsValid,
-            menuTrackingIsActive: snapshot.menuTrackingIsActive
-        )
+        return observation.rebasingGeneration(to: generation)
     }
 
     private func requireCurrentGeneration(_ expectedGeneration: UInt64) throws {

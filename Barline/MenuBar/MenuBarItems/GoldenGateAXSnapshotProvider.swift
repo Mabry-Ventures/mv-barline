@@ -283,7 +283,15 @@ actor GoldenGateAXSnapshotProvider {
     private let serviceConnection = BarlineMenuService.Connection.shared
     private var generation: UInt64 = 0
     private var cachedAt: UInt64?
-    private var cachedSnapshot: MenuBarSnapshot?
+    private var cachedSnapshot: MenuBarSnapshot? {
+        didSet {
+            // Mutation proposals and legacy publications cannot inherit scan
+            // context. Actual collection/cache reuse sets it explicitly.
+            cachedObservationScan = nil
+        }
+    }
+
+    private var cachedObservationScan: MenuBarObservationScan?
     private var cachedEnvironment: MenuBarEnvironmentSnapshot?
     private var cachedDisplayBounds: [MenuBarDisplayID: MenuBarRect] = [:]
     private var rememberedSections: [MenuBarItemID: BarlineCore.MenuBarSection]
@@ -359,6 +367,14 @@ actor GoldenGateAXSnapshotProvider {
     }
 
     private func snapshot(forceRefresh: Bool) async throws -> MenuBarSnapshot {
+        try await collectAuthorityObservation(forceRefresh: forceRefresh).snapshot
+    }
+
+    func authorityObservation(freshness: MenuBarObservationFreshness) async throws -> MenuBarAuthorityObservation {
+        try await collectAuthorityObservation(forceRefresh: freshness == .freshRequired)
+    }
+
+    private func collectAuthorityObservation(forceRefresh: Bool) async throws -> MenuBarAuthorityObservation {
         guard !hasInvalidIdentityState else {
             throw MenuBarBackendError.operationFailed("saved menu bar identity state requires recovery")
         }
@@ -404,10 +420,10 @@ actor GoldenGateAXSnapshotProvider {
                lifetimeNanoseconds: GoldenGateTiming.snapshotCacheLifetimeNanoseconds
            )
         {
-            // A cache hit is still a new backend observation. Reusing the
-            // prior generation violates the coordinator's monotonic snapshot
-            // contract and can turn an otherwise successful assignment into
-            // a stale-generation failure during its immediate UI refresh.
+            // UI generations remain monotonic, but this is not a new scan.
+            // Preserve original scan identity/time; fresh verification never
+            // enters this cache branch.
+            let scan = cachedObservationScan
             generation &+= 1
             let observed = MenuBarSnapshot(
                 generation: generation,
@@ -419,12 +435,16 @@ actor GoldenGateAXSnapshotProvider {
                 menuTrackingIsActive: initialEnvironment.menuTrackingIsActive
             )
             self.cachedSnapshot = observed
-            return observed
+            let envelope = MenuBarAuthorityObservation(snapshot: observed, scan: scan)
+            cachedObservationScan = envelope.scan
+            return envelope
         }
 
         guard AXHelpers.isProcessTrusted() else {
             throw MenuBarBackendError.unavailableCapability("Accessibility menu bar inventory")
         }
+        let scanID = UUID()
+        let scanStartedAt = DispatchTime.now().uptimeNanoseconds
         let entries = collectEntries()
         let observations = entries.map(\.observation)
         guard !observations.isEmpty else {
@@ -547,8 +567,24 @@ actor GoldenGateAXSnapshotProvider {
         }
         // Cache reuse starts after the successful scan and projection finish;
         // the snapshot's capturedAt still describes the observation itself.
-        cachedAt = DispatchTime.now().uptimeNanoseconds
+        let scanCompletedAt = DispatchTime.now().uptimeNanoseconds
+        cachedAt = scanCompletedAt
         cachedSnapshot = result
+        let envelope = MenuBarAuthorityObservation(
+            snapshot: result,
+            scan: MenuBarObservationScan(
+                scanID: scanID,
+                startedAtUptimeNanoseconds: scanStartedAt,
+                completedAtUptimeNanoseconds: scanCompletedAt,
+                observedSnapshot: result,
+                initialEnvironment: initialEnvironment,
+                finalEnvironment: finalEnvironment
+            )
+        )
+        // Context records this UI scan association only. collectEntries still
+        // applies owner scheduling and retained inventory; neither context
+        // nor a stable receipt proves complete platform-control coverage.
+        cachedObservationScan = envelope.scan
         cachedEnvironment = finalEnvironment
         cachedDisplayBounds = displayBounds
         Self.updateSnapshotDiagnostic(
@@ -560,7 +596,7 @@ actor GoldenGateAXSnapshotProvider {
         logger.info(
             "Main-process Golden Gate inventory completed: items=\(result.items.count, privacy: .public), controls=\(result.items.count(where: \.isBarlineControlItem), privacy: .public), built=\(built.items.count, privacy: .public), retainedAdded=\(result.items.count - built.items.count, privacy: .public)"
         )
-        return result
+        return envelope
     }
 
     func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {

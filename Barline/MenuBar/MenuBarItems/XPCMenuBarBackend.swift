@@ -36,6 +36,15 @@ actor XPCMenuBarBackend: MenuBarBackend {
         return try await connection.snapshot()
     }
 
+    func authorityObservation(freshness: MenuBarObservationFreshness) async throws -> MenuBarAuthorityObservation {
+        if #available(macOS 27.0, *) {
+            return try await goldenGateProvider.authorityObservation(freshness: freshness)
+        }
+        // The Tahoe helper enumerates anew. It supplies no platform-specific
+        // scan context, and persisted snapshot bytes cannot construct it.
+        return try await MenuBarAuthorityObservation(snapshot: connection.snapshot())
+    }
+
     func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
         if #available(macOS 27.0, *) {
             return try await goldenGateProvider.move(operation)
