@@ -42,6 +42,13 @@ enum AXChildrenRead {
     case failure(AXReadFailure)
 }
 
+enum AXElementRead {
+    case element(AXUIElement)
+    case noValue
+    case unsupported
+    case failure(AXReadFailure)
+}
+
 /// One scan's cancellation handler revokes this signal before queued AX work
 /// is admitted. Unlike Task.isCancelled, it survives dispatch thread hops.
 final class AXReadCancellation: @unchecked Sendable {
@@ -62,6 +69,47 @@ final class AXReadCancellation: @unchecked Sendable {
 }
 
 enum AXIdentityReadSupport {
+    /// The production extras adapter uses this orchestration, including the
+    /// returned root's timeout adoption. No IPC or adoption may start after
+    /// cancellation/deadline, and late results remain unknown.
+    static func element(
+        deadline: UInt64,
+        now: () -> UInt64,
+        cancelled: () -> Bool,
+        setTimeout: (Float) -> AXError,
+        copy: () -> (AXError, CFTypeRef?),
+        adopt: (AXUIElement) -> AXError
+    ) -> AXElementRead {
+        let result = perform(deadline: deadline, now: now, cancelled: cancelled, setTimeout: setTimeout, operation: copy)
+        switch result {
+        case let .failure(error): return .failure(error)
+        case let .success((status, value)):
+            let read = decodeElement(status: status, value: value)
+            if case let .element(element) = read {
+                guard !cancelled() else { return .failure(AXReadFailure(.cancelled)) }
+                guard now() < deadline else { return .failure(AXReadFailure(.deadlineExceeded)) }
+                let adoptionStatus = adopt(element)
+                guard !cancelled() else { return .failure(AXReadFailure(.cancelled)) }
+                guard now() < deadline else { return .failure(AXReadFailure(.deadlineExceeded)) }
+                guard adoptionStatus == .success else { return .failure(failure(adoptionStatus)) }
+            }
+            return read
+        }
+    }
+
+    static func decodeElement(status: AXError, value: CFTypeRef?) -> AXElementRead {
+        switch status {
+        case .noValue: return .noValue
+        case .attributeUnsupported: return .unsupported
+        case .success:
+            guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
+                return .failure(AXReadFailure(.wrongType))
+            }
+            return .element(unsafeDowncast(value, to: AXUIElement.self))
+        default: return .failure(failure(status))
+        }
+    }
+
     static func failure(_ error: AXError) -> AXReadFailure {
         let kind: AXReadFailure.Kind = switch error {
         case .invalidUIElement: .invalidElement

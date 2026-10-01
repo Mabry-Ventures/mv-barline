@@ -1,5 +1,38 @@
 # Barline execution plan
 
+## Live publisher verification and typed extras — October 1, 2026
+
+The runtime verifier now obtains a non-Codable, privately constructed witness
+only after fixed Apple-anchor validity, exact MenuBarAgent sealed identity,
+bounded code identity and repeated live kernel/process checks. Admission is
+checked between native Security calls. The returned AX extras root uses the
+same injected copy/adoption flow tested for cancellation, timeout and failure.
+The 73 AX checks, 106 publisher checks, 796 Core tests, repository fast gate
+and Xcode 27 Debug app/helper compile pass. Both independent reviewers approve
+the source prerequisites, not future presence integration or release. The live
+adapter passed on CODEX01 27.0.1/26A434 with a 20-byte code identity. It neither
+performs AX reads nor changes the installed application.
+
+A separately signed, supervised native DND diagnostic observed the exact
+MenuBarAgent-published Focus node `com.apple.menuextra.focusmode`, role
+`AXMenuBarItem`, subrole `AXMenuExtra`, with the same verified publisher and
+element-owner lifetime. DND selected value 1 was observed. The child cycle is
+FAIL: after DND was turned off, the Focus node outlived its two-second inventory
+settling window. A fresh supervisor recovery independently verified the DND
+checkbox 0, main Focus 0, closed panel and two original identifier sets. This
+is positive identity evidence plus a failed settling test, not a complete
+presence/absence contract or a successful release journey. No native Barline
+assessment, profile or permission was changed by the diagnostic.
+
+Runtime receipts remain ignored under `.artifacts/fresh-observation/`.
+Diagnostic executable SHA256:
+`6cda23df2024c9d871b28e7deab49d977511b19fce07cf56b5273b47ed25fea6`.
+The AX code `-25212` is correctly classified as no-value, not unsupported;
+the built-in DND description was used only as GUI test input selection.
+The next slice transports atomic, non-Codable observation envelopes while
+keeping all missing-item rules strict until the full projection is connected.
+Installed 152 and public 142 remain unchanged; OS 26 runtime is unavailable.
+
 ## Bounded typed Accessibility observations — October 1, 2026
 
 Exact-node identifier/role/subrole reads and bounded children reads now retain

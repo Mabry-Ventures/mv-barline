@@ -142,6 +142,33 @@ enum AXHelpers {
         }
     }
 
+    /// Authority scans use this typed path, not the coarse legacy inventory
+    /// disposition. Unsupported and no-value cannot prove complete coverage.
+    static func boundedExtrasMenuBar(
+        for app: Application, deadline: UInt64, cancellation: AXReadCancellation
+    ) -> AXElementRead {
+        guard !Task.isCancelled, !cancellation.isCancelled else { return .failure(AXReadFailure(.cancelled)) }
+        guard DispatchTime.now().uptimeNanoseconds < deadline else { return .failure(AXReadFailure(.deadlineExceeded)) }
+        let observed: AXElementRead = run(on: app.element) {
+            defer { _ = AXUIElementSetMessagingTimeout(app.element, 0.25) }
+            return AXIdentityReadSupport.element(
+                deadline: deadline,
+                now: { DispatchTime.now().uptimeNanoseconds },
+                cancelled: { cancellation.isCancelled },
+                setTimeout: { AXUIElementSetMessagingTimeout(app.element, $0) },
+                copy: {
+                    var value: CFTypeRef?
+                    let status = AXUIElementCopyAttributeValue(app.element, kAXExtrasMenuBarAttribute as CFString, &value)
+                    return (status, value)
+                },
+                adopt: { AXUIElementSetMessagingTimeout($0, 0.25) }
+            )
+        }
+        guard !Task.isCancelled, !cancellation.isCancelled else { return .failure(AXReadFailure(.cancelled)) }
+        guard DispatchTime.now().uptimeNanoseconds < deadline else { return .failure(AXReadFailure(.deadlineExceeded)) }
+        return observed
+    }
+
     /// Reads one node's exact identity tuple without combining descendants,
     /// normalizing strings or converting a failed read into an absent value.
     static func identityAttributes(

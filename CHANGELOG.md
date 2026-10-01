@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Runtime publisher checks require the exact Apple signing anchor and sealed
+  identity, a live kernel process lifetime and bounded signing metadata. Typed
+  AX extras reads reject late root setup as well as late attribute results.
+  These prerequisites do not yet authorize a platform-presence exception.
+
 - Authority-reader prerequisites preserve typed Accessibility errors, bounded
   exact-node identities and children, and cancellation across dispatch hops.
   Failed, late, duplicate or malformed reads cannot prove a control is absent.

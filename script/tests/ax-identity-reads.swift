@@ -142,6 +142,123 @@ enum AXIdentityReadTests {
 
         let first = AXUIElementCreateApplication(ProcessInfo.processInfo.processIdentifier)
         let second = AXUIElementCreateSystemWide()
+        if case let .element(value) = AXIdentityReadSupport.decodeElement(status: .success, value: first) {
+            expect(CFEqual(value, first), "exact_element_decoded")
+        } else {
+            expect(false, "element_missing")
+        }
+        for (status, kind) in [(AXError.cannotComplete, AXReadFailure.Kind.cannotComplete),
+                               (.apiDisabled, .apiDisabled), (.invalidUIElement, .invalidElement)]
+        {
+            if case let .failure(error) = AXIdentityReadSupport.decodeElement(status: status, value: first) {
+                expect(error == AXReadFailure(kind, error: status), "element_error_not_presence_or_absence_\(status.rawValue)")
+            } else {
+                expect(false, "element_error_erased")
+            }
+        }
+        if case .noValue = AXIdentityReadSupport.decodeElement(status: .noValue, value: first) {
+            expect(true, "element_no_value_distinct")
+        } else {
+            expect(false, "element_no_value_erased")
+        }
+        if case .unsupported = AXIdentityReadSupport.decodeElement(status: .attributeUnsupported, value: nil) {
+            expect(true, "element_unsupported_distinct")
+        } else {
+            expect(false, "element_unsupported_erased")
+        }
+        for raw in [nil, "wrong" as CFString, kCFNull, NSNumber(value: 1), [] as CFArray, wrongAXValue] as [CFTypeRef?] {
+            if case let .failure(error) = AXIdentityReadSupport.decodeElement(status: .success, value: raw) {
+                expect(error.kind == .wrongType, "element_success_wrong_type")
+            } else {
+                expect(false, "element_type_unchecked")
+            }
+        }
+        if case let .failure(error) = AXIdentityReadSupport.decodeElement(status: .failure, value: first) {
+            expect(error == AXReadFailure(.otherAXError, error: .failure), "generic_element_error_preserved")
+        } else {
+            expect(false, "generic_element_error_erased")
+        }
+
+        var elementTimeouts = 0
+        var elementCopies = 0
+        var elementAdoptions = 0
+        var elementCancelled = false
+        func elementRead(status: AXError = .success, raw: CFTypeRef? = first, interruptAt: String = "",
+                         adoptionStatus: AXError = .success) -> AXElementRead
+        {
+            elementTimeouts = 0; elementCopies = 0; elementAdoptions = 0
+            elementCancelled = interruptAt == "before"
+            now = interruptAt == "expired" ? 100_000_001 : 1
+            return AXIdentityReadSupport.element(
+                deadline: 100_000_001, now: { now }, cancelled: { elementCancelled },
+                setTimeout: { _ in
+                    elementTimeouts += 1
+                    if interruptAt == "timeout" {
+                        elementCancelled = true
+                    }
+                    return .success
+                }, copy: {
+                    elementCopies += 1
+                    if interruptAt == "copy" {
+                        elementCancelled = true
+                    }
+                    if interruptAt == "lateCopy" {
+                        now = 100_000_001
+                    }
+                    return (status, raw)
+                }, adopt: { value in
+                    elementAdoptions += 1
+                    expect(CFEqual(value, first), "exact_returned_root_adopted")
+                    if interruptAt == "adopt" {
+                        elementCancelled = true
+                    }
+                    if interruptAt == "lateAdopt" {
+                        now = 100_000_001
+                    }
+                    return adoptionStatus
+                }
+            )
+        }
+        func elementFailure(_ read: AXElementRead, _ kind: AXReadFailure.Kind) -> Bool {
+            if case let .failure(error) = read {
+                return error.kind == kind
+            }
+            return false
+        }
+        expect(elementFailure(elementRead(interruptAt: "before"), .cancelled) && elementTimeouts == 0 && elementCopies == 0,
+               "cancelled_element_not_admitted")
+        expect(elementFailure(elementRead(interruptAt: "expired"), .deadlineExceeded) && elementTimeouts == 0,
+               "expired_element_not_admitted")
+        expect(elementFailure(elementRead(interruptAt: "timeout"), .cancelled) && elementCopies == 0 && elementAdoptions == 0,
+               "cancel_at_timeout_no_element_copy")
+        expect(elementFailure(elementRead(interruptAt: "copy"), .cancelled) && elementAdoptions == 0,
+               "cancelled_element_copy_no_adoption")
+        expect(elementFailure(elementRead(interruptAt: "lateCopy"), .deadlineExceeded) && elementAdoptions == 0,
+               "late_element_copy_no_adoption")
+        expect(elementFailure(elementRead(interruptAt: "adopt"), .cancelled), "cancelled_root_adoption_no_publication")
+        expect(elementFailure(elementRead(interruptAt: "lateAdopt"), .deadlineExceeded), "late_root_adoption_no_publication")
+        expect(elementFailure(elementRead(adoptionStatus: .invalidUIElement), .invalidElement), "invalid_root_adoption_unknown")
+        expect(elementFailure(elementRead(raw: kCFNull), .wrongType) && elementAdoptions == 0,
+               "malformed_element_not_adopted")
+        for status in [AXError.noValue, .attributeUnsupported] {
+            expect(elementFailure(elementRead(status: status, interruptAt: "lateCopy"), .deadlineExceeded) && elementAdoptions == 0,
+                   "late_no_value_or_unsupported_not_admitted_\(status.rawValue)")
+        }
+        if case .noValue = elementRead(status: .noValue) {
+            expect(elementAdoptions == 0, "no_value_not_adopted")
+        } else {
+            expect(false, "no_value_orchestration_erased")
+        }
+        if case .unsupported = elementRead(status: .attributeUnsupported) {
+            expect(elementAdoptions == 0, "unsupported_not_adopted")
+        } else {
+            expect(false, "unsupported_orchestration_erased")
+        }
+        if case let .element(value) = elementRead() {
+            expect(CFEqual(value, first) && elementCopies == 1 && elementAdoptions == 1, "complete_element_adoption")
+        } else {
+            expect(false, "element_orchestration_failed")
+        }
         var copies = 0
         func children(counts: [(AXError, CFIndex)], raw: CFTypeRef?, maximum: Int = 2, late: Bool = false) -> AXChildrenRead {
             var index = 0

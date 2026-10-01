@@ -62,6 +62,21 @@ thread hops; callers must wire its task cancellation handler. These helpers
 are not yet connected to publisher attestation or absence authority. Equal
 child counts alone do not attest equal membership.
 
+The typed extras copy/adoption path and live publisher verifier are separately
+implemented and tested. Fixed Apple-anchor and sealed-ID validity, kernel
+lifetime and bounded signing metadata produce a privately constructed runtime
+witness. Security calls remain synchronous and non-preemptible: callers must
+run off the main actor, wire cancellation, and reject late publication.
+
+On CODEX01 27.0.1/26A434, a supervised native DND ON observation now captured
+the exact Focus tuple `com.apple.menuextra.focusmode` / `AXMenuBarItem` /
+`AXMenuExtra`, published and owned by the verified MenuBarAgent lifetime.
+DND OFF was independently restored. The child settling gate failed because
+the node remained beyond its two-second window; the fresh recovery gate later
+verified two original inventories. This does not qualify absence under native
+Barline suppression, scene/display coverage or production catalogue admission.
+Do not activate an exception on the strength of this single positive tuple.
+
 Preserve typed AX read outcomes and their actual errors. A failed children read
 is unknown, not an empty menu bar. Explicitly scan the relevant owner despite
 the normal owner-probe schedule. Read assertion receipts before and after the
