@@ -15,10 +15,12 @@ struct ProfilesSettingsPane: View {
     @EnvironmentObject var appState: AppState
     @ObservedObject var manager: ProfileManager
     @State private var profileName = "Work"
+    @StateObject private var captureSubmission = ProfileCaptureSubmission()
     @State private var editedProfile: BarlineProfile?
     @State private var exportDocument: ProfileArchiveDocument?
     @State private var showsArchiveExporter = false
     @State private var showsArchiveImporter = false
+    @State private var archiveSelectionNotice: String?
     @State private var focusLayoutID: UUID?
     @State private var confirmedRecoveryToken: UUID?
     @State private var showsFocusRecoveryConfirmation = false
@@ -31,9 +33,14 @@ struct ProfilesSettingsPane: View {
         manager.profiles.first { $0.id == focusLayoutID }
     }
 
+    private var operationsBusy: Bool {
+        manager.isBusy || captureSubmission.isSubmitting
+    }
+
     var body: some View {
         Form {
             focusSetupSection
+                .disabled(operationsBusy)
 
             Section("Menu Bar Layouts") {
                 if manager.profiles.isEmpty {
@@ -74,13 +81,22 @@ struct ProfilesSettingsPane: View {
                     }
                 }
             }
+            .disabled(operationsBusy)
 
             Section("Create Menu Bar Layout") {
+                // Do not disable the first-responder text field as part of an
+                // asynchronous capture's environment transition.
                 TextField("Layout name", text: $profileName)
                 HStack {
                     Button("Capture Current Layout") {
-                        Task { await manager.captureCurrentProfile(named: profileName) }
+                        captureSubmission.submit(
+                            name: profileName,
+                            whenAllowed: !manager.isBusy && appState.permissions.accessibility.hasPermission
+                        ) { capturedName in
+                            await manager.captureCurrentProfile(named: capturedName)
+                        }
                     }
+                    .disabled(operationsBusy)
                     .disabled(profileName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     .disabled(!appState.permissions.accessibility.hasPermission)
                 }
@@ -91,8 +107,10 @@ struct ProfilesSettingsPane: View {
             }
 
             displayLayoutsSection
+                .disabled(operationsBusy)
 
             ContextualRulesSection(manager: appState.contextualRules, profiles: manager.profiles)
+                .disabled(operationsBusy)
 
             Section("Import and Export") {
                 HStack {
@@ -101,6 +119,7 @@ struct ProfilesSettingsPane: View {
                     }
                     .disabled(!appState.permissions.accessibility.hasPermission)
                     Button("Import Layout Archive…") {
+                        archiveSelectionNotice = nil
                         showsArchiveImporter = true
                     }
                     Button("Export All Layouts…") {
@@ -115,6 +134,7 @@ struct ProfilesSettingsPane: View {
                 Text("Imports are validated and previewed before anything is saved. Existing profiles are never replaced without explicit approval.")
                     .foregroundStyle(.secondary)
             }
+            .disabled(operationsBusy)
 
             if !manager.pendingIceImports.isEmpty {
                 Section("Ice Import Preview") {
@@ -141,6 +161,7 @@ struct ProfilesSettingsPane: View {
                     }
                     Button("Cancel", role: .cancel) { manager.cancelIceImports() }
                 }
+                .disabled(operationsBusy)
             }
 
             if let preview = manager.pendingArchiveImport {
@@ -175,6 +196,7 @@ struct ProfilesSettingsPane: View {
                         }
                     }
                 }
+                .disabled(operationsBusy)
             }
 
             Section("Recovery") {
@@ -209,52 +231,76 @@ struct ProfilesSettingsPane: View {
                 }
                 HStack {
                     Button("Undo Layout Change") {
-                        Task { await manager.undoLayoutChange() }
+                        guard !operationsBusy else { return }
+                        Task {
+                            guard !operationsBusy else { return }
+                            await manager.undoLayoutChange()
+                        }
                     }
                     .keyboardShortcut("z", modifiers: .command)
                     Button("Redo Layout Change") {
-                        Task { await manager.redoLayoutChange() }
+                        guard !operationsBusy else { return }
+                        Task {
+                            guard !operationsBusy else { return }
+                            await manager.redoLayoutChange()
+                        }
                     }
                     .keyboardShortcut("z", modifiers: [.command, .shift])
                     Button("Restore Last-Known-Good Layout") {
-                        Task { await manager.restoreLastKnownGoodLayout() }
+                        guard !operationsBusy else { return }
+                        Task {
+                            guard !operationsBusy else { return }
+                            await manager.restoreLastKnownGoodLayout()
+                        }
                     }
                 }
                 .disabled(!appState.permissions.accessibility.hasPermission)
                 Text("Undo and redo keep a bounded in-memory layout history. Last-known-good restore does not delete profiles or reset unrelated settings.")
                     .foregroundStyle(.secondary)
             }
+            .disabled(operationsBusy)
 
             if let statusMessage = manager.statusMessage {
                 Section { Text(statusMessage).accessibilityIdentifier("profile-status") }
             }
+            if let archiveSelectionNotice {
+                Section { Text(archiveSelectionNotice) }
+            }
         }
         .formStyle(.grouped)
-        .disabled(manager.isBusy)
         .confirmationDialog("Restore the pre-Focus layout?", isPresented: $showsFocusRecoveryConfirmation) {
             Button("Restore Pre-Focus Layout") {
-                guard let token = confirmedRecoveryToken else { return }
-                Task { await manager.restoreInterruptedFocusLayout(confirmedToken: token) }
+                guard !operationsBusy, let token = confirmedRecoveryToken else { return }
+                Task {
+                    guard !operationsBusy else { return }
+                    await manager.restoreInterruptedFocusLayout(confirmedToken: token)
+                }
             }
+            .disabled(operationsBusy)
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This replaces the current menu bar arrangement and layout settings with the saved pre-Focus checkpoint. Saved layouts are not deleted. If restoration cannot be verified, the checkpoint is retained.")
         }
         .alert("Restore available items?", isPresented: $showsAvailableRecoveryConfirmation) {
             Button("Restore Available Items") {
-                guard let token = confirmedRecoveryToken, let prepared = availableRecovery else { return }
-                availableRecovery = nil
-                Task { await manager.restoreAvailableFocusLayout(confirmedToken: token, prepared: prepared) }
+                guard !operationsBusy, let token = confirmedRecoveryToken, let prepared = availableRecovery else { return }
+                Task {
+                    guard !operationsBusy else { return }
+                    availableRecovery = nil
+                    await manager.restoreAvailableFocusLayout(confirmedToken: token, prepared: prepared)
+                }
             }
+            .disabled(operationsBusy)
             Button("Cancel", role: .cancel) { availableRecovery = nil }
         } message: {
             Text("\(availableRecovery?.preview.missingItemIDs.count ?? 0) saved items are unavailable; \(availableRecovery?.preview.addedItemIDs.count ?? 0) new items will be preserved. This replaces the available items’ arrangement and layout settings. The original checkpoint stays available. Any change since this preview cancels recovery.")
         }
         .confirmationDialog("Discard the archived recovery checkpoint?", isPresented: $showsArchiveRemovalConfirmation) {
             Button("Discard Archived Checkpoint", role: .destructive) {
-                guard let token = archivedRecoveryToken else { return }
+                guard !operationsBusy, let token = archivedRecoveryToken else { return }
                 manager.discardArchivedFocusRecovery(confirmedToken: token)
             }
+            .disabled(operationsBusy)
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("This permanently removes only the previous partial recovery checkpoint. The current arrangement, saved layouts, and any newer interrupted Focus transaction are preserved.")
@@ -274,9 +320,11 @@ struct ProfilesSettingsPane: View {
         .sheet(item: $editedProfile) { profile in
             ProfileEditorSheet(
                 profile: profile,
-                canResetFromWorkspace: appState.permissions.accessibility.hasPermission
+                canResetFromWorkspace: appState.permissions.accessibility.hasPermission,
+                canPerformOperations: !operationsBusy
             ) { name, symbol, groups, spacers, variants in
-                await manager.update(
+                guard !operationsBusy else { return false }
+                return await manager.update(
                     profile,
                     name: name,
                     symbol: symbol,
@@ -285,9 +333,13 @@ struct ProfilesSettingsPane: View {
                     displayOverrides: variants
                 )
             } onReset: {
-                Task { await manager.resetFromCurrentWorkspace(profile) }
+                guard !operationsBusy else { return false }
+                return await manager.resetFromCurrentWorkspace(profile)
             } onCapture: { draft in
-                try await appState.compatibilityCoordinator.captureDisplayVariant(profile: draft)
+                guard !operationsBusy else {
+                    throw MenuBarBackendError.operationFailed("another profile operation is in progress")
+                }
+                return try await appState.compatibilityCoordinator.captureDisplayVariant(profile: draft)
             }
         }
         .fileImporter(
@@ -298,8 +350,19 @@ struct ProfilesSettingsPane: View {
             switch result {
             case let .success(urls):
                 guard let url = urls.first else { return }
-                Task { await manager.previewArchiveImport(from: url) }
+                guard !operationsBusy else {
+                    archiveSelectionNotice = "Finish the current operation, then select the layout archive again."
+                    return
+                }
+                Task {
+                    guard !operationsBusy else {
+                        archiveSelectionNotice = "Finish the current operation, then select the layout archive again."
+                        return
+                    }
+                    await manager.previewArchiveImport(from: url)
+                }
             case .failure:
+                guard !operationsBusy else { return }
                 manager.statusMessage = "No profile archive was selected."
             }
         }
@@ -310,6 +373,7 @@ struct ProfilesSettingsPane: View {
             defaultFilename: "Barline Layouts.json"
         ) { result in
             exportDocument = nil
+            guard !operationsBusy else { return }
             switch result {
             case .success:
                 manager.statusMessage = "Profile archive exported."

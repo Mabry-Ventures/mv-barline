@@ -2,7 +2,7 @@
 
 The public latest release is Barline 1.0.65 (build 142), published September 27,
 2026 at `887d335`. See [execution history](EXECUTION_PLAN.md). The clock repair
-in 1.0.66 (build 143) is an internal candidate, not a qualified release. Evidence
+in 1.0.66 (build 148) is an internal candidate, not a qualified release. Evidence
 is bound to exact source and signed binary; it is not blanket approval for
 later changes.
 
@@ -39,11 +39,12 @@ later changes.
   guarantee. Volume, brightness, capture indicators, Globe+N, multiple displays,
   and every restoration failure mode need separate qualification.
 
-- The internal unnotarized 1.0.66 candidate's own control is not reachable under
+- An earlier internal unnotarized 1.0.66 candidate's own control was not reachable under
   a controlled concealment assertion on CPLCODEX01. The same candidate works
   with an empty concealment configuration; notarized 1.0.65 retains its control
   under the same fixture configuration. Source and trust both differ, so
-  notarization is a testable hypothesis, not a proven fix. See the
+  notarization was a testable hypothesis, not a proven fix. This historical
+  experiment does not describe the later signed candidates. See the
   [takeover evidence and next comparison](MACOS27_TAKEOVER.md).
 
 - Individual AX operations have timeouts, but the complete inventory crawl has
@@ -73,9 +74,11 @@ validation requirements; see [search architecture](SEARCH_AND_APPLE_INTELLIGENCE
 The 1.0.65 release evidence is listed in [execution history](EXECUTION_PLAN.md).
 No macOS 26 runtime is currently available for the takeover candidate. Local
 Xcode 27 builds and pure tests on macOS 27 cannot certify macOS 26 behavior.
-The September 30 notarization preflight found the stored `barline-notary`
-profile, but Apple rejected authentication with HTTP 401. No new candidate is
-notarized or distribution-ready on that evidence.
+The September 30 notarization preflight rejected authentication with HTTP 401.
+That boundary was resolved: builds 146 and 147 passed notarization, stapling and
+Gatekeeper. Their trust receipts do not qualify the changed build 148, and
+notarization alone is not production-readiness proof. See the current
+[candidate qualification contract](MACOS_27_BUILD_148_READINESS.md).
 
 ### Historical 1.0.31 evidence
 

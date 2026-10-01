@@ -427,9 +427,10 @@ final class ProfileManager: ObservableObject {
         return didSave
     }
 
-    func resetFromCurrentWorkspace(_ profile: BarlineProfile) async {
+    func resetFromCurrentWorkspace(_ profile: BarlineProfile) async -> Bool {
         appState?.contextualRules.pauseForManualChange()
-        guard let appState else { return }
+        guard let appState else { return false }
+        var didReset = false
         await performOperation(successMessage: "Profile reset from the current workspace.") {
             guard let index = self.profiles.firstIndex(where: { $0.id == profile.id }) else {
                 throw MenuBarBackendError.operationFailed("profile is unavailable")
@@ -459,6 +460,7 @@ final class ProfileManager: ObservableObject {
             )
         } completion: { [weak self] updated in
             guard let self else { return }
+            didReset = true
             profiles = updated.profiles
             if activeProfileID == updated.profileID || updated.clearedAuthority {
                 activeProfileID = nil
@@ -471,6 +473,7 @@ final class ProfileManager: ObservableObject {
             }
             publishCatalog()
         }
+        return didReset
     }
 
     func restoreLastKnownGoodLayout() async {
@@ -591,6 +594,8 @@ final class ProfileManager: ObservableObject {
     }
 
     func archiveData() async -> Data? {
+        await profileOperationSemaphore.wait()
+        defer { profileOperationSemaphore.signal() }
         guard !profiles.isEmpty else {
             statusMessage = "Create a profile before exporting an archive."
             return nil
@@ -612,6 +617,8 @@ final class ProfileManager: ObservableObject {
     }
 
     func previewArchiveImport(from url: URL) async {
+        await profileOperationSemaphore.wait()
+        defer { profileOperationSemaphore.signal() }
         isBusy = true
         defer { isBusy = false }
         do {
@@ -703,6 +710,8 @@ final class ProfileManager: ObservableObject {
     }
 
     func discoverIceImports() async {
+        await profileOperationSemaphore.wait()
+        defer { profileOperationSemaphore.signal() }
         guard let appState else { return }
         isBusy = true
         defer { isBusy = false }

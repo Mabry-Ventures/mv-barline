@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.66 (build 147) — qualification candidate, October 1, 2026
+## 1.0.66 (build 148) — qualification candidate, October 1, 2026
 
 ### macOS 27
 
@@ -32,6 +32,13 @@
 
 ### Both
 
+- Capturing a layout keeps the new-layout name editable while competing actions
+  are locked. Rapid duplicate captures are rejected and the submitted name is
+  preserved even if the draft changes while capture runs. This is a mitigation
+  under installed qualification, not a confirmed fix for every Settings hang.
+- Import/export preview work shares the profile-operation lock, preventing one
+  operation from clearing another operation's busy indication.
+- Settings uses the native fixed toolbar style instead of self-observing writes.
 - Saved layouts are marked Active only after their authority record and token
   are verified. Failed saves stop automatic retries without consuming a pending
   Focus recovery checkpoint or pretending the applied layout was saved.
@@ -44,7 +51,7 @@
   occupancy is capped even when cancellation does not immediately release a read.
 
 These changes are an internal qualification candidate, not a published release.
-Installed tests from builds 144 through 146 do not qualify this candidate. Both OS runtime
+Installed tests from builds 144 through 147 do not qualify this candidate. Both OS runtime
 lanes and the remaining release gates must pass before publication.
 
 ## 1.0.65 (build 142) — September 27, 2026

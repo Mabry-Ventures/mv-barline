@@ -230,6 +230,7 @@ run_fast() {
     if [[ "$(uname -s)" == Darwin ]]; then
         run_step "app-intents-source-topology" ruby ./script/validate-app-intents-topology.rb
         run_step "latest-optional-owner" bash ./script/test-latest-optional-publisher.sh
+        run_step "profile-capture-submission" bash ./script/test-profile-capture-submission.sh
         run_step "event-delivery-ordering" bash ./script/test-event-delivery.sh
         run_step "search-preferences-atomicity" bash ./script/test-search-preferences.sh
         run_step "feature-preferences-atomicity" bash ./script/test-feature-preferences.sh

@@ -1,5 +1,22 @@
 # Barline execution plan
 
+## Build 148 profile-capture mitigation — October 1, 2026
+
+Build 147 exposed an intermittent Settings capture freeze after the synthetic
+profile had been saved. Sampling localized the saturated work to AppKit/SwiftUI
+focus and field observation, not profile storage, but baseline passes and
+debugger perturbation prevent a confirmed causal attribution. Build 148 keeps
+the capture name editable, snapshots submissions synchronously, locks competing
+actions, guards already-open modal callbacks, and replaces toolbar KVO with the
+native fixed-style API. Independently identified import/export busy owners now
+use the existing profile serialization lock.
+
+Focused production admission tests, the 752-test Core suite, fast gates and
+application compilation passed during iteration. They do not qualify the new
+signed binary. Repeated uninstrumented installed captures and all other exact
+candidate gates remain required. See [build 148 readiness](MACOS_27_BUILD_148_READINESS.md).
+The public build and Claude's checkout remain unchanged.
+
 ## Build 147 authority publication repair — October 1, 2026
 
 Build 146's installed profile happy path passed, but a source audit identified

@@ -9,8 +9,9 @@ import SwiftUI
 struct ProfileEditorSheet: View {
     let profile: BarlineProfile
     let canResetFromWorkspace: Bool
+    let canPerformOperations: Bool
     let onSave: (String, String?, [ProfileGroup], [ProfileSpacer], [DisplayProfileOverride]) async -> Bool
-    let onReset: () -> Void
+    let onReset: () async -> Bool
     let onCapture: (BarlineProfile) async throws -> DisplayProfileOverride
 
     @Environment(\.dismiss) private var dismiss
@@ -22,17 +23,20 @@ struct ProfileEditorSheet: View {
     @State private var showsResetConfirmation = false
     @State private var isCapturing = false
     @State private var isSaving = false
+    @State private var isResetting = false
     @State private var showsSaveFailure = false
 
     init(
         profile: BarlineProfile,
         canResetFromWorkspace: Bool,
+        canPerformOperations: Bool,
         onSave: @escaping (String, String?, [ProfileGroup], [ProfileSpacer], [DisplayProfileOverride]) async -> Bool,
-        onReset: @escaping () -> Void,
+        onReset: @escaping () async -> Bool,
         onCapture: @escaping (BarlineProfile) async throws -> DisplayProfileOverride
     ) {
         self.profile = profile
         self.canResetFromWorkspace = canResetFromWorkspace
+        self.canPerformOperations = canPerformOperations
         self.onSave = onSave
         self.onReset = onReset
         self.onCapture = onCapture
@@ -100,7 +104,7 @@ struct ProfileEditorSheet: View {
                     }
                 }
 
-                DisplayVariantsEditor(variants: $variants, isCapturing: $isCapturing, canCapture: canResetFromWorkspace) {
+                DisplayVariantsEditor(variants: $variants, isCapturing: $isCapturing, canCapture: canResetFromWorkspace && canPerformOperations && !isResetting) {
                     var draft = profile
                     draft.groups = groups
                     draft.spacers = spacers
@@ -111,7 +115,7 @@ struct ProfileEditorSheet: View {
                     Button("Reset Profile from Current Workspace", role: .destructive) {
                         showsResetConfirmation = true
                     }
-                    .disabled(!canResetFromWorkspace || isCapturing)
+                    .disabled(!canResetFromWorkspace || !canPerformOperations || isCapturing || isResetting)
                     Text("Replaces this profile’s layout and modeled workspace settings, and removes its groups, spacers, and display overrides. Other profiles and app settings are preserved.")
                         .foregroundStyle(.secondary)
                 }
@@ -120,10 +124,11 @@ struct ProfileEditorSheet: View {
             .navigationTitle("Edit Layout")
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
-                    Button("Cancel") { dismiss() }.disabled(isSaving)
+                    Button("Cancel") { dismiss() }.disabled(isSaving || isResetting)
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
+                        guard canPerformOperations, !isSaving, !isCapturing, !isResetting else { return }
                         isSaving = true
                         Task {
                             let saved = await onSave(normalizedName, normalizedSymbol, groups, spacers, variants)
@@ -136,7 +141,7 @@ struct ProfileEditorSheet: View {
                         }
                     }
                     .disabled(
-                        isCapturing || normalizedName.isEmpty || groups.contains {
+                        !canPerformOperations || isCapturing || isResetting || normalizedName.isEmpty || groups.contains {
                             $0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                         }
                     )
@@ -145,8 +150,8 @@ struct ProfileEditorSheet: View {
         }
         .frame(minWidth: 560, minHeight: 520)
         .disabled(isSaving)
-        .interactiveDismissDisabled(isSaving)
-        .alert("Couldn’t save this layout", isPresented: $showsSaveFailure) {
+        .interactiveDismissDisabled(isSaving || isResetting)
+        .alert("Couldn’t update this layout", isPresented: $showsSaveFailure) {
             Button("OK", role: .cancel) {}
         } message: {
             Text("Your draft is still here. Check local storage and make sure the layout has not changed elsewhere. A layout controlled by Focus must be released before its structure can be edited.")
@@ -157,9 +162,19 @@ struct ProfileEditorSheet: View {
             titleVisibility: .visible
         ) {
             Button("Reset Profile", role: .destructive) {
-                onReset()
-                dismiss()
+                guard canPerformOperations, !isSaving, !isCapturing, !isResetting else { return }
+                isResetting = true
+                Task {
+                    let reset = await onReset()
+                    isResetting = false
+                    if reset {
+                        dismiss()
+                    } else {
+                        showsSaveFailure = true
+                    }
+                }
             }
+            .disabled(!canPerformOperations || isSaving || isCapturing || isResetting)
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The current validated layout and supported workspace settings will replace this profile.")

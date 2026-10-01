@@ -31,6 +31,7 @@ struct DisplayVariantsEditor: View {
                 }
             }
             Button(isCapturing ? "Capturing…" : "Capture Current Menu Bar Display") {
+                guard canCapture, !isCapturing else { return }
                 isCapturing = true
                 captureTask = Task { @MainActor in
                     defer { isCapturing = false }
