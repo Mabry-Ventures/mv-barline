@@ -1211,11 +1211,7 @@ public actor MenuBarStateCoordinator {
         guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
             throw MenuBarBackendError.staleItem(operation.itemID)
         }
-        let changesGroupVisibility = source.section != operation.section &&
-            !source.id.bundleIdentifier.lowercased().hasPrefix("com.apple.")
-        let affected = Set(before.items.filter { item in
-            changesGroupVisibility ? item.id.bundleIdentifier == source.id.bundleIdentifier : item.id == source.id
-        }.map(\.id))
+        let affected = logicalMutationItemIDs(operation: operation, source: source, before: before)
         let currentByID = Dictionary(uniqueKeysWithValues: after.items.map { ($0.id, $0) })
         guard before.items.allSatisfy({ prior in
             currentByID[prior.id].map { $0.displayID == prior.displayID } ?? true
@@ -1239,6 +1235,18 @@ public actor MenuBarStateCoordinator {
                 guard previousOrder == currentOrder else { throw MenuBarBackendError.mutationSuperseded }
             }
         }
+    }
+
+    private static func logicalMutationItemIDs(
+        operation: MenuBarMoveOperation,
+        source: MenuBarItemDescriptor,
+        before: MenuBarSnapshot
+    ) -> Set<MenuBarItemID> {
+        let changesGroupVisibility = source.section != operation.section &&
+            !source.id.bundleIdentifier.lowercased().hasPrefix("com.apple.")
+        return Set(before.items.filter { item in
+            changesGroupVisibility ? item.id.bundleIdentifier == source.id.bundleIdentifier : item.id == source.id
+        }.map(\.id))
     }
 
     private static func preservingNativeVisibleOrder(
@@ -1348,6 +1356,7 @@ public actor MenuBarStateCoordinator {
         displayID: MenuBarDisplayID?,
         arrangementPlan: MenuBarArrangementExecutionPlan,
         destinationSupport: MenuBarMoveDestinationSupport,
+        transactionOwnedItemIDs: Set<MenuBarItemID>,
         now: Date
     ) async throws -> MenuBarSnapshot {
         guard arrangementPlan.nativeOrder == .preserveCurrentOrder else {
@@ -1355,11 +1364,56 @@ public actor MenuBarStateCoordinator {
         }
         let validationClockStartedAt = Date()
         let observed = try await normalizedBackendSnapshot()
-        let current = try validator.validate(
+        var current = try validator.validate(
             observed,
             previous: nil,
             now: now.addingTimeInterval(Date().timeIntervalSince(validationClockStartedAt))
         ).get()
+        if Set(current.items.map(\.id)) != Set(before.items.map(\.id)) {
+            guard destinationSupport == .logicalSectionsPreserveNativeOrder,
+                  GoldenGateConcealmentPolicy.permitsFocusDeassertionRecovery(
+                      original: before, current: current, transactionOwnedItemIDs: transactionOwnedItemIDs
+                  )
+            else {
+                throw MenuBarBackendError.operationFailed("profile recovery inventory changed")
+            }
+            try Task.checkCancellation()
+            try await backend.configureConcealment(MenuBarConcealmentConfiguration(
+                visibleItemIDs: before.items.filter { !$0.isBarlineControlItem }.map(\.id),
+                concealedItemIDs: []
+            ))
+            var stableSignature: ProfileObservationSignature?
+            var recovered: MenuBarSnapshot?
+            let attempts = max(2, retryPolicy.maximumAttempts + 2)
+            for attempt in 0 ..< attempts {
+                try Task.checkCancellation()
+                let candidate = try await validator.validate(
+                    normalizedBackendSnapshot(), previous: current,
+                    now: now.addingTimeInterval(Date().timeIntervalSince(validationClockStartedAt))
+                ).get()
+                guard GoldenGateConcealmentPolicy.preservesUnownedRecoveryInventory(
+                    original: before, current: candidate, transactionOwnedItemIDs: transactionOwnedItemIDs
+                ) else { throw MenuBarBackendError.mutationSuperseded }
+                if Set(candidate.items.map(\.id)) == Set(before.items.map(\.id)) {
+                    let signature = ProfileObservationSignature(snapshot: candidate)
+                    if signature == stableSignature {
+                        recovered = candidate
+                        break
+                    }
+                    stableSignature = signature
+                } else {
+                    stableSignature = nil
+                }
+                current = candidate
+                if attempt + 1 < attempts {
+                    try await Task.sleep(for: retryPolicy.delay(forAttempt: attempt))
+                }
+            }
+            guard let recovered else {
+                throw MenuBarBackendError.operationFailed("profile recovery inventory did not return")
+            }
+            current = recovered
+        }
         let originalLayout = Self.layout(from: before, displayID: displayID)
         let admittedLayout = Self.preservingNativeVisibleOrder(
             in: originalLayout,
@@ -1566,6 +1620,7 @@ public actor MenuBarStateCoordinator {
         let generation = mutationGeneration
         var didBeginLayoutMutation = false
         var completedLayoutMutationCount = 0
+        var attemptedLogicalMutationItemIDs = Set<MenuBarItemID>()
         var didBeginWorkspaceMutation = false
         var appliedWorkspaceRevision: UInt64?
 
@@ -1608,6 +1663,11 @@ public actor MenuBarStateCoordinator {
                     try Task.checkCancellation()
                     try await admission?()
                     didBeginLayoutMutation = true
+                    if let source = executionSnapshot.items.first(where: { $0.id == operation.itemID }) {
+                        attemptedLogicalMutationItemIDs.formUnion(Self.logicalMutationItemIDs(
+                            operation: operation, source: source, before: executionSnapshot
+                        ))
+                    }
                     _ = try await backend.move(operation)
                     completedLayoutMutationCount += 1
                     let nextSnapshot = try await validator.validate(
@@ -1770,12 +1830,14 @@ public actor MenuBarStateCoordinator {
                           arrangementPlan.nativeOrder == .preserveCurrentOrder
                 {
                     do {
+                        let ownedItemIDs = attemptedLogicalMutationItemIDs
                         verifiedRollbackSnapshot = try await withCompensation {
                             try await self.compensateSupportedArrangement(
                                 restoring: before,
                                 displayID: profileDisplayID,
                                 arrangementPlan: arrangementPlan,
                                 destinationSupport: destinationSupport,
+                                transactionOwnedItemIDs: ownedItemIDs,
                                 now: now ?? Date()
                             )
                         }

@@ -69,6 +69,73 @@ public struct GoldenGateNativeConcealmentState: Equatable, Sendable {
 public enum GoldenGateConcealmentPolicy {
     public static let allSystemItemIdentifiers = Set(0 ... 8)
 
+    /// Recovery only, never a successful-activation inventory exemption. The
+    /// native catalogue has no Focus category; an active assessment assertion
+    /// suppresses this control even with every known system item allowed.
+    public static func permitsFocusDeassertionRecovery(
+        original: MenuBarSnapshot,
+        current: MenuBarSnapshot,
+        transactionOwnedItemIDs: Set<MenuBarItemID>
+    ) -> Bool {
+        let originalIDs = Set(original.items.map(\.id))
+        let currentIDs = Set(current.items.map(\.id))
+        let missing = original.items.filter { !currentIDs.contains($0.id) }
+        guard !transactionOwnedItemIDs.isEmpty,
+              transactionOwnedItemIDs.isSubset(of: originalIDs),
+              originalIDs.count == original.items.count,
+              currentIDs.count == current.items.count,
+              currentIDs.isSubset(of: originalIDs),
+              missing.count == 1,
+              let focus = missing.first,
+              focus.section == .visible,
+              focus.isSystemItem, focus.sourceOwnership == .system,
+              ["com.apple.menubaragent", "com.apple.controlcenter"].contains(focus.id.bundleIdentifier),
+              let identifier = focus.id.accessibilityIdentifier,
+              ["focus", "focusmode", "focusmodes", "donotdisturb"].contains(
+                  (identifier.split(separator: ".").last.map(String.init) ?? identifier).lowercased()
+              ),
+              // Only restoring an all-visible original state can remove the
+              // assertion. Reasserting its nine-item list cannot restore Focus.
+              original.items.filter({ !$0.isBarlineControlItem }).allSatisfy({ $0.section == .visible })
+        else { return false }
+        return preservesUnownedRecoveryInventory(
+            original: original, current: current, transactionOwnedItemIDs: transactionOwnedItemIDs
+        )
+    }
+
+    public static func preservesUnownedRecoveryInventory(
+        original: MenuBarSnapshot,
+        current: MenuBarSnapshot,
+        transactionOwnedItemIDs: Set<MenuBarItemID>
+    ) -> Bool {
+        guard original.displayIDs == current.displayIDs,
+              original.displayIdentities == current.displayIdentities,
+              original.activeSpaceIsValid, current.activeSpaceIsValid,
+              !original.menuTrackingIsActive, !current.menuTrackingIsActive,
+              Set(original.items.map(\.id)).count == original.items.count,
+              Set(current.items.map(\.id)).count == current.items.count
+        else { return false }
+        let originalByID = Dictionary(uniqueKeysWithValues: original.items.map { ($0.id, $0) })
+        guard current.items.allSatisfy({ item in
+            guard let prior = originalByID[item.id] else { return false }
+            return item.displayID == prior.displayID &&
+                (transactionOwnedItemIDs.contains(item.id) || item.section == prior.section)
+        }) else { return false }
+        let unchangedIDs = Set(current.items.map(\.id)).subtracting(transactionOwnedItemIDs)
+        for display in Set(original.items.map(\.displayID)) {
+            for section in [MenuBarSection.hidden, .alwaysHidden] {
+                let before = original.items.filter {
+                    $0.displayID == display && $0.section == section && unchangedIDs.contains($0.id)
+                }.sorted { $0.order < $1.order }.map(\.id)
+                let after = current.items.filter {
+                    $0.displayID == display && $0.section == section && unchangedIDs.contains($0.id)
+                }.sorted { $0.order < $1.order }.map(\.id)
+                guard before == after else { return false }
+            }
+        }
+        return true
+    }
+
     public static func resolve(
         _ configuration: MenuBarConcealmentConfiguration,
         barlineBundleIdentifier: String

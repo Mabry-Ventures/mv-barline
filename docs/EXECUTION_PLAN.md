@@ -1,11 +1,38 @@
 # Barline execution plan
 
+## Build 152 native Focus boundary and conservative rollback — October 1, 2026
+
+The exact macOS 27.0.1/26A434 native catalogue has nine cases (0 through 8).
+Bounded physical probes confirm that its complete explicit allowlist preserves
+Clock and Control Center, but suppresses Focus while a third-party restriction
+is active. Deassertion restores the original observed inventory. A diagnostic
+nil-list hypothesis removed all system controls and was rejected and reverted.
+
+Build 152 repairs only failed-activation recovery: an original all-visible
+inventory, one strongly identified system-owned Focus absence and an attempted
+owned mutation may authorize one deassertion. Two stable complete observations
+must precede compensation planning. Changed identities, display ownership,
+unrelated edits, incomplete recovery and deadline expiry withhold authority.
+No missing descriptor is fabricated or exempted from successful activation.
+
+The dirty fast gate passes 780 core tests and the native transaction, topology,
+privacy, persistence, packaging and repository checks. Gemini and Astra grant
+source-bounded approval only. The next candidate still requires clean-source
+gates, packaging and installed proof. See [build 152 readiness](MACOS_27_BUILD_152_READINESS.md).
+
+Successful saved-layout transitions need an explicit platform-presence contract
+separate from manageable layout membership, plus an honest Focus-access UX.
+The choice between native Control Center access and a Barline replacement
+control is pending. OS 26, clock visibility, XCUITest setup and hardware gates
+remain open. The public build remains 142.
+
 ## Build 151 grouped execution repair — October 1, 2026
 
 Installed build 150 isolated the failure stages: activation rejected changed
 section/display inventory, workspace rollback succeeded, and layout rollback
 attempted unsupported native reordering. Inventory fell 14 to 13 with both
-controls present. The inventory loss is still unproven.
+controls present. Subsequent native probes isolated Focus suppression; see the
+build-152 entry above.
 
 Build 151 replans grouped forward and compensating operations against fresh,
 validated snapshots, bounded by a move budget. Unexpected unrelated edits or

@@ -86,6 +86,12 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
     }
 }
 
+static BOOL BLNGoldenGateAllowsAllKnownSystemItems(NSArray<NSNumber *> *items) {
+    if (items.count != 9) return NO;
+    return [[NSSet setWithArray:items] isEqualToSet:
+        [NSSet setWithArray:@[@0, @1, @2, @3, @4, @5, @6, @7, @8]]];
+}
+
 - (uint64_t)beginConcealedBundleIdentifiers:(NSArray<NSString *> *)concealedBundleIdentifiers
            allowedSystemItemIdentifiers:(NSArray<NSNumber *> *)allowedSystemItemIdentifiers
            allowedBundleIdentifiers:(NSArray<NSString *> *)allowedBundleIdentifiers {
@@ -101,7 +107,8 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
         self.activationState = 0;
     }
 
-    if (concealedBundleIdentifiers.count == 0 && allowedSystemItemIdentifiers.count == 9) {
+    BOOL allowsAllKnownSystemItems = BLNGoldenGateAllowsAllKnownSystemItems(allowedSystemItemIdentifiers);
+    if (concealedBundleIdentifiers.count == 0 && allowsAllKnownSystemItems) {
         @synchronized (self) {
             if (self.pendingToken != token) return 0;
             self.pendingClearsCurrentAssertion = YES;
@@ -127,22 +134,32 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
         return 0;
     }
 
-    id configurationAllocation = ((id (*)(id, SEL))objc_msgSend)(
-        configurationClass, @selector(alloc)
-    );
-    id configuration = ((id (*)(id, SEL, id, id))objc_msgSend)(
-        configurationAllocation,
-        configurationInitializer,
-        allowedSystemItemIdentifiers,
-        allowedBundleIdentifiers
-    );
-    if (!configuration) {
+    id configuration = nil;
+    id candidate = nil;
+    @try {
+        id configurationAllocation = ((id (*)(id, SEL))objc_msgSend)(
+            configurationClass, @selector(alloc)
+        );
+        // Both inputs are nonoptional arrays in the private runtime contract.
+        // Do not infer nil semantics from the public assessment framework's
+        // different, combined allowlist: native verification proved that nil
+        // here removes every system control rather than preserving them.
+        configuration = ((id (*)(id, SEL, id, id))objc_msgSend)(
+            configurationAllocation,
+            configurationInitializer,
+            allowedSystemItemIdentifiers,
+            allowedBundleIdentifiers
+        );
+        if (configuration) {
+            candidate = ((id (*)(id, SEL))objc_msgSend)(assertionClass, @selector(new));
+        }
+    } @catch (__unused NSException *exception) {
+        // A runtime contract rejection must not terminate the helper or replace
+        // the previously accepted assertion. Do not log exception payloads.
         [self abortToken:token];
         return 0;
     }
-
-    id candidate = ((id (*)(id, SEL))objc_msgSend)(assertionClass, @selector(new));
-    if (!candidate) {
+    if (!configuration || !candidate) {
         [self abortToken:token];
         return 0;
     }

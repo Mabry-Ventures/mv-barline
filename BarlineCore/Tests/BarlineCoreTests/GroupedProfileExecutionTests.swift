@@ -4,6 +4,92 @@ import Testing
 
 @Suite("Stateful grouped profile execution")
 struct GroupedProfileExecutionTests {
+    @Test("Native Focus suppression fails activation but recovers the original complete inventory")
+    func restoresSuppressedFocus() async throws {
+        let backend = GroupedProfileBackend(section: .visible, suppressesFocusAfterMove: true)
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let prior = BarlineProfile(name: "Prior", layout: ProfileLayout(visible: backend.siblings))
+        _ = try await coordinator.activate(profile: prior)
+        let target = BarlineProfile(name: "Hidden", layout: ProfileLayout(hidden: backend.siblings))
+        await #expect(throws: SnapshotRejectionReason.implausibleSystemItemCollapse(previous: 1, candidate: 0)) {
+            try await coordinator.activate(profile: target)
+        }
+        #expect(await backend.nativeDeassertionCount == 1)
+        #expect(await backend.visibilityMutationCount == 2)
+        #expect(await coordinator.currentSnapshot?.items.count == 4)
+        #expect(await coordinator.currentSnapshot?.items.allSatisfy { $0.section == .visible } == true)
+        #expect(await coordinator.activeProfileID == prior.id)
+    }
+
+    @Test("An acknowledged native deassertion without Focus restoration cannot publish recovery authority")
+    func rejectsIncompleteFocusRecovery() async throws {
+        let backend = GroupedProfileBackend(section: .visible, suppressesFocusAfterMove: true, restoresFocus: false)
+        let coordinator = MenuBarStateCoordinator(backend: backend, retryPolicy: .init(maximumAttempts: 1, baseDelay: .milliseconds(1)))
+        let target = BarlineProfile(name: "Hidden", layout: ProfileLayout(hidden: backend.siblings))
+        await #expect(throws: ProfileActivationRecoveryFailure.self) { try await coordinator.activate(profile: target) }
+        #expect(await backend.nativeDeassertionCount == 1)
+        #expect(await backend.visibilityMutationCount == 1)
+        #expect(await coordinator.activeProfileID == nil)
+        #expect(await coordinator.currentSnapshot == nil)
+    }
+
+    @Test("A changed inventory after native deassertion cannot authorize compensation", arguments: [
+        "different_focus_id", "different_focus_display", "unrelated_section", "configuration_failure",
+    ])
+    func rejectsChangedDeassertionRecovery(fault: String) async throws {
+        let backend = GroupedProfileBackend(
+            section: .visible, suppressesFocusAfterMove: true, focusRecoveryFault: fault
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend, retryPolicy: .init(maximumAttempts: 1, baseDelay: .milliseconds(1)))
+        let prior = BarlineProfile(name: "Prior", layout: ProfileLayout(visible: backend.siblings))
+        _ = try await coordinator.activate(profile: prior)
+        let target = BarlineProfile(name: "Hidden", layout: ProfileLayout(hidden: backend.siblings))
+        await #expect(throws: ProfileActivationRecoveryFailure.self) { try await coordinator.activate(profile: target) }
+        #expect(await backend.nativeDeassertionCount == 1)
+        #expect(await backend.visibilityMutationCount == 1)
+        #expect(await backend.nativeReorderAttempts == 0)
+        #expect(await coordinator.activeProfileID == nil)
+        #expect(await coordinator.currentSnapshot == nil)
+    }
+
+    @Test("Cancellation cannot interrupt verified native Focus recovery")
+    func recoversFocusAfterCancellation() async throws {
+        let backend = GroupedProfileBackend(
+            section: .visible, suppressesFocusAfterMove: true, cancelsAfterMove: true
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let prior = BarlineProfile(name: "Prior", layout: ProfileLayout(visible: backend.siblings))
+        _ = try await coordinator.activate(profile: prior)
+        let target = BarlineProfile(name: "Hidden", layout: ProfileLayout(hidden: backend.siblings))
+        let task = Task { try await coordinator.activate(profile: target) }
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(await backend.nativeDeassertionCount == 1)
+        #expect(await backend.visibilityMutationCount == 2)
+        #expect(await coordinator.currentSnapshot?.items.count == 4)
+        #expect(await coordinator.currentSnapshot?.items.allSatisfy { $0.section == .visible } == true)
+        #expect(await coordinator.activeProfileID == prior.id)
+    }
+
+    @Test("The Focus-return wait honors the compensation deadline and withholds authority")
+    func boundsFocusRecoveryWait() async throws {
+        let backend = GroupedProfileBackend(
+            section: .visible, suppressesFocusAfterMove: true, focusRecoveryFault: "wait_for_cancellation"
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend, compensationTimeout: .milliseconds(100))
+        let target = BarlineProfile(name: "Hidden", layout: ProfileLayout(hidden: backend.siblings))
+        do {
+            _ = try await coordinator.activate(profile: target)
+            Issue.record("A cancelled restoration observation must not authorize compensation")
+        } catch let failure as ProfileActivationRecoveryFailure {
+            #expect(failure.layoutRollbackError as? MenuBarBackendError == .timedOut)
+        }
+        #expect(await backend.nativeDeassertionCount == 1)
+        #expect(await backend.cancelledRecoveryObservationCount == 1)
+        #expect(await backend.visibilityMutationCount == 1)
+        #expect(await coordinator.activeProfileID == nil)
+        #expect(await coordinator.currentSnapshot == nil)
+    }
+
     @Test("Cancelled grouped activation compensates in its uncancelled recovery task")
     func compensatesCancellation() async throws {
         let backend = GroupedProfileBackend(section: .visible)
@@ -208,6 +294,13 @@ private actor GroupedProfileBackend: MenuBarBackend {
     private let relocatesGroupAfterMove: Bool
     private let interleavesIndependentDisplays: Bool
     private let duplicatesAfterMove: Bool
+    private let suppressesFocusAfterMove: Bool
+    private let restoresFocus: Bool
+    private let focusRecoveryFault: String?
+    private let cancelsAfterMove: Bool
+    private var suppressedFocus: MenuBarItemDescriptor?
+    private(set) var nativeDeassertionCount = 0
+    private(set) var cancelledRecoveryObservationCount = 0
     private(set) var visibilityMutationCount = 0
     private(set) var shelfMutationCount = 0
     private(set) var nativeReorderAttempts = 0
@@ -218,7 +311,8 @@ private actor GroupedProfileBackend: MenuBarBackend {
         hidesUnrelatedAfterMove: Bool = false, staleAfterMove: Bool = false,
         trackingAfterMove: Bool = false, stalls: Bool = false, unrelatedOnOtherDisplay: Bool = false,
         relocatesGroupAfterMove: Bool = false, interleavesIndependentDisplays: Bool = false,
-        duplicatesAfterMove: Bool = false
+        duplicatesAfterMove: Bool = false, suppressesFocusAfterMove: Bool = false, restoresFocus: Bool = true,
+        focusRecoveryFault: String? = nil, cancelsAfterMove: Bool = false
     ) {
         self.dropsUnrelatedAfterMove = dropsUnrelatedAfterMove
         self.hidesUnrelatedAfterMove = hidesUnrelatedAfterMove
@@ -228,6 +322,10 @@ private actor GroupedProfileBackend: MenuBarBackend {
         self.relocatesGroupAfterMove = relocatesGroupAfterMove
         self.interleavesIndependentDisplays = interleavesIndependentDisplays
         self.duplicatesAfterMove = duplicatesAfterMove
+        self.suppressesFocusAfterMove = suppressesFocusAfterMove
+        self.restoresFocus = restoresFocus
+        self.focusRecoveryFault = focusRecoveryFault
+        self.cancelsAfterMove = cancelsAfterMove
         let localSiblings = siblings
         let localDisplay = MenuBarDisplayID("test-display")
         items = localSiblings.enumerated().map { index, id in
@@ -237,6 +335,12 @@ private actor GroupedProfileBackend: MenuBarBackend {
             section: .visible, order: 2,
             displayID: unrelatedOnOtherDisplay ? MenuBarDisplayID("other-display") : localDisplay
         )]
+        if suppressesFocusAfterMove {
+            items.append(MenuBarItemDescriptor(
+                id: MenuBarItemID(bundleIdentifier: "com.apple.menubaragent", accessibilityIdentifier: "com.apple.menuextra.focusmode"),
+                section: .visible, order: 3, displayID: localDisplay, isSystemItem: true, sourceOwnership: .system
+            ))
+        }
         if interleavesIndependentDisplays {
             items += [
                 MenuBarItemDescriptor(
@@ -251,7 +355,18 @@ private actor GroupedProfileBackend: MenuBarBackend {
         }
     }
 
-    func snapshot() -> MenuBarSnapshot {
+    func snapshot() async throws -> MenuBarSnapshot {
+        if cancelsAfterMove {
+            try Task.checkCancellation()
+        }
+        if focusRecoveryFault == "wait_for_cancellation", nativeDeassertionCount > 0 {
+            do {
+                try await Task.sleep(for: .seconds(10))
+            } catch {
+                cancelledRecoveryObservationCount += 1
+                throw error
+            }
+        }
         generation &+= 1
         return MenuBarSnapshot(
             generation: generation, capturedAt: staleAfterMove && visibilityMutationCount > 0 ? .distantPast : Date(),
@@ -311,7 +426,43 @@ private actor GroupedProfileBackend: MenuBarBackend {
         if duplicatesAfterMove, let first = items.first {
             items.append(first)
         }
+        if suppressesFocusAfterMove, operation.section != .visible {
+            suppressedFocus = items.first { $0.id.bundleIdentifier == "com.apple.menubaragent" }
+            items.removeAll { $0.id.bundleIdentifier == "com.apple.menubaragent" }
+        }
+        if cancelsAfterMove, visibilityMutationCount == 1 {
+            withUnsafeCurrentTask { $0?.cancel() }
+        }
         return MenuBarMutationResult(generation: generation, changedItemIDs: siblings)
+    }
+
+    func configureConcealment(_ configuration: MenuBarConcealmentConfiguration) throws {
+        guard configuration.concealedItemIDs.isEmpty else { throw MenuBarBackendError.mutationNotStarted }
+        nativeDeassertionCount += 1
+        if focusRecoveryFault == "configuration_failure" {
+            throw MenuBarBackendError.operationFailed("injected configuration failure")
+        }
+        if restoresFocus, let suppressedFocus {
+            switch focusRecoveryFault {
+            case "different_focus_id":
+                items.append(MenuBarItemDescriptor(
+                    id: MenuBarItemID(bundleIdentifier: "com.apple.menubaragent", accessibilityIdentifier: "replacement.focusmode"),
+                    section: .visible, order: suppressedFocus.order, displayID: suppressedFocus.displayID,
+                    isSystemItem: true, sourceOwnership: .system
+                ))
+            case "different_focus_display":
+                items.append(MenuBarItemDescriptor(
+                    id: suppressedFocus.id, section: .visible, order: suppressedFocus.order,
+                    displayID: MenuBarDisplayID("other-display"), isSystemItem: true, sourceOwnership: .system
+                ))
+            default:
+                items.append(suppressedFocus)
+            }
+            if focusRecoveryFault == "unrelated_section" {
+                items = items.map { $0.id.bundleIdentifier == "com.example.unrelated" ? $0.replacingSection(.hidden) : $0 }
+            }
+            self.suppressedFocus = nil
+        }
     }
 
     func reveal(_: MenuBarItemID) throws -> MenuBarMutationResult {

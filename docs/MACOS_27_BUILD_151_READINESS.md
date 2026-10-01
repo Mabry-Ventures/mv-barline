@@ -6,7 +6,10 @@ The exact installed build-150 transition reported
 `profile_section_or_display_mismatch`, with successful workspace compensation
 but `native_reorder_unavailable` during layout compensation. Observed inventory
 fell from 14 to 13 items while both Barline controls remained present. The
-missing item's cause is not established.
+missing item's cause was subsequently established on the exact test OS:
+Apple's native hiding assertion suppresses the Focus surface. The complete
+native nine-item allowlist does not exempt it. See
+[build 152 recovery qualification](MACOS_27_BUILD_152_READINESS.md).
 
 ## Repair and safety proof
 
@@ -40,10 +43,13 @@ relaxed. Missing visible items are not fabricated.
 
 ## Required next proof
 
-Install the exact signed/notarized candidate only on CPLCODEX01. Repeat the
-physical visible-to-hidden saved-layout transition and correlate these counters
-before making any sampling or identity repair. Passing a capture/apply no-op
-does not qualify that transition.
+The signed/notarized candidate was installed only on CPLCODEX01. The physical
+visible-to-hidden saved-layout transition failed twice: inventory fell from
+14 to 13, Focus disappeared under native hiding, and returned on deassertion.
+Reduced-inventory compensation then rejected the returning original item.
+The independent native probe establishes this is a platform presence change,
+not a deduplication/projection failure. Build 151 remains rejected. Passing a
+capture/apply no-op does not qualify the transition.
 
 All open build-150 release gates remain open: XCUITest runner initialization,
 native clock-panel visibility, macOS 26 runtime, notched/multi-display hardware,

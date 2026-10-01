@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.66 (build 151) — qualification candidate, October 1, 2026
+## 1.0.66 (build 152) — qualification candidate, October 1, 2026
 
 ### macOS 27
 
@@ -36,6 +36,14 @@
 
 ### Both
 
+- Failed native-hiding transitions can restore a previously visible Focus
+  control before planning rollback. Recovery requires the original complete
+  inventory, preserves unrelated edits and obeys its deadline. This is a
+  recovery repair, not qualification of Focus compatibility during hiding.
+- Native configuration construction contains runtime rejection without
+  replacing the accepted assertion or terminating the helper. Exact allowlists
+  remain unchanged; the public assessment API's nullable-list behavior does
+  not apply to the private native-hiding initializer.
 - Grouped saved-layout execution and compensation replan from each fresh
   observation, avoiding redundant sibling moves and stale shelf indices.
   Concurrent unrelated edits are preserved, not overwritten during recovery.

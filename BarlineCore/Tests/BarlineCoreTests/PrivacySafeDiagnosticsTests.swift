@@ -18,6 +18,8 @@ struct PrivacySafeDiagnosticsTests {
             ("profile display identity became ambiguous during activation", "profile_display_identity_ambiguous"),
             ("profile display topology changed during activation", "profile_display_topology_changed"),
             ("profile layout execution did not converge", "profile_execution_unsettled"),
+            ("profile recovery inventory changed", "profile_recovery_inventory_changed"),
+            ("profile recovery inventory did not return", "profile_recovery_inventory_unsettled"),
             ("item spacing changed repeatedly during profile rollback", "workspace_spacing_rollback_unsettled"),
         ]
         for (reason, expected) in cases {
@@ -34,7 +36,7 @@ struct PrivacySafeDiagnosticsTests {
         )) == "capability_unavailable")
     }
 
-    @Test func wrappedActivationFailureRetainsBoundariesWithoutLeakingPayloads() {
+    @Test func wrappedActivationFailureRetainsBoundariesWithoutLeakingPayloads() throws {
         let secret = "PRIVATE_PROFILE_/Users/private/profile"
         let item = MenuBarItemID(bundleIdentifier: secret, title: secret)
         let failure = ProfileActivationRecoveryFailure(
@@ -42,11 +44,13 @@ struct PrivacySafeDiagnosticsTests {
             workspaceRollbackError: MenuBarWorkspaceTransactionError.superseded,
             layoutRollbackError: SnapshotRejectionReason.unstableItemIdentity(item)
         )
+        let workspaceRollback = try #require(failure.workspaceRollbackError)
+        let layoutRollback = try #require(failure.layoutRollbackError)
         let codes = [
             PrivacySafeDiagnostics.errorCode(failure),
             PrivacySafeDiagnostics.errorCode(failure.activationError),
-            PrivacySafeDiagnostics.errorCode(failure.workspaceRollbackError!),
-            PrivacySafeDiagnostics.errorCode(failure.layoutRollbackError!),
+            PrivacySafeDiagnostics.errorCode(workspaceRollback),
+            PrivacySafeDiagnostics.errorCode(layoutRollback),
         ]
         #expect(codes == ["profile_activation_recovery_failed", "operation_failed",
                           "workspace_superseded", "snapshot_unstable_item"])

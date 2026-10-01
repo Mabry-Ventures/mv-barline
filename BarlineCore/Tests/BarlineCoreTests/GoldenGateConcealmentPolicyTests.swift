@@ -1,7 +1,75 @@
 @testable import BarlineCore
+import Foundation
 import Testing
 
 struct GoldenGateConcealmentPolicyTests {
+    @Test("Focus recovery admits only the exact original all-visible inventory")
+    func focusRecoveryRequiresOriginalInventory() {
+        let display = MenuBarDisplayID("display")
+        let owned = MenuBarItemID(bundleIdentifier: "com.example.owned", accessibilityIdentifier: "item")
+        let focus = MenuBarItemID(bundleIdentifier: "com.apple.controlcenter", accessibilityIdentifier: "com.apple.controlcenter.focus")
+        let original = MenuBarSnapshot(generation: 1, capturedAt: Date(), items: [
+            MenuBarItemDescriptor(id: owned, section: .visible, order: 0, displayID: display),
+            MenuBarItemDescriptor(id: focus, section: .visible, order: 1, displayID: display,
+                                  isSystemItem: true, sourceOwnership: .system),
+        ], displayIDs: [display], activeSpaceIsValid: true)
+        let current = MenuBarSnapshot(generation: 2, capturedAt: Date(), items: [
+            MenuBarItemDescriptor(id: owned, section: .hidden, order: 0, displayID: display),
+        ], displayIDs: [display], activeSpaceIsValid: true)
+        #expect(GoldenGateConcealmentPolicy.permitsFocusDeassertionRecovery(
+            original: original, current: current, transactionOwnedItemIDs: [owned]
+        ))
+        #expect(!GoldenGateConcealmentPolicy.permitsFocusDeassertionRecovery(
+            original: original, current: current, transactionOwnedItemIDs: []
+        ))
+    }
+
+    @Test("Focus recovery never excuses a different inventory or external mutation", arguments: [
+        "application_missing", "second_missing", "added", "weak_identity", "wrong_ownership", "wrong_bundle",
+        "unknown_system", "display_relocated", "external_section", "previously_concealed", "tracking",
+        "duplicate_current", "duplicate_original",
+    ])
+    func rejectsUnownedFocusRecovery(change: String) {
+        let display = MenuBarDisplayID("display")
+        let owned = MenuBarItemID(bundleIdentifier: "com.example.owned", accessibilityIdentifier: "A")
+        let unrelated = MenuBarItemID(bundleIdentifier: "com.example.unrelated", accessibilityIdentifier: "B")
+        let focus = MenuBarItemID(
+            bundleIdentifier: change == "wrong_bundle" ? "com.example.focus" : "com.apple.controlcenter",
+            accessibilityIdentifier: change == "weak_identity" ? nil :
+                (change == "unknown_system" ? "com.apple.controlcenter.unknown" : "com.apple.controlcenter.focus"),
+            title: "Focus"
+        )
+        var originalItems = [
+            MenuBarItemDescriptor(id: owned, section: .visible, order: 0, displayID: display),
+            MenuBarItemDescriptor(id: unrelated, section: change == "previously_concealed" ? .hidden : .visible,
+                                  order: 1, displayID: display),
+            MenuBarItemDescriptor(id: focus, section: .visible, order: 2, displayID: display, isSystemItem: true,
+                                  sourceOwnership: change == "wrong_ownership" ? .application : .system),
+        ]
+        var currentItems = [
+            MenuBarItemDescriptor(id: owned, section: .hidden, order: 0, displayID: display),
+            MenuBarItemDescriptor(id: unrelated, section: change == "external_section" ? .hidden : .visible,
+                                  order: 1, displayID: change == "display_relocated" ? MenuBarDisplayID("other") : display),
+        ]
+        switch change {
+        case "application_missing": currentItems = [originalItems[2]]
+        case "second_missing": currentItems.removeLast()
+        case "added": currentItems.append(MenuBarItemDescriptor(
+                id: MenuBarItemID(bundleIdentifier: "com.example.new", accessibilityIdentifier: "new"),
+                section: .visible, order: 3, displayID: display
+            ))
+        case "duplicate_current": currentItems.append(currentItems[0])
+        case "duplicate_original": originalItems.append(originalItems[0])
+        default: break
+        }
+        let original = MenuBarSnapshot(generation: 1, capturedAt: Date(), items: originalItems, displayIDs: [display], activeSpaceIsValid: true)
+        let current = MenuBarSnapshot(generation: 2, capturedAt: Date(), items: currentItems, displayIDs: [display], activeSpaceIsValid: true,
+                                      menuTrackingIsActive: change == "tracking")
+        #expect(!GoldenGateConcealmentPolicy.permitsFocusDeassertionRecovery(
+            original: original, current: current, transactionOwnedItemIDs: [owned]
+        ))
+    }
+
     @Test("Native deduplication includes newly running allowed apps")
     func runningAppAllowlistChanges() {
         let resolution = GoldenGateResolvedConcealment(

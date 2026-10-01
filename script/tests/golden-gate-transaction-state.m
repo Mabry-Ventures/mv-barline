@@ -1,5 +1,7 @@
 #import <AppKit/AppKit.h>
 #define BARLINE_BRIDGE_TESTING 1
+static BOOL BLNTestRejectConfiguration;
+static BOOL BLNTestThrowOnConfiguration;
 
 @interface MBAssessmentModeConfiguration : NSObject
 @property(nonatomic, copy) NSArray<NSNumber *> *items;
@@ -11,6 +13,11 @@
 @implementation MBAssessmentModeConfiguration
 - (instancetype)initWithAllowedSystemItems:(NSArray<NSNumber *> *)items
                   allowedBundleIdentifiers:(NSArray<NSString *> *)identifiers {
+    if (BLNTestThrowOnConfiguration) {
+        @throw [NSException exceptionWithName:@"BLNTestConfigurationException"
+                                      reason:@"synthetic rejection" userInfo:nil];
+    }
+    if (BLNTestRejectConfiguration) return nil;
     self = [super init];
     if (self) {
         _items = [items copy];
@@ -76,9 +83,54 @@ int main(void) {
         BLNRequire([inputAssertion.configuration.identifiers isEqualToArray:allowedBundles],
                    @"Begin uses exactly the caller-captured allowlist without resampling running apps");
         BLNRequire([inputAssertion.configuration.items isEqualToArray:systemItems],
-                   @"Begin preserves the captured system-item allowlist");
+                   @"all known systems preserve the exact native array");
         BLNRequire(BLNGoldenGateAssessmentCommit(inputController, inputToken),
                    @"captured input transaction commits");
+        for (NSArray *restricted in @[@[@0, @1, @3], @[], @[@0, @1, @2, @3, @4, @5, @6, @7, @7],
+                                       @[@0, @1, @2, @3, @4, @5, @6, @7, @9]]) {
+            uint64_t restrictedToken = BLNGoldenGateAssessmentBegin(inputController,
+                (__bridge CFArrayRef)hiddenBundles, (__bridge CFArrayRef)restricted,
+                (__bridge CFArrayRef)allowedBundles);
+            MBAssessmentModeAssertion *restrictedAssertion = inputState.pendingAssertion;
+            BLNRequire([restrictedAssertion.configuration.items isEqualToArray:restricted],
+                       @"restricted, empty, duplicate, and unknown system arrays remain literal");
+            BLNRequire([restrictedAssertion.configuration.identifiers isEqualToArray:allowedBundles],
+                       @"restricted transaction preserves caller bundle allowlist");
+            BLNRequire(BLNGoldenGateAssessmentCommit(inputController, restrictedToken),
+                       @"restricted transaction commits");
+        }
+        id priorAssertion = inputState.assertion;
+        for (NSUInteger failure = 0; failure < 2; failure++) {
+            BLNTestRejectConfiguration = failure == 0;
+            BLNTestThrowOnConfiguration = failure == 1;
+            BLNRequire(BLNGoldenGateAssessmentBegin(inputController,
+                (__bridge CFArrayRef)hiddenBundles, (__bridge CFArrayRef)systemItems,
+                (__bridge CFArrayRef)allowedBundles) == 0,
+                       @"configuration rejection and exception are contained");
+            BLNRequire(inputState.assertion == priorAssertion && inputState.pendingToken == 0,
+                       @"configuration failure preserves accepted state and releases pending token");
+        }
+        BLNTestRejectConfiguration = NO;
+        BLNTestThrowOnConfiguration = NO;
+        uint64_t clearAborted = BLNGoldenGateAssessmentBegin(inputController,
+            (__bridge CFArrayRef)@[], (__bridge CFArrayRef)systemItems,
+            (__bridge CFArrayRef)allowedBundles);
+        BLNRequire(clearAborted != 0 && inputState.assertion == priorAssertion,
+                   @"all-visible clear remains pending after configuration failures");
+        BLNRequire(BLNGoldenGateAssessmentAbort(inputController, clearAborted) &&
+                   inputState.assertion == priorAssertion, @"aborted clear preserves prior assertion");
+        uint64_t clearCommitted = BLNGoldenGateAssessmentBegin(inputController,
+            (__bridge CFArrayRef)@[], (__bridge CFArrayRef)systemItems,
+            (__bridge CFArrayRef)allowedBundles);
+        BLNRequire(BLNGoldenGateAssessmentCommit(inputController, clearCommitted) &&
+                   inputState.assertion == nil, @"committed all-visible clear removes assertion");
+        uint64_t malformedClear = BLNGoldenGateAssessmentBegin(inputController,
+            (__bridge CFArrayRef)@[], (__bridge CFArrayRef)@[@0, @1, @2, @3, @4, @5, @6, @7, @7],
+            (__bridge CFArrayRef)allowedBundles);
+        BLNRequire(inputState.pendingAssertion != nil && !inputState.pendingClearsCurrentAssertion,
+                   @"nine-element malformed array does not clear an assertion");
+        BLNRequire(BLNGoldenGateAssessmentAbort(inputController, malformedClear),
+                   @"malformed literal transaction aborts");
         BLNGoldenGateAssessmentDestroy(inputController);
 
         BLNGoldenGateAssessmentController *controller = [BLNGoldenGateAssessmentController new];
