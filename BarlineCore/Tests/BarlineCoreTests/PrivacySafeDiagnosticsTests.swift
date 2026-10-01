@@ -17,6 +17,7 @@ struct PrivacySafeDiagnosticsTests {
             ("profile display identity changed during activation", "profile_display_identity_changed"),
             ("profile display identity became ambiguous during activation", "profile_display_identity_ambiguous"),
             ("profile display topology changed during activation", "profile_display_topology_changed"),
+            ("profile layout execution did not converge", "profile_execution_unsettled"),
             ("item spacing changed repeatedly during profile rollback", "workspace_spacing_rollback_unsettled"),
         ]
         for (reason, expected) in cases {

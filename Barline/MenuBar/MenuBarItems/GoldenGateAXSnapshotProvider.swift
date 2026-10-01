@@ -549,7 +549,7 @@ actor GoldenGateAXSnapshotProvider {
             snapshotTerminalCode: "snapshot_available"
         )
         logger.info(
-            "Main-process Golden Gate inventory completed: items=\(result.items.count, privacy: .public), controls=\(result.items.count(where: \.isBarlineControlItem), privacy: .public)"
+            "Main-process Golden Gate inventory completed: items=\(result.items.count, privacy: .public), controls=\(result.items.count(where: \.isBarlineControlItem), privacy: .public), built=\(built.items.count, privacy: .public), retainedAdded=\(result.items.count - built.items.count, privacy: .public)"
         )
         return result
     }
@@ -1845,6 +1845,9 @@ actor GoldenGateAXSnapshotProvider {
             probeSet.contains($0.processIdentifier)
         }
         var owningProcesses = Set<Int32>()
+        var failedKnownOwnerReads = 0
+        var emptyKnownOwnerChildren = 0
+        var applicationElementFailures = 0
         defer {
             ownerProbePolicy.record(
                 probed: plan.processes,
@@ -1864,12 +1867,18 @@ actor GoldenGateAXSnapshotProvider {
         )
         for runningApplication in runningApplications {
             guard let application = AXHelpers.application(for: runningApplication) else {
+                applicationElementFailures += 1
                 continue
             }
             applicationElementCount += 1
             let read = AXHelpers.extrasMenuBarResult(for: application)
             readCounts[read.disposition.rawValue, default: 0] += 1
-            guard let extrasMenuBar = read.element else { continue }
+            guard let extrasMenuBar = read.element else {
+                if ownerProbePolicy.knownOwners.contains(runningApplication.processIdentifier) {
+                    failedKnownOwnerReads += 1
+                }
+                continue
+            }
             extrasMenuBarCount += 1
             owningProcesses.insert(runningApplication.processIdentifier)
 
@@ -1878,6 +1887,9 @@ actor GoldenGateAXSnapshotProvider {
             var unnamedIndex = 0
             let children = AXHelpers.children(for: extrasMenuBar)
             rawChildCount += children.count
+            if children.isEmpty, ownerProbePolicy.knownOwners.contains(runningApplication.processIdentifier) {
+                emptyKnownOwnerChildren += 1
+            }
             for child in children {
                 guard let bounds = AXHelpers.frame(for: child),
                       bounds.height > 0,
@@ -1981,6 +1993,9 @@ actor GoldenGateAXSnapshotProvider {
             }
             return $0.observation.bounds.x < $1.observation.bounds.x
         }
+        logger.info(
+            "Golden Gate collection boundaries: rawChildren=\(rawChildCount, privacy: .public), valid=\(entries.count, privacy: .public), deduplicated=\(accepted.count, privacy: .public), failedKnownOwnerReads=\(failedKnownOwnerReads, privacy: .public), emptyKnownOwnerChildren=\(emptyKnownOwnerChildren, privacy: .public), applicationElementFailures=\(applicationElementFailures, privacy: .public), fullScan=\(plan.isFullScan, privacy: .public)"
+        )
         let terminalCode = if allRunningApplications.isEmpty {
             "no_running_applications"
         } else if extrasMenuBarCount == 0 {

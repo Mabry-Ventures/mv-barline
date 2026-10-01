@@ -1078,7 +1078,7 @@ struct StateCoordinatorTests {
             activeSpaceIsValid: true
         )
         let backend = FakeBackend(
-            snapshots: [before, after, after],
+            snapshots: [before, after, after, after],
             capabilities: MenuBarCapabilities(
                 canSnapshot: true,
                 canMove: true,
@@ -1144,7 +1144,7 @@ struct StateCoordinatorTests {
             activeSpaceIsValid: true
         )
         let backend = FakeBackend(
-            snapshots: [before, partiallyApplied, rolledBack],
+            snapshots: [before, partiallyApplied, partiallyApplied, rolledBack, rolledBack],
             capabilities: MenuBarCapabilities(
                 canSnapshot: true,
                 canMove: true,

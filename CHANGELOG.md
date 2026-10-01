@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.66 (build 150) — diagnostic qualification candidate, October 1, 2026
+## 1.0.66 (build 151) — qualification candidate, October 1, 2026
 
 ### macOS 27
 
@@ -36,9 +36,15 @@
 
 ### Both
 
+- Grouped saved-layout execution and compensation replan from each fresh
+  observation, avoiding redundant sibling moves and stale shelf indices.
+  Concurrent unrelated edits are preserved, not overwritten during recovery.
+  Cross-display enumeration does not invalidate unchanged display-local order.
+- Count-only inventory boundaries help isolate transient collection loss;
+  missing visible items and uncertain identities remain rejected.
 - Failed saved-layout transactions retain distinct, privacy-safe activation,
   workspace rollback and layout rollback codes instead of a combined generic
-  error. This diagnostic candidate does not yet repair the installed failure.
+  error. The installed inventory-loss failure remains under qualification.
 - Rejected saved-layout plans report a specific, privacy-safe explanation and
   stop automatic command replay until a fresh request is made. Recovery data
   and previous authority are not discarded to make a rejected plan succeed.

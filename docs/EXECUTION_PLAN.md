@@ -1,5 +1,22 @@
 # Barline execution plan
 
+## Build 151 grouped execution repair — October 1, 2026
+
+Installed build 150 isolated the failure stages: activation rejected changed
+section/display inventory, workspace rollback succeeded, and layout rollback
+attempted unsupported native reordering. Inventory fell 14 to 13 with both
+controls present. The inventory loss is still unproven.
+
+Build 151 replans grouped forward and compensating operations against fresh,
+validated snapshots, bounded by a move budget. Unexpected unrelated edits or
+display relocation withdraw authority through the existing observation-only
+path; per-display shelf order remains protected. Stateful before/after tests
+and the 773-test core suite pass. Count-only collection boundaries now support
+causal installed diagnosis without fabricated inventory or relaxed guards.
+
+This candidate remains HOLD. See [build 151 readiness](MACOS_27_BUILD_151_READINESS.md).
+The public build remains 142; prior binary proof does not qualify build 151.
+
 ## Build 150 failed-transition diagnosis — October 1, 2026
 
 Build 149 passed 759 core tests, its clean fast gate and signed/notarized

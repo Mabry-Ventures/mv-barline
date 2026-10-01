@@ -121,6 +121,7 @@ public enum PrivacySafeDiagnostics {
         case "profile display identity changed during activation": "profile_display_identity_changed"
         case "profile display identity became ambiguous during activation": "profile_display_identity_ambiguous"
         case "profile display topology changed during activation": "profile_display_topology_changed"
+        case "profile layout execution did not converge": "profile_execution_unsettled"
         case "item spacing changed repeatedly during profile rollback": "workspace_spacing_rollback_unsettled"
         default: "operation_failed"
         }

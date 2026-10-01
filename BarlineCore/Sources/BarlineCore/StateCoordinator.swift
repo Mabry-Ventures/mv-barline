@@ -1078,6 +1078,7 @@ public actor MenuBarStateCoordinator {
                 items: snapshot.items,
                 validateShelfOrder: plan.shelfOrder == .applySavedOrder
             ) else {
+                Self.logLogicalProfileMismatch(admittedLayoutPlan, snapshot: snapshot)
                 throw MenuBarBackendError.operationFailed(
                     "profile activation changed an unrequested section or display"
                 )
@@ -1132,6 +1133,112 @@ public actor MenuBarStateCoordinator {
             return arrangementPlan.nativeOrder == .applySavedOrder
         }
         return arrangementPlan.shelfOrder == .applySavedOrder
+    }
+
+    /// Native group assignments can move several siblings at once. Translate
+    /// the complete admitted target against each new observation, never replay
+    /// a stale sibling operation or shelf index from the original plan.
+    private static func nextLogicalProfileOperation(
+        target: ProfileLayoutReconciler.DisplayPlan,
+        snapshot: MenuBarSnapshot,
+        displayID: MenuBarDisplayID?,
+        arrangementPlan: MenuBarArrangementExecutionPlan,
+        destinationSupport: MenuBarMoveDestinationSupport
+    ) throws -> MenuBarMoveOperation? {
+        guard !snapshot.menuTrackingIsActive else { throw MenuBarBackendError.unsafeMenuTracking }
+        let observed = snapshot.items.filter { displayID == nil || $0.displayID == displayID }
+        let expectedIDs = Set(target.targets.flatMap(\.layout.allItemIDs))
+        guard Set(observed.map(\.id)) == expectedIDs,
+              target.targets.allSatisfy({ scoped in
+                  Set(observed.filter { $0.displayID == scoped.displayID }.map(\.id)) ==
+                      Set(scoped.layout.allItemIDs)
+              })
+        else {
+            logLogicalProfileMismatch(target, snapshot: snapshot)
+            throw MenuBarBackendError.operationFailed("profile activation changed an unrequested section or display")
+        }
+        let layout = ProfileLayout(
+            visible: target.targets.flatMap(\.layout.visible),
+            hidden: target.targets.flatMap(\.layout.hidden),
+            alwaysHidden: target.targets.flatMap(\.layout.alwaysHidden)
+        )
+        let remaining = try ProfileLayoutReconciler.planAcrossDisplays(
+            layout: preservingNativeVisibleOrder(in: layout, snapshot: snapshot),
+            items: snapshot.items, displayID: displayID, destinationSupport: destinationSupport
+        )
+        return remaining.operations.first {
+            shouldApply($0, to: snapshot, arrangementPlan: arrangementPlan)
+        }
+    }
+
+    /// Only counts and booleans cross the diagnostic boundary. Inventory and
+    /// control guards remain strict; this does not adopt a changed inventory.
+    private static func logLogicalProfileMismatch(
+        _ target: ProfileLayoutReconciler.DisplayPlan,
+        snapshot: MenuBarSnapshot
+    ) {
+        let expected = Set(target.targets.flatMap(\.layout.allItemIDs))
+        let relevantItems = target.isGloballyScoped ? snapshot.items : snapshot.items.filter { item in
+            target.targets.contains { $0.displayID == item.displayID }
+        }
+        let observed = Set(relevantItems.map(\.id))
+        let missing = expected.subtracting(observed)
+        let added = observed.subtracting(expected)
+        let missingSystem = missing.count { $0.bundleIdentifier.lowercased().hasPrefix("com.apple.") }
+        let missingApplication = missing.count - missingSystem
+        let sectionMismatch = target.targets.reduce(0) { total, scoped in
+            let sections = Dictionary(uniqueKeysWithValues:
+                scoped.layout.visible.map { ($0, MenuBarSection.visible) } +
+                    scoped.layout.hidden.map { ($0, MenuBarSection.hidden) } +
+                    scoped.layout.alwaysHidden.map { ($0, MenuBarSection.alwaysHidden) })
+            return total + relevantItems.count { item in
+                sections[item.id].map { $0 != item.section } ?? false
+            }
+        }
+        Self.logger.error(
+            "Profile observation mismatch: expected=\(expected.count, privacy: .public) observed=\(observed.count, privacy: .public) missing=\(missing.count, privacy: .public) added=\(added.count, privacy: .public) missingSystem=\(missingSystem, privacy: .public) missingApplication=\(missingApplication, privacy: .public) sections=\(sectionMismatch, privacy: .public)"
+        )
+    }
+
+    /// A fresh replan is not permission to overwrite changes outside the move.
+    /// Unexpected concurrent edits take the existing superseded/observation-only
+    /// path, withdrawing authority without blindly restoring the old layout.
+    private static func validateLogicalProfileStep(
+        operation: MenuBarMoveOperation,
+        before: MenuBarSnapshot,
+        after: MenuBarSnapshot
+    ) throws {
+        guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
+            throw MenuBarBackendError.staleItem(operation.itemID)
+        }
+        let changesGroupVisibility = source.section != operation.section &&
+            !source.id.bundleIdentifier.lowercased().hasPrefix("com.apple.")
+        let affected = Set(before.items.filter { item in
+            changesGroupVisibility ? item.id.bundleIdentifier == source.id.bundleIdentifier : item.id == source.id
+        }.map(\.id))
+        let currentByID = Dictionary(uniqueKeysWithValues: after.items.map { ($0.id, $0) })
+        guard before.items.allSatisfy({ prior in
+            currentByID[prior.id].map { $0.displayID == prior.displayID } ?? true
+        }) else { throw MenuBarBackendError.mutationSuperseded }
+        let beforeUnchanged = before.items.filter { !affected.contains($0.id) }
+        let afterUnchanged = after.items.filter { !affected.contains($0.id) }
+        let byID = Dictionary(uniqueKeysWithValues: afterUnchanged.map { ($0.id, $0) })
+        guard beforeUnchanged.allSatisfy({ prior in
+            guard let current = byID[prior.id] else { return true }
+            return prior.section == current.section && prior.displayID == current.displayID
+        }) else { throw MenuBarBackendError.mutationSuperseded }
+        let shared = Set(beforeUnchanged.map(\.id)).intersection(Set(afterUnchanged.map(\.id)))
+        for display in Set(beforeUnchanged.map(\.displayID)) {
+            for section in [MenuBarSection.hidden, .alwaysHidden] {
+                let previousOrder = beforeUnchanged.filter {
+                    $0.displayID == display && $0.section == section && shared.contains($0.id)
+                }.sorted { $0.order < $1.order }.map(\.id)
+                let currentOrder = afterUnchanged.filter {
+                    $0.displayID == display && $0.section == section && shared.contains($0.id)
+                }.sorted { $0.order < $1.order }.map(\.id)
+                guard previousOrder == currentOrder else { throw MenuBarBackendError.mutationSuperseded }
+            }
+        }
     }
 
     private static func preservingNativeVisibleOrder(
@@ -1264,12 +1371,33 @@ public actor MenuBarStateCoordinator {
             displayID: displayID,
             destinationSupport: destinationSupport
         )
-        for operation in plan.operations where Self.shouldApply(
-            operation,
-            to: current,
-            arrangementPlan: arrangementPlan
-        ) {
-            _ = try await backend.move(operation)
+        if destinationSupport == .logicalSectionsPreserveNativeOrder {
+            var executionSnapshot = current
+            let maximumMoves = max(1, current.items.count * 4)
+            var completedMoves = 0
+            while let operation = try Self.nextLogicalProfileOperation(
+                target: plan, snapshot: executionSnapshot, displayID: displayID,
+                arrangementPlan: arrangementPlan, destinationSupport: destinationSupport
+            ) {
+                guard completedMoves < maximumMoves else {
+                    throw MenuBarBackendError.operationFailed("profile layout execution did not converge")
+                }
+                try Task.checkCancellation()
+                _ = try await backend.move(operation)
+                completedMoves += 1
+                let nextSnapshot = try await validator.validate(
+                    normalizedBackendSnapshot(), previous: executionSnapshot,
+                    now: now.addingTimeInterval(Date().timeIntervalSince(validationClockStartedAt))
+                ).get()
+                try Self.validateLogicalProfileStep(operation: operation, before: executionSnapshot, after: nextSnapshot)
+                executionSnapshot = nextSnapshot
+            }
+        } else {
+            for operation in plan.operations where Self.shouldApply(
+                operation, to: current, arrangementPlan: arrangementPlan
+            ) {
+                _ = try await backend.move(operation)
+            }
         }
         let candidate = try await normalizedBackendSnapshot()
         let restored = try validator.validate(
@@ -1464,21 +1592,44 @@ public actor MenuBarStateCoordinator {
                     try await workspaceTransaction.apply(targetWorkspace)
                 }
             }
-            for operation in layoutPlan.operations {
-                if let arrangementPlan,
-                   !Self.shouldApply(
-                       operation,
-                       to: before,
-                       arrangementPlan: arrangementPlan
-                   )
-                {
-                    continue
+            if let arrangementPlan,
+               destinationSupport == .logicalSectionsPreserveNativeOrder
+            {
+                var executionSnapshot = before
+                let executionStartedAt = Date()
+                let maximumMoves = max(1, before.items.count * 4)
+                while let operation = try Self.nextLogicalProfileOperation(
+                    target: layoutPlan, snapshot: executionSnapshot, displayID: profileDisplayID,
+                    arrangementPlan: arrangementPlan, destinationSupport: destinationSupport
+                ) {
+                    guard completedLayoutMutationCount < maximumMoves else {
+                        throw MenuBarBackendError.operationFailed("profile layout execution did not converge")
+                    }
+                    try Task.checkCancellation()
+                    try await admission?()
+                    didBeginLayoutMutation = true
+                    _ = try await backend.move(operation)
+                    completedLayoutMutationCount += 1
+                    let nextSnapshot = try await validator.validate(
+                        normalizedBackendSnapshot(), previous: executionSnapshot,
+                        now: (now ?? executionStartedAt).addingTimeInterval(Date().timeIntervalSince(executionStartedAt))
+                    ).get()
+                    try Self.validateLogicalProfileStep(operation: operation, before: executionSnapshot, after: nextSnapshot)
+                    executionSnapshot = nextSnapshot
                 }
-                try Task.checkCancellation()
-                try await admission?()
-                didBeginLayoutMutation = true
-                _ = try await backend.move(operation)
-                completedLayoutMutationCount += 1
+            } else {
+                for operation in layoutPlan.operations {
+                    if let arrangementPlan,
+                       !Self.shouldApply(operation, to: before, arrangementPlan: arrangementPlan)
+                    {
+                        continue
+                    }
+                    try Task.checkCancellation()
+                    try await admission?()
+                    didBeginLayoutMutation = true
+                    _ = try await backend.move(operation)
+                    completedLayoutMutationCount += 1
+                }
             }
 
             try Task.checkCancellation()
