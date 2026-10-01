@@ -180,8 +180,8 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
         try client.captureBackground(displayID: displayID, sampleHeight: sampleHeight)
     }
 
-    func environment() -> MenuBarEnvironmentSnapshot {
-        client.environment()
+    func environment() async throws -> MenuBarEnvironmentSnapshot {
+        try await concealmentController.environment { [client] in client.environment() }
     }
 
     func pointContext(_ point: MenuBarPoint) throws -> MenuBarPointContext {
@@ -232,8 +232,12 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
     }
 
     func configureConcealment(_ configuration: MenuBarConcealmentConfiguration) async throws {
+        _ = try await configureConcealmentWithReceipt(configuration)
+    }
+
+    func configureConcealmentWithReceipt(_ configuration: MenuBarConcealmentConfiguration) async throws -> NativeConcealmentReceipt? {
         guard revealObservations.canAdmitOperations else { throw MenuBarBackendError.interrupted }
-        try await concealmentController.configure(configuration)
+        return try await concealmentController.configure(configuration)
     }
 
     func pressSystemClockIfConcealed(

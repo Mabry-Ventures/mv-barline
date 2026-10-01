@@ -1,5 +1,31 @@
 # Barline execution plan
 
+## Helper-owned concealment receipts — October 1, 2026
+
+The isolated presence-contract work now includes revisioned helper control
+receipts, atomic configure acknowledgements, and observation invalidation
+across activation, reveal, Clock restoration, failed attempts and restart.
+Receipts describe committed helper ownership, not rendered native item presence.
+Uncertain outcomes cannot reuse the prior deduplication key. Ordinary cache
+reuse requires stable unchanged receipts; verification still enumerates afresh.
+
+The 796-test core suite, real controller/session fault executables, bridge
+transactions, repository fast gate, and Xcode 27 app/helper Debug compile pass.
+Additional tests cover failed final-reveal retry, contradictory bridge state,
+receipt transport/replay and read timeout safety. An initial topology check
+expected the retired unguarded no-op shape; it now checks the stronger receipt
+conditions and fails-closed native-attempt boundary. Astra and Gemini approve
+this source slice. Gemini's later scoping concern quoted a nonexistent optional
+connection; the full source and successful compile refuted it, and its final
+recheck withdraws that finding. This is not installed proof or release approval.
+
+The exact Focus publisher/AX tuple is still unqualified. The previous native
+enum probe proved cases 0 through 8, but its aggregate Focus label classifier
+did not establish a signature- and lifetime-bound exact identity. Do not promote
+synthetic test IDs or that classifier into production authority. Next: bounded
+typed observation, publisher attestation, immutable projection and all authority
+boundaries. No new version is cut; installed 152 and public 142 are unchanged.
+
 ## Fresh verification and platform-presence contract — October 1, 2026
 
 Build 152 is frozen and remains production HOLD. Its clean fast gate,

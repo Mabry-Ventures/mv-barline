@@ -188,8 +188,8 @@ final class Listener: @unchecked Sendable {
                         sessionCancellation: sessionCancellation
                     ) {
                         do {
-                            try await self.backend.configureConcealment(configuration)
-                            return .success(BarlineMenuService.EmptyResult())
+                            let receipt = try await self.backend.configureConcealmentWithReceipt(configuration)
+                            return .success(BarlineMenuService.EmptyResult(nativeConcealmentReceipt: receipt))
                         } catch let error as MenuBarBackendError {
                             return .failure(error)
                         } catch {

@@ -20,5 +20,8 @@ bool BLNGoldenGateAssessmentAbort(
     void * _Nonnull opaqueController,
     uint64_t transactionToken
 );
+/// -1: pending/uncertain; 0: no committed assertion; 1: committed assertion.
+/// This observes helper ownership, not physical menu-bar item presence.
+int32_t BLNGoldenGateAssessmentCommittedState(void * _Nonnull opaqueController);
 void BLNGoldenGateAssessmentInvalidate(void * _Nonnull opaqueController);
 void BLNGoldenGateAssessmentDestroy(void * _Nonnull opaqueController);

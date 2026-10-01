@@ -124,21 +124,34 @@ private final class SyntheticHelper: @unchecked Sendable {
                 configurationStorage = label
             }
             lock.unlock()
-            response = rejected ? .activation(.failure(.interrupted)) : .activation(.success(.init()))
+            let receipt = NativeConcealmentReceipt(
+                helperSessionID: UUID(), assertionRevision: 2, configurationRevision: 1,
+                configurationDigest: String(repeating: "a", count: 64),
+                effectiveStateDigest: String(repeating: "b", count: 64), phase: .asserted
+            )
+            response = rejected ? .activation(.failure(.interrupted)) :
+                .activation(.success(.init(nativeConcealmentReceipt: receipt)))
         case .restart:
             lock.lock()
             recordsStorage.append(.init(sessionID: envelope.sessionID, operation: "restart", configuration: nil))
             configurationStorage = nil
             lock.unlock()
             response = .restart
-        case .health:
+        case .health, .environment:
             lock.lock()
             recordsStorage.append(.init(sessionID: envelope.sessionID, operation: "health", configuration: nil))
             let barrier = nextHealthBarrier
             nextHealthBarrier = nil
             lock.unlock()
             try barrier?.enter()
-            response = .health(.init(backendName: "synthetic", state: .healthy, message: nil))
+            if case .environment = request {
+                response = .environment(.success(.init(
+                    activeDisplayID: 1, activeStableDisplayID: MenuBarDisplayID("synthetic"),
+                    activeSpaceToken: 1, activeSpaceIsFullscreen: false, menuTrackingIsActive: false
+                )))
+            } else {
+                response = .health(.init(backendName: "synthetic", state: .healthy, message: nil))
+            }
         default:
             throw Failure(message: "unexpected request in orchestration fixture")
         }
@@ -225,13 +238,13 @@ private func timerFence(_ seconds: Double) throws {
 }
 
 @available(macOS 26.0, *)
-private func readyReadCompletesDuringGrace() throws {
+private func readyReadCompletesDuringGrace(request: BarlineMenuService.Request = .health) throws {
     let fixture = Fixture()
     try fixture.seedA()
     let barrier = Barrier()
     defer { barrier.release() }
     fixture.helper.holdNextHealth(barrier)
-    let pending = fixture.enqueue(.health, lease: shortHealthLease(fixture))
+    let pending = fixture.enqueue(request, lease: shortHealthLease(fixture))
     try barrier.waitForArrival()
     try require(try pending.wait() == nil, "expired read returned a value")
     barrier.release()
@@ -316,6 +329,24 @@ private func isConfigured(_ response: BarlineMenuService.Response?) -> Bool {
         return true
     }
     return false
+}
+
+@available(macOS 26.0, *)
+private func receiptAcknowledgementTransport() throws {
+    let legacy = try JSONDecoder().decode(BarlineMenuService.EmptyResult.self, from: Data("{}".utf8))
+    try require(legacy.nativeConcealmentReceipt == nil, "legacy acknowledgement fabricated native proof")
+    let fixture = Fixture()
+    let response = try fixture.enqueue(fixture.configure("a")).wait()
+    guard case let .activation(.success(acknowledgement))? = response,
+          let receipt = acknowledgement.nativeConcealmentReceipt
+    else { throw Failure(message: "receipt did not cross actual Session acknowledgement transport") }
+    try require(receipt.isStable && receipt.configurationRevision == 1,
+                "transport altered synthetic committed acknowledgement")
+    fixture.session.cancel(reason: "verify receipt-bearing accepted configuration replay")
+    fixture.helper.clearConfiguration()
+    try require(try isStarted(fixture.enqueue(.start).wait()), "receipt-bearing recovery handshake failed")
+    try require(fixture.helper.configuration == "test.a", "receipt-bearing configuration was not retained for replay")
+    try fixture.drain()
 }
 
 private func isRestarted(_ response: BarlineMenuService.Response?) -> Bool {
@@ -548,7 +579,9 @@ private enum SessionRecoveryTestMain {
                 ("explicit cancellation revokes delayed retry", explicitCancelInvalidatesDelayedRetry),
                 ("explicit cancellation rejects not-yet-scheduled stale recovery", explicitCancelBeforeRecoveryScheduling),
                 ("failed persistence and native rollback cannot poison recovery replay", rejectedPersistenceCannotPoisonReplay),
-                ("ready read finishing during grace preserves healthy session", readyReadCompletesDuringGrace),
+                ("ready read finishing during grace preserves healthy session", { try readyReadCompletesDuringGrace() }),
+                ("environment receipt query timeout preserves healthy ready session", { try readyReadCompletesDuringGrace(request: .environment) }),
+                ("atomic receipt acknowledgement survives transport and replay", receiptAcknowledgementTransport),
                 ("unfinished ready read retires only its own generation", hungReadyReadRetiresOnlyItsGeneration),
                 ("obsolete read cleanup cannot cancel replacement", obsoleteReadCleanupCannotCancelReplacement),
                 ("outstanding transport workers remain bounded", transportWorkersRemainBounded),

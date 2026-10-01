@@ -173,15 +173,16 @@ extension BarlineMenuService {
             _ = await send(.configureCursorInBackground(enabled))
         }
 
+        @discardableResult
         func configureConcealment(
             _ configuration: MenuBarConcealmentConfiguration
-        ) async throws {
+        ) async throws -> NativeConcealmentReceipt? {
             guard case let .activation(result) = await send(
                 .configureConcealment(configuration, deadlineUptimeNanoseconds: mutationDeadline())
             ) else {
                 throw MenuBarBackendError.interrupted
             }
-            _ = try result.value()
+            return try result.value().nativeConcealmentReceipt
         }
 
         /// A failed durable commit revokes the proposal's recovery authority
@@ -451,7 +452,7 @@ extension BarlineMenuService {
         /// Reads leave no native state behind when they run out of time.
         private static func isReadOnly(_ request: Request) -> Bool {
             switch request {
-            case .capabilities, .snapshot, .health, .shelfPresentationObservation:
+            case .capabilities, .snapshot, .health, .environment, .shelfPresentationObservation:
                 true
             default:
                 false
@@ -464,6 +465,7 @@ extension BarlineMenuService {
             case .start: "start"
             case .capabilities: "capabilities"
             case .snapshot: "snapshot"
+            case .environment: "environment"
             case .health: "health"
             case .restart: "restart"
             case .shelfPresentationObservation: "shelf_presentation_observation"

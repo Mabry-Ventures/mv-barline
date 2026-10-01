@@ -10,6 +10,7 @@
 @property(nonatomic) uint64_t nextToken;
 @property(nonatomic) BOOL pendingClearsCurrentAssertion;
 @property(nonatomic) int32_t activationState;
+@property(nonatomic) BOOL hasAcknowledgedState;
 - (uint64_t)beginConcealedBundleIdentifiers:(NSArray<NSString *> *)concealedBundleIdentifiers
            allowedSystemItemIdentifiers:(NSArray<NSNumber *> *)allowedSystemItemIdentifiers
            allowedBundleIdentifiers:(NSArray<NSString *> *)allowedBundleIdentifiers;
@@ -17,6 +18,7 @@
 - (void)acknowledgeCandidate:(id)candidate token:(uint64_t)token error:(NSError * _Nullable)error;
 - (BOOL)commitToken:(uint64_t)token;
 - (BOOL)abortToken:(uint64_t)token;
+- (int32_t)committedAssertionState;
 - (void)invalidate;
 @end
 
@@ -201,7 +203,8 @@ static BOOL BLNGoldenGateAllowsAllKnownSystemItems(NSArray<NSNumber *> *items) {
 - (void)acknowledgeCandidate:(id)candidate token:(uint64_t)token error:(NSError *)error {
     @synchronized (self) {
         // A callback only acknowledges readiness. The Swift owner must
-        // explicitly commit this exact token before native state changes.
+        // explicitly commit this exact token before committed ownership changes.
+        // Activation itself can already affect native rendering before Commit.
         if (self.pendingToken != token || self.pendingAssertion != candidate) return;
         if (error) {
             self.pendingAssertion = nil;
@@ -233,6 +236,7 @@ static BOOL BLNGoldenGateAllowsAllKnownSystemItems(NSArray<NSNumber *> *items) {
         }
         previous = self.assertion;
         self.assertion = self.pendingClearsCurrentAssertion ? nil : self.pendingAssertion;
+        self.hasAcknowledgedState = YES;
         self.pendingAssertion = nil;
         self.pendingToken = 0;
         self.pendingClearsCurrentAssertion = NO;
@@ -260,6 +264,16 @@ static BOOL BLNGoldenGateAllowsAllKnownSystemItems(NSArray<NSNumber *> *items) {
     return YES;
 }
 
+- (int32_t)committedAssertionState {
+    @synchronized (self) {
+        // Pending activation may already affect native rendering. Only an
+        // idle committed pointer can acknowledge helper control state; this
+        // is not a physical item-presence or Focus-visibility observation.
+        if (self.pendingToken != 0 || !self.hasAcknowledgedState) return -1;
+        return self.assertion ? 1 : 0;
+    }
+}
+
 - (void)invalidate {
     id current = nil;
     id pending = nil;
@@ -267,6 +281,7 @@ static BOOL BLNGoldenGateAllowsAllKnownSystemItems(NSArray<NSNumber *> *items) {
         current = self.assertion;
         pending = self.pendingAssertion;
         self.assertion = nil;
+        self.hasAcknowledgedState = NO;
         self.pendingAssertion = nil;
         self.pendingToken = 0;
         self.pendingClearsCurrentAssertion = NO;
@@ -316,6 +331,11 @@ bool BLNGoldenGateAssessmentCommit(void *opaqueController, uint64_t transactionT
 bool BLNGoldenGateAssessmentAbort(void *opaqueController, uint64_t transactionToken) {
     BLNGoldenGateAssessmentController *controller = (__bridge BLNGoldenGateAssessmentController *)opaqueController;
     return [controller abortToken:transactionToken];
+}
+
+int32_t BLNGoldenGateAssessmentCommittedState(void *opaqueController) {
+    BLNGoldenGateAssessmentController *controller = (__bridge BLNGoldenGateAssessmentController *)opaqueController;
+    return [controller committedAssertionState];
 }
 
 void BLNGoldenGateAssessmentInvalidate(void *opaqueController) {

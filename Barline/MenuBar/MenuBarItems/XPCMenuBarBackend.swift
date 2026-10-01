@@ -81,6 +81,12 @@ actor XPCMenuBarBackend: MenuBarBackend {
     func configureConcealment(
         _ configuration: MenuBarConcealmentConfiguration
     ) async throws {
+        _ = try await configureConcealmentWithReceipt(configuration)
+    }
+
+    func configureConcealmentWithReceipt(
+        _ configuration: MenuBarConcealmentConfiguration
+    ) async throws -> NativeConcealmentReceipt? {
         if #available(macOS 27.0, *) {
             // Accessibility inventory belongs to the signed application, while
             // the native assessment assertion belongs to the helper. Validate
@@ -112,10 +118,11 @@ actor XPCMenuBarBackend: MenuBarBackend {
                     "menu bar visibility assignment is not supported"
                 )
             }
-            try await connection.configureConcealment(configuration)
+            let receipt = try await connection.configureConcealment(configuration)
             await goldenGateProvider.concealmentDidChange()
+            return receipt
         } else {
-            try await connection.configureConcealment(configuration)
+            return try await connection.configureConcealment(configuration)
         }
     }
 

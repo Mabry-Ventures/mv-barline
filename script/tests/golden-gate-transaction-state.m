@@ -72,6 +72,8 @@ int main(void) {
         BLNGoldenGateAssessmentDestroy(recoveredController);
 
         void *inputController = BLNGoldenGateAssessmentCreate();
+        BLNRequire(BLNGoldenGateAssessmentCommittedState(inputController) == -1,
+                   @"fresh bridge cannot acknowledge state before an explicit commit");
         NSArray *hiddenBundles = @[@"com.example.hidden"];
         NSArray *allowedBundles = @[@"com.example.visible", @"com.example.new"];
         NSArray *systemItems = @[@0, @1, @2, @3, @4, @5, @6, @7, @8];
@@ -80,12 +82,16 @@ int main(void) {
             (__bridge CFArrayRef)allowedBundles);
         BLNGoldenGateAssessmentController *inputState = (__bridge id)inputController;
         MBAssessmentModeAssertion *inputAssertion = inputState.pendingAssertion;
+        BLNRequire(BLNGoldenGateAssessmentCommittedState(inputController) == -1,
+                   @"pending activation cannot acknowledge stable committed state");
         BLNRequire([inputAssertion.configuration.identifiers isEqualToArray:allowedBundles],
                    @"Begin uses exactly the caller-captured allowlist without resampling running apps");
         BLNRequire([inputAssertion.configuration.items isEqualToArray:systemItems],
                    @"all known systems preserve the exact native array");
         BLNRequire(BLNGoldenGateAssessmentCommit(inputController, inputToken),
                    @"captured input transaction commits");
+        BLNRequire(BLNGoldenGateAssessmentCommittedState(inputController) == 1,
+                   @"accepted restrictive transaction reports committed ownership");
         for (NSArray *restricted in @[@[@0, @1, @3], @[], @[@0, @1, @2, @3, @4, @5, @6, @7, @7],
                                        @[@0, @1, @2, @3, @4, @5, @6, @7, @9]]) {
             uint64_t restrictedToken = BLNGoldenGateAssessmentBegin(inputController,
@@ -124,6 +130,8 @@ int main(void) {
             (__bridge CFArrayRef)allowedBundles);
         BLNRequire(BLNGoldenGateAssessmentCommit(inputController, clearCommitted) &&
                    inputState.assertion == nil, @"committed all-visible clear removes assertion");
+        BLNRequire(BLNGoldenGateAssessmentCommittedState(inputController) == 0,
+                   @"all-visible commit acknowledges no committed assertion");
         uint64_t malformedClear = BLNGoldenGateAssessmentBegin(inputController,
             (__bridge CFArrayRef)@[], (__bridge CFArrayRef)@[@0, @1, @2, @3, @4, @5, @6, @7, @7],
             (__bridge CFArrayRef)allowedBundles);
@@ -131,6 +139,9 @@ int main(void) {
                    @"nine-element malformed array does not clear an assertion");
         BLNRequire(BLNGoldenGateAssessmentAbort(inputController, malformedClear),
                    @"malformed literal transaction aborts");
+        BLNGoldenGateAssessmentInvalidate(inputController);
+        BLNRequire(BLNGoldenGateAssessmentCommittedState(inputController) == -1,
+                   @"invalidated all-visible bridge must revoke committed acknowledgement");
         BLNGoldenGateAssessmentDestroy(inputController);
 
         BLNGoldenGateAssessmentController *controller = [BLNGoldenGateAssessmentController new];

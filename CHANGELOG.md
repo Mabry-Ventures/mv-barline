@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Native concealment exposes helper-owned, revisioned control acknowledgements.
+  Activation, reveal, Clock restoration and uncertain failures invalidate older
+  scan evidence without pretending to prove native Focus visibility.
+
 - Mutation, saved-layout, rollback, history and restart verification bypass
   inventory caches. A new generation stamped on cached UI inventory no longer
   counts as an independent stability observation. Ordinary UI caching remains.

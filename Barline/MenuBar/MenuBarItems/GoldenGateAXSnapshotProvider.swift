@@ -391,10 +391,12 @@ actor GoldenGateAXSnapshotProvider {
         }
         let now = DispatchTime.now().uptimeNanoseconds
         if !forceRefresh,
+           initialEnvironment.nativeConcealmentReceipt?.isStable != false,
            let cachedAt,
            let cachedSnapshot,
            let cachedEnvironment,
            initialEnvironment.hasSameValidScene(as: cachedEnvironment),
+           initialEnvironment.nativeConcealmentReceipt == cachedEnvironment.nativeConcealmentReceipt,
            displayBounds == cachedDisplayBounds,
            MenuBarInventoryCachePolicy.isReusable(
                completedAt: cachedAt,
@@ -430,6 +432,7 @@ actor GoldenGateAXSnapshotProvider {
         }
         let finalEnvironment = try await serviceConnection.environment()
         guard initialEnvironment.hasSameValidScene(as: finalEnvironment),
+              initialEnvironment.nativeConcealmentReceipt == finalEnvironment.nativeConcealmentReceipt,
               activeDisplays == activeDisplayIDs(),
               MenuBarDisplayOwnershipPolicy.hasStableGeometry(before: displayBounds, after: Dictionary(uniqueKeysWithValues: activeDisplays.map { displayID in
                   let bounds = CGDisplayBounds(displayID)

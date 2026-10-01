@@ -171,6 +171,9 @@ public struct MenuBarEnvironmentSnapshot: Codable, Equatable, Sendable {
     public let activeSpaceIsFullscreen: Bool
     public let activeSpaceIsValid: Bool
     public let menuTrackingIsActive: Bool
+    /// Helper-owned control evidence, not proof of physical item presence.
+    /// Missing on older peers never authorizes a platform-presence exception.
+    public let nativeConcealmentReceipt: NativeConcealmentReceipt?
 
     public init(
         activeDisplayID: UInt32?,
@@ -178,7 +181,8 @@ public struct MenuBarEnvironmentSnapshot: Codable, Equatable, Sendable {
         activeSpaceToken: Int,
         activeSpaceIsFullscreen: Bool,
         activeSpaceIsValid: Bool? = nil,
-        menuTrackingIsActive: Bool = true
+        menuTrackingIsActive: Bool = true,
+        nativeConcealmentReceipt: NativeConcealmentReceipt? = nil
     ) {
         self.activeDisplayID = activeDisplayID
         self.activeStableDisplayID = activeStableDisplayID
@@ -186,11 +190,12 @@ public struct MenuBarEnvironmentSnapshot: Codable, Equatable, Sendable {
         self.activeSpaceIsFullscreen = activeSpaceIsFullscreen
         self.activeSpaceIsValid = activeSpaceIsValid ?? (activeSpaceToken > 0)
         self.menuTrackingIsActive = menuTrackingIsActive
+        self.nativeConcealmentReceipt = nativeConcealmentReceipt
     }
 
     private enum CodingKeys: String, CodingKey {
         case activeDisplayID, activeStableDisplayID, activeSpaceToken, activeSpaceIsFullscreen
-        case activeSpaceIsValid, menuTrackingIsActive
+        case activeSpaceIsValid, menuTrackingIsActive, nativeConcealmentReceipt
     }
 
     public init(from decoder: any Decoder) throws {
@@ -203,6 +208,7 @@ public struct MenuBarEnvironmentSnapshot: Codable, Equatable, Sendable {
         // must never be interpreted as permission to mutate the native scene.
         activeSpaceIsValid = try values.decodeIfPresent(Bool.self, forKey: .activeSpaceIsValid) ?? false
         menuTrackingIsActive = try values.decodeIfPresent(Bool.self, forKey: .menuTrackingIsActive) ?? true
+        nativeConcealmentReceipt = try values.decodeIfPresent(NativeConcealmentReceipt.self, forKey: .nativeConcealmentReceipt)
     }
 
     public func hasSameValidScene(as other: Self) -> Bool {
@@ -210,6 +216,18 @@ public struct MenuBarEnvironmentSnapshot: Codable, Equatable, Sendable {
             activeDisplayID != nil && activeStableDisplayID != nil &&
             activeDisplayID == other.activeDisplayID && activeStableDisplayID == other.activeStableDisplayID &&
             activeSpaceToken == other.activeSpaceToken
+    }
+
+    public func replacingConcealmentReceipt(_ receipt: NativeConcealmentReceipt) -> Self {
+        Self(
+            activeDisplayID: activeDisplayID,
+            activeStableDisplayID: activeStableDisplayID,
+            activeSpaceToken: activeSpaceToken,
+            activeSpaceIsFullscreen: activeSpaceIsFullscreen,
+            activeSpaceIsValid: activeSpaceIsValid,
+            menuTrackingIsActive: menuTrackingIsActive,
+            nativeConcealmentReceipt: receipt
+        )
     }
 }
 
@@ -455,6 +473,9 @@ public protocol MenuBarBackend: Sendable {
     func environment() async throws -> MenuBarEnvironmentSnapshot
     func pointContext(_ point: MenuBarPoint) async throws -> MenuBarPointContext
     func configureConcealment(_ configuration: MenuBarConcealmentConfiguration) async throws
+    /// Acknowledgement created inside the helper's configuration critical
+    /// section. A later environment query is not an atomic acknowledgement.
+    func configureConcealmentWithReceipt(_ configuration: MenuBarConcealmentConfiguration) async throws -> NativeConcealmentReceipt?
     /// Opens Notification Center when `point` is on the system clock and
     /// native concealment is blocking it. Returns false when the click was not
     /// on the clock or nothing blocks it, so the native click proceeds.
@@ -498,6 +519,11 @@ public extension MenuBarBackend {
 
     func configureConcealment(_: MenuBarConcealmentConfiguration) async throws {
         throw MenuBarBackendError.unavailableCapability("native concealment")
+    }
+
+    func configureConcealmentWithReceipt(_ configuration: MenuBarConcealmentConfiguration) async throws -> NativeConcealmentReceipt? {
+        try await configureConcealment(configuration)
+        return nil
     }
 
     func pressSystemClockIfConcealed(

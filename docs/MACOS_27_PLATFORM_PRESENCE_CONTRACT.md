@@ -2,7 +2,7 @@
 
 Status: **implementation prerequisite, not release approval**. The native
 suppression cause is verified on 27.0.1/26A434; the connected authority repair
-below is not implemented. GPT 6 Astra High independently reviewed this design.
+below is not yet integrated. GPT 6 Astra High independently reviewed this design.
 
 Build 152 repairs only recovery from failed activation. Its successful-profile
 guard correctly rejects loss of an admitted item, but native assessment hiding
@@ -26,6 +26,17 @@ No missing-item validation rule is relaxed by this slice.
 
 ### 1. Helper-owned assertion receipts
 
+Implemented as a separate source slice: typed receipts cross the existing
+environment response and atomic configuration acknowledgement. A helper-owned
+ledger expires evidence before native `Begin`, not merely at logical commit.
+Uncertain failure clears the trusted deduplication mirrors; retrying the prior
+configuration must establish state again. Reveals remain transient; Clock
+lift/restoration changes revision even when it returns to identical allowlists.
+Lifecycle invalidation and counter exhaustion rotate receipt lifetime. The
+locked bridge query acknowledges only explicit idle commits, not native item
+presence. Passive cache reuse excludes unstable receipts, and scans compare
+receipts before and after enumeration. No Focus exception is admitted yet.
+
 Publish helper-session identity, assertion revision, accepted configuration
 revision/digest, and a typed `deasserted/asserted/transient/unknown` state through
 the existing environment response. The helper creates receipts; caller-provided
@@ -36,8 +47,10 @@ presence, because an all-visible commit can intentionally clear it.
 Advance assertion revision for every actual lift, reapply, reveal, invalidate
 or recovery, including clock activation. Logical configuration changes with
 identical native allowlists advance configuration revision. Genuine no-ops
-retain receipts; rejected proposals retain prior accepted state. Uncertain
-restoration reports unknown. New helper/session lifetimes invalidate old proof.
+retain receipts; rejected proposals retain prior accepted logical intent and
+bridge ownership, but native attempts revoke prior observation proof. An abort
+does not establish physical restoration. Uncertain restoration reports unknown.
+New helper/session lifetimes invalidate old proof.
 
 ### 2. Trusted runtime Focus observations
 

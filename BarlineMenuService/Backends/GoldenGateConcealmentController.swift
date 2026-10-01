@@ -1,5 +1,6 @@
 import AppKit
 import BarlineCore
+import CryptoKit
 import Foundation
 import OSLog
 
@@ -15,6 +16,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     private var temporaryRevealLedger = TemporaryRevealLedger()
     private var appliedResolution: GoldenGateResolvedConcealment?
     private var appliedNativeState: GoldenGateNativeConcealmentState?
+    private var receiptLedger = NativeConcealmentReceiptLedger()
     // Access is serialized by transactionGate, including worker admission.
     private var recoveryLease = GoldenGateRecoveryLease()
     private var recoveryTask: Task<Void, Never>?
@@ -39,18 +41,47 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         controller() != nil
     }
 
-    func configure(_ configuration: MenuBarConcealmentConfiguration) async throws {
+    @discardableResult
+    func configure(_ configuration: MenuBarConcealmentConfiguration) async throws -> NativeConcealmentReceipt {
         try await transactionGate.withLock { [self] in
             let previousConfiguration = desiredConfiguration
             desiredConfiguration = configuration
             do {
                 try await applyCurrentState()
                 cancelBackgroundRecovery()
+                return receiptLedger.receipt
             } catch {
                 desiredConfiguration = previousConfiguration
                 throw error
             }
         }
+    }
+
+    func receipt() async throws -> NativeConcealmentReceipt {
+        try await transactionGate.withLock { [self] in
+            checkedReceipt()
+        }
+    }
+
+    func environment(_ observeScene: @escaping @Sendable () -> MenuBarEnvironmentSnapshot) async throws -> MenuBarEnvironmentSnapshot {
+        try await transactionGate.withLock { [self] in
+            observeScene().replacingConcealmentReceipt(checkedReceipt())
+        }
+    }
+
+    private func checkedReceipt() -> NativeConcealmentReceipt {
+        if receiptLedger.receipt.hasKnownEffectiveState {
+            guard let appliedNativeState,
+                  let controller = controller(createIfNeeded: false),
+                  BLNGoldenGateAssessmentCommittedState(controller) == expectedAssertionState(appliedNativeState)
+            else {
+                receiptLedger.markUnknown()
+                appliedResolution = nil
+                appliedNativeState = nil
+                return receiptLedger.receipt
+            }
+        }
+        return receiptLedger.receipt
     }
 
     @discardableResult
@@ -104,6 +135,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
                 now: { DispatchTime.now().uptimeNanoseconds },
                 isCurrent: isCurrent,
                 lift: { [self] in
+                    receiptLedger.beginNativeTransition()
                     if let controller = controller(createIfNeeded: false) {
                         BLNGoldenGateAssessmentInvalidate(controller)
                     }
@@ -128,6 +160,9 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             try await applyCurrentState(timeout: GoldenGateTiming.clockRestoreBudget)
             cancelBackgroundRecovery()
         } catch {
+            receiptLedger.markUnknown()
+            appliedResolution = nil
+            appliedNativeState = nil
             logger.error("Concealment re-apply after the clock press failed; scheduling recovery")
             scheduleBackgroundReapply()
             throw MenuBarBackendError.mutationRecoveryFailed
@@ -182,6 +217,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
                 appliedResolution = nil
                 appliedNativeState = nil
                 desiredConfiguration = MenuBarConcealmentConfiguration(visibleItemIDs: [], concealedItemIDs: [])
+                receiptLedger.invalidateSession()
             }
         }.value
     }
@@ -193,7 +229,9 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         guard let opaqueController = controller() else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
         }
-        let temporarilyVisible = (temporaryRevealLedger ?? self.temporaryRevealLedger).visibleItemIDs
+        let candidateRevealLedger = temporaryRevealLedger ?? self.temporaryRevealLedger
+        let temporarilyVisible = candidateRevealLedger.visibleItemIDs
+        let revealOwnershipChanged = candidateRevealLedger != self.temporaryRevealLedger
         let configuration = MenuBarConcealmentConfiguration(
             visibleItemIDs: desiredConfiguration.visibleItemIDs + temporarilyVisible,
             concealedItemIDs: desiredConfiguration.concealedItemIDs.filter {
@@ -211,6 +249,15 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         let nativeState = GoldenGateNativeConcealmentState(
             resolution: resolved, runningBundleIdentifiers: runningBundles
         )
+        let configurationDigest = try digest([
+            "visible": Set(desiredConfiguration.visibleItemIDs.map(\.searchDocumentID.value)).sorted(),
+            "concealed": Set(desiredConfiguration.concealedItemIDs.map(\.searchDocumentID.value)).sorted(),
+        ])
+        let effectiveDigest = try digest([
+            "concealedBundles": resolved.concealedBundleIdentifiers.sorted(),
+            "systemItems": resolved.allowedSystemItemIdentifiers.sorted().map(String.init),
+            "allowedBundles": nativeState.allowedBundleIdentifiers.sorted(),
+        ])
         let desiredVisibleCount = desiredConfiguration.visibleItemIDs.count
         let desiredHiddenCount = desiredConfiguration.concealedItemIDs.count
         logger.notice(
@@ -222,7 +269,17 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         // Keep the committed assertion when the effective allowlists have not
         // changed; real visibility changes still flow through the transactional
         // activate-then-commit path below.
-        if appliedNativeState == nativeState {
+        if appliedNativeState == nativeState,
+           checkedReceipt().hasKnownEffectiveState,
+           BLNGoldenGateAssessmentCommittedState(opaqueController) == expectedAssertionState(nativeState)
+        {
+            appliedResolution = resolved
+            receiptLedger.accept(
+                configurationDigest: configurationDigest, effectiveStateDigest: effectiveDigest,
+                hasCommittedAssertion: expectedAssertionState(nativeState) == 1,
+                hasTemporaryReveal: !temporarilyVisible.isEmpty,
+                forceObservationChange: revealOwnershipChanged
+            )
             return
         }
         let bundles = resolved.concealedBundleIdentifiers.sorted() as CFArray
@@ -230,9 +287,20 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         let allowedBundles = nativeState.allowedBundleIdentifiers.sorted() as CFArray
         // Synchronous bridge setup must consume the activation budget too.
         let deadline = ContinuousClock.now.advanced(by: timeout)
+        // Begin invokes native activation before logical Commit. Even a zero
+        // token can follow an activation exception, so old proof expires now.
+        receiptLedger.beginNativeTransition()
+        var acknowledged = false
+        defer {
+            if !acknowledged {
+                receiptLedger.markUnknown()
+                appliedResolution = nil
+                appliedNativeState = nil
+            }
+        }
         let transaction = BLNGoldenGateAssessmentBegin(opaqueController, bundles, systemItems, allowedBundles)
         guard transaction != 0 else {
-            throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
+            throw MenuBarBackendError.operationFailed("Golden Gate native concealment could not start")
         }
         var committed = false
         defer {
@@ -250,8 +318,18 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
                         throw MenuBarBackendError.interrupted
                     }
                     committed = true
+                    guard BLNGoldenGateAssessmentCommittedState(opaqueController) == expectedAssertionState(nativeState) else {
+                        throw MenuBarBackendError.mutationRecoveryFailed
+                    }
                     appliedResolution = resolved
                     appliedNativeState = nativeState
+                    receiptLedger.accept(
+                        configurationDigest: configurationDigest, effectiveStateDigest: effectiveDigest,
+                        hasCommittedAssertion: expectedAssertionState(nativeState) == 1,
+                        hasTemporaryReveal: !temporarilyVisible.isEmpty,
+                        forceObservationChange: true
+                    )
+                    acknowledged = true
                     return
                 case -1:
                     throw MenuBarBackendError.operationFailed(
@@ -268,6 +346,18 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             logger.error("Golden Gate assertion transaction aborted before commit")
             throw error
         }
+    }
+
+    private func expectedAssertionState(_ state: GoldenGateNativeConcealmentState) -> Int32 {
+        state.resolution.concealedBundleIdentifiers.isEmpty &&
+            state.resolution.allowedSystemItemIdentifiers == GoldenGateConcealmentPolicy.allSystemItemIdentifiers ? 0 : 1
+    }
+
+    private func digest(_ fields: [String: [String]]) throws -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(fields)
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     /// Returns the retained bridge controller, retrying creation after a

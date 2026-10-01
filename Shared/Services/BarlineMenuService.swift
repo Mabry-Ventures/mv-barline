@@ -78,5 +78,11 @@ extension BarlineMenuService {
         case failure(MenuBarBackendError)
     }
 
-    struct EmptyResult: Codable, Sendable {}
+    struct EmptyResult: Codable, Sendable {
+        let nativeConcealmentReceipt: NativeConcealmentReceipt?
+
+        init(nativeConcealmentReceipt: NativeConcealmentReceipt? = nil) {
+            self.nativeConcealmentReceipt = nativeConcealmentReceipt
+        }
+    }
 }
