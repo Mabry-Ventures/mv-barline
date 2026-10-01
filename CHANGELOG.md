@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.66 (build 149) — qualification candidate, October 1, 2026
+## 1.0.66 (build 150) — diagnostic qualification candidate, October 1, 2026
 
 ### macOS 27
 
@@ -36,6 +36,9 @@
 
 ### Both
 
+- Failed saved-layout transactions retain distinct, privacy-safe activation,
+  workspace rollback and layout rollback codes instead of a combined generic
+  error. This diagnostic candidate does not yet repair the installed failure.
 - Rejected saved-layout plans report a specific, privacy-safe explanation and
   stop automatic command replay until a fresh request is made. Recovery data
   and previous authority are not discarded to make a rejected plan succeed.

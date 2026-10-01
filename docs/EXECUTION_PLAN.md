@@ -1,5 +1,19 @@
 # Barline execution plan
 
+## Build 150 failed-transition diagnosis — October 1, 2026
+
+Build 149 passed 759 core tests, its clean fast gate and signed/notarized
+packaging. Its installed physical visible-to-hidden saved-layout transition
+still failed. It is not approved for release. The public build remains 142.
+
+Build 150 preserves typed activation and compensation failures and emits only
+closed, payload-free diagnostic codes. Successful compensation still rethrows
+the original failure; no mutation, rollback or authority rules are relaxed.
+The installed failure must be identified before the next behavioral repair.
+Source review also identifies grouped sibling operations being classified
+against stale pre-mutation state. That is a separate reproducible concern,
+not yet the established cause of the build-149 installed hide failure.
+
 ## Build 149 saved-layout admission repair — October 1, 2026
 
 Build 148 failed a real installed visible-to-hidden saved-layout transition.

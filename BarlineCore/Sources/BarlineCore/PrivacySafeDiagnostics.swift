@@ -4,6 +4,18 @@ import Foundation
 /// description, userInfo, identity, title, path, or a nested error in a log.
 public enum PrivacySafeDiagnostics {
     public static func errorCode(_ error: any Error) -> String {
+        if error is ProfileActivationRecoveryFailure {
+            return "profile_activation_recovery_failed"
+        }
+        if let reason = error as? SnapshotRejectionReason {
+            return snapshotCode(reason)
+        }
+        if let validationError = error as? ProfileValidationError {
+            if case .invalidAppearance = validationError {
+                return "profile_appearance_invalid"
+            }
+            return "profile_validation_failed"
+        }
         if error is ProfileAuthorityPersistenceError {
             return "profile_authority_persistence_failed"
         }
@@ -63,6 +75,7 @@ public enum PrivacySafeDiagnostics {
             case MenuBarBackendCapabilityReason.sourceApplicationResolution: return "source_app_unresolved"
             case MenuBarBackendCapabilityReason.dragSynthesis: return "drag_synthesis_unavailable"
             case MenuBarBackendCapabilityReason.eventDelivery: return "event_delivery_unavailable"
+            case "macOS 27 native menu bar reorder": return "native_reorder_unavailable"
             default: return "capability_unavailable"
             }
         case .staleItem: return "stale_item"
@@ -96,6 +109,19 @@ public enum PrivacySafeDiagnostics {
         case "history restore did not reach requested displays": "restore_display_mismatch"
         case "history restore did not reach requested display identity": "restore_display_identity_mismatch"
         case "history restore did not reach requested layout": "restore_layout_mismatch"
+        case "saved menu bar identities are ambiguous": "saved_identity_ambiguous"
+        case "profile activation did not reach requested layout": "profile_layout_mismatch"
+        case "profile activation changed an unrequested section or display": "profile_section_or_display_mismatch"
+        case "profile activation did not reach requested visibility": "profile_visibility_mismatch"
+        case "profile activation did not reach requested shelf order": "profile_shelf_order_mismatch"
+        case "profile visibility observation has not settled": "profile_observation_unsettled"
+        case "profile activation postcondition was unavailable": "profile_postcondition_unavailable"
+        case "workspace changed while profile activation was starting": "workspace_changed_at_admission"
+        case "workspace journal persistence failed": "workspace_journal_persistence_failed"
+        case "profile display identity changed during activation": "profile_display_identity_changed"
+        case "profile display identity became ambiguous during activation": "profile_display_identity_ambiguous"
+        case "profile display topology changed during activation": "profile_display_topology_changed"
+        case "item spacing changed repeatedly during profile rollback": "workspace_spacing_rollback_unsettled"
         default: "operation_failed"
         }
     }

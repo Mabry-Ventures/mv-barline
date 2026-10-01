@@ -83,6 +83,24 @@ public enum MenuBarWorkspaceTransactionError: Error, Equatable, Sendable {
     case sideEffectRecoveryFailed
 }
 
+/// Keeps each failed transaction boundary distinguishable without formatting
+/// underlying errors. Compensation and authority rules are unchanged.
+public struct ProfileActivationRecoveryFailure: Error, Sendable {
+    public let activationError: any Error
+    public let workspaceRollbackError: (any Error)?
+    public let layoutRollbackError: (any Error)?
+
+    public init(
+        activationError: any Error,
+        workspaceRollbackError: (any Error)?,
+        layoutRollbackError: (any Error)?
+    ) {
+        self.activationError = activationError
+        self.workspaceRollbackError = workspaceRollbackError
+        self.layoutRollbackError = layoutRollbackError
+    }
+}
+
 public struct MenuBarWorkspaceTransaction: Sendable {
     fileprivate let captureClosure: @Sendable () async throws -> ProfileWorkspaceState
     fileprivate let applyClosure: @Sendable (ProfileWorkspaceState) async throws -> Void
@@ -1524,6 +1542,9 @@ public actor MenuBarStateCoordinator {
             return snapshot
         } catch {
             let activationError = error
+            Self.logger.error(
+                "Profile activation rejected: \(PrivacySafeDiagnostics.errorCode(activationError), privacy: .public)"
+            )
             // A preflight rejection describes only the move that threw. A
             // prior move in this same profile may already have succeeded and
             // still requires verified compensation.
@@ -1633,10 +1654,10 @@ public actor MenuBarStateCoordinator {
             }
             currentSnapshot = nil
             activeProfileID = nil
-            let workspaceDescription = workspaceRollbackError.map(String.init(describing:)) ?? "none"
-            let layoutDescription = layoutRollbackError.map(String.init(describing:)) ?? "none"
-            throw MenuBarBackendError.operationFailed(
-                "profile activation failed: \(activationError); workspace rollback: \(workspaceDescription); layout rollback: \(layoutDescription)"
+            throw ProfileActivationRecoveryFailure(
+                activationError: activationError,
+                workspaceRollbackError: workspaceRollbackError,
+                layoutRollbackError: layoutRollbackError
             )
         }
     }

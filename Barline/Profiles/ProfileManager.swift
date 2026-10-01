@@ -2455,6 +2455,14 @@ final class ProfileManager: ObservableObject {
                 statusMessage = "The profile operation could not be completed."
             }
             Logger(category: "Profiles").error("Profile operation failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)")
+            if let failure = error as? ProfileActivationRecoveryFailure {
+                let activationCode = PrivacySafeDiagnostics.errorCode(failure.activationError)
+                let workspaceCode = failure.workspaceRollbackError.map(PrivacySafeDiagnostics.errorCode) ?? "none"
+                let layoutCode = failure.layoutRollbackError.map(PrivacySafeDiagnostics.errorCode) ?? "none"
+                Logger(category: "Profiles").error(
+                    "Profile transaction stages: activation=\(activationCode, privacy: .public) workspaceRollback=\(workspaceCode, privacy: .public) layoutRollback=\(layoutCode, privacy: .public)"
+                )
+            }
         }
     }
 }

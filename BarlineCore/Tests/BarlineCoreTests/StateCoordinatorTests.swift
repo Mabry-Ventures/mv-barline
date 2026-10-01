@@ -3599,12 +3599,17 @@ struct StateCoordinatorTests {
         )
         _ = try await coordinator.refresh(now: before.capturedAt)
 
-        await #expect(throws: MenuBarBackendError.self) {
+        do {
             try await coordinator.activate(
                 profile: profile,
                 now: before.capturedAt,
                 workspaceTransaction: transaction
             )
+            Issue.record("Expected a failed activation with unverified compensation")
+        } catch let failure as ProfileActivationRecoveryFailure {
+            #expect(failure.activationError is MenuBarBackendError)
+            #expect(failure.workspaceRollbackError is MenuBarBackendError)
+            #expect(failure.layoutRollbackError is MenuBarBackendError)
         }
 
         #expect(await coordinator.currentSnapshot == nil)
@@ -4161,12 +4166,21 @@ struct StateCoordinatorTests {
         )
         _ = try await coordinator.refresh(now: before.capturedAt)
 
-        await #expect(throws: MenuBarBackendError.self) {
+        do {
             try await coordinator.activate(
                 profile: profile,
                 on: liveDisplay,
                 now: after.capturedAt
             )
+            Issue.record("Expected display identity rejection and failed rollback verification")
+        } catch let failure as ProfileActivationRecoveryFailure {
+            #expect(failure.activationError as? MenuBarBackendError == .operationFailed(
+                "profile display identity changed during activation"
+            ))
+            #expect(failure.workspaceRollbackError == nil)
+            #expect(failure.layoutRollbackError as? MenuBarBackendError == .operationFailed(
+                "history restore did not reach requested display identity"
+            ))
         }
 
         #expect(await coordinator.activeProfileID == nil)

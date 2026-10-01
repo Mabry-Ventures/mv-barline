@@ -3,6 +3,63 @@ import Foundation
 import Testing
 
 struct PrivacySafeDiagnosticsTests {
+    @Test func profileTransactionStagesUseExactClosedCodes() {
+        let cases = [
+            ("saved menu bar identities are ambiguous", "saved_identity_ambiguous"),
+            ("profile activation did not reach requested layout", "profile_layout_mismatch"),
+            ("profile activation changed an unrequested section or display", "profile_section_or_display_mismatch"),
+            ("profile activation did not reach requested visibility", "profile_visibility_mismatch"),
+            ("profile activation did not reach requested shelf order", "profile_shelf_order_mismatch"),
+            ("profile visibility observation has not settled", "profile_observation_unsettled"),
+            ("profile activation postcondition was unavailable", "profile_postcondition_unavailable"),
+            ("workspace changed while profile activation was starting", "workspace_changed_at_admission"),
+            ("workspace journal persistence failed", "workspace_journal_persistence_failed"),
+            ("profile display identity changed during activation", "profile_display_identity_changed"),
+            ("profile display identity became ambiguous during activation", "profile_display_identity_ambiguous"),
+            ("profile display topology changed during activation", "profile_display_topology_changed"),
+            ("item spacing changed repeatedly during profile rollback", "workspace_spacing_rollback_unsettled"),
+        ]
+        for (reason, expected) in cases {
+            #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.operationFailed(reason)) == expected)
+            #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.operationFailed(
+                reason + " /Users/private/profile"
+            )) == "operation_failed")
+        }
+        #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.unavailableCapability(
+            "macOS 27 native menu bar reorder"
+        )) == "native_reorder_unavailable")
+        #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.unavailableCapability(
+            "macOS 27 native menu bar reorder /Users/private/profile"
+        )) == "capability_unavailable")
+    }
+
+    @Test func wrappedActivationFailureRetainsBoundariesWithoutLeakingPayloads() {
+        let secret = "PRIVATE_PROFILE_/Users/private/profile"
+        let item = MenuBarItemID(bundleIdentifier: secret, title: secret)
+        let failure = ProfileActivationRecoveryFailure(
+            activationError: MenuBarBackendError.operationFailed(secret),
+            workspaceRollbackError: MenuBarWorkspaceTransactionError.superseded,
+            layoutRollbackError: SnapshotRejectionReason.unstableItemIdentity(item)
+        )
+        let codes = [
+            PrivacySafeDiagnostics.errorCode(failure),
+            PrivacySafeDiagnostics.errorCode(failure.activationError),
+            PrivacySafeDiagnostics.errorCode(failure.workspaceRollbackError!),
+            PrivacySafeDiagnostics.errorCode(failure.layoutRollbackError!),
+        ]
+        #expect(codes == ["profile_activation_recovery_failed", "operation_failed",
+                          "workspace_superseded", "snapshot_unstable_item"])
+        #expect(!codes.joined().contains(secret))
+        let noWorkspaceFailure = ProfileActivationRecoveryFailure(
+            activationError: CancellationError(), workspaceRollbackError: nil, layoutRollbackError: nil
+        )
+        #expect(noWorkspaceFailure.workspaceRollbackError == nil)
+        #expect(noWorkspaceFailure.layoutRollbackError == nil)
+        #expect(noWorkspaceFailure.activationError is CancellationError)
+        #expect(PrivacySafeDiagnostics.errorCode(ProfileValidationError.invalidAppearance) == "profile_appearance_invalid")
+        #expect(PrivacySafeDiagnostics.errorCode(ProfileValidationError.malformedDocument(secret)) == "profile_validation_failed")
+    }
+
     @Test func activationHandoffFailuresUseExactClosedCodes() {
         let cases = [
             (MenuBarBackendCapabilityReason.sourceApplicationResolution, "source_app_unresolved"),
@@ -115,6 +172,7 @@ struct PrivacySafeDiagnosticsTests {
             .nonMonotonicGeneration(previous: 99, candidate: 1),
         ]
         let codes = reasons.map { PrivacySafeDiagnostics.errorCode(MenuBarBackendError.invalidSnapshot($0)) }
+        #expect(reasons.map { PrivacySafeDiagnostics.errorCode($0) } == codes)
         #expect(Set(codes).count == reasons.count)
         for code in codes {
             #expect(code.hasPrefix("snapshot_"))
