@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Mutation, saved-layout, rollback, history and restart verification bypass
+  inventory caches. A new generation stamped on cached UI inventory no longer
+  counts as an independent stability observation. Ordinary UI caching remains.
+  This is source hardening, not macOS 27 Focus compatibility or release approval.
+
 ## 1.0.66 (build 152) — qualification candidate, October 1, 2026
 
 ### macOS 27

@@ -352,6 +352,12 @@ actor GoldenGateAXSnapshotProvider {
         try await snapshot(forceRefresh: false)
     }
 
+    /// Consecutive mutation verification must enumerate AX again, rather than
+    /// stamp the ordinary UI cache with another generation number.
+    func snapshotForVerification() async throws -> MenuBarSnapshot {
+        try await snapshot(forceRefresh: true)
+    }
+
     private func snapshot(forceRefresh: Bool) async throws -> MenuBarSnapshot {
         guard !hasInvalidIdentityState else {
             throw MenuBarBackendError.operationFailed("saved menu bar identity state requires recovery")

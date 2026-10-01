@@ -149,6 +149,13 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
         return try client.goldenGateSnapshot()
     }
 
+    func snapshotForVerification() throws -> MenuBarSnapshot {
+        guard capabilities.canSnapshot else {
+            throw MenuBarBackendError.unavailableCapability("Golden Gate snapshot")
+        }
+        return try client.goldenGateSnapshot(forceRefresh: true)
+    }
+
     func move(_: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
         throw MenuBarBackendError.unavailableCapability("Golden Gate move")
     }

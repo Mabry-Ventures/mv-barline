@@ -443,6 +443,10 @@ public protocol MenuBarBackend: Sendable {
     var capabilities: MenuBarCapabilities { get async }
 
     func snapshot() async throws -> MenuBarSnapshot
+    /// Capture a new observation for mutation postconditions. A backend that
+    /// caches ordinary snapshots must override this and bypass that cache;
+    /// issuing a new generation for old inventory is not independent proof.
+    func snapshotForVerification() async throws -> MenuBarSnapshot
     func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult
     func reveal(_ item: MenuBarItemID) async throws -> MenuBarMutationResult
     func activate(_ item: MenuBarItemID, button: MenuBarMouseButton) async throws
@@ -470,6 +474,12 @@ public protocol MenuBarBackend: Sendable {
 }
 
 public extension MenuBarBackend {
+    /// Uncached backends use their ordinary observation operation. Cached
+    /// adapters must implement the protocol requirement explicitly.
+    func snapshotForVerification() async throws -> MenuBarSnapshot {
+        try await snapshot()
+    }
+
     func capture(_: [MenuBarItemID]) async throws -> [MenuBarCapturedImage] {
         throw MenuBarBackendError.unavailableCapability("capture")
     }

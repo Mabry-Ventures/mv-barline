@@ -4,6 +4,52 @@ import Testing
 
 @Suite("Stateful grouped profile execution")
 struct GroupedProfileExecutionTests {
+    @Test("A cached UI projection cannot mask an external edit from profile verification")
+    func verifiesProfileWithFreshInventory() async throws {
+        let backend = GroupedProfileBackend(
+            section: .visible, hidesUnrelatedAfterMove: true, masksExternalEditInOrdinaryReads: true
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let profile = BarlineProfile(name: "Hidden", layout: ProfileLayout(hidden: backend.siblings))
+        await #expect(throws: MenuBarBackendError.mutationSuperseded) {
+            try await coordinator.activate(profile: profile)
+        }
+        #expect(await backend.freshObservationCount > 0)
+        #expect(await backend.visibilityMutationCount == 1)
+        #expect(await coordinator.activeProfileID == nil)
+    }
+
+    @Test("Stable profile convergence uses two new scans rather than the UI cache")
+    func requiresFreshProfileConvergence() async throws {
+        let backend = GroupedProfileBackend(section: .visible)
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let profile = BarlineProfile(name: "Hidden", layout: ProfileLayout(hidden: backend.siblings))
+        let snapshot = try await coordinator.activate(profile: profile)
+        #expect(snapshot.items.filter { backend.siblings.contains($0.id) }.allSatisfy { $0.section == .hidden })
+        // One step observation and two independent terminal observations.
+        #expect(await backend.freshObservationCount == 3)
+        #expect(await coordinator.activeProfileID == profile.id)
+    }
+
+    @Test("A cached first Focus-return scan cannot authorize unstable compensation")
+    func rejectsCachedFocusReturn() async throws {
+        let backend = GroupedProfileBackend(
+            section: .visible, suppressesFocusAfterMove: true, focusRecoveryFault: "unstable_focus_return"
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend, retryPolicy: .init(maximumAttempts: 1, baseDelay: .milliseconds(1))
+        )
+        let target = BarlineProfile(name: "Hidden", layout: ProfileLayout(hidden: backend.siblings))
+        await #expect(throws: ProfileActivationRecoveryFailure.self) {
+            try await coordinator.activate(profile: target)
+        }
+        #expect(await backend.nativeDeassertionCount == 1)
+        #expect(await backend.freshRecoveryObservationCount == 2)
+        #expect(await backend.visibilityMutationCount == 1)
+        #expect(await coordinator.activeProfileID == nil)
+        #expect(await coordinator.currentSnapshot == nil)
+    }
+
     @Test("Native Focus suppression fails activation but recovers the original complete inventory")
     func restoresSuppressedFocus() async throws {
         let backend = GroupedProfileBackend(section: .visible, suppressesFocusAfterMove: true)
@@ -298,6 +344,7 @@ private actor GroupedProfileBackend: MenuBarBackend {
     private let restoresFocus: Bool
     private let focusRecoveryFault: String?
     private let cancelsAfterMove: Bool
+    private let masksExternalEditInOrdinaryReads: Bool
     private var suppressedFocus: MenuBarItemDescriptor?
     private(set) var nativeDeassertionCount = 0
     private(set) var cancelledRecoveryObservationCount = 0
@@ -305,6 +352,8 @@ private actor GroupedProfileBackend: MenuBarBackend {
     private(set) var shelfMutationCount = 0
     private(set) var nativeReorderAttempts = 0
     private(set) var movedUnrelated = false
+    private(set) var freshObservationCount = 0
+    private(set) var freshRecoveryObservationCount = 0
 
     init(
         section: MenuBarSection, dropsUnrelatedAfterMove: Bool = false,
@@ -312,7 +361,8 @@ private actor GroupedProfileBackend: MenuBarBackend {
         trackingAfterMove: Bool = false, stalls: Bool = false, unrelatedOnOtherDisplay: Bool = false,
         relocatesGroupAfterMove: Bool = false, interleavesIndependentDisplays: Bool = false,
         duplicatesAfterMove: Bool = false, suppressesFocusAfterMove: Bool = false, restoresFocus: Bool = true,
-        focusRecoveryFault: String? = nil, cancelsAfterMove: Bool = false
+        focusRecoveryFault: String? = nil, cancelsAfterMove: Bool = false,
+        masksExternalEditInOrdinaryReads: Bool = false
     ) {
         self.dropsUnrelatedAfterMove = dropsUnrelatedAfterMove
         self.hidesUnrelatedAfterMove = hidesUnrelatedAfterMove
@@ -326,6 +376,7 @@ private actor GroupedProfileBackend: MenuBarBackend {
         self.restoresFocus = restoresFocus
         self.focusRecoveryFault = focusRecoveryFault
         self.cancelsAfterMove = cancelsAfterMove
+        self.masksExternalEditInOrdinaryReads = masksExternalEditInOrdinaryReads
         let localSiblings = siblings
         let localDisplay = MenuBarDisplayID("test-display")
         items = localSiblings.enumerated().map { index, id in
@@ -356,6 +407,18 @@ private actor GroupedProfileBackend: MenuBarBackend {
     }
 
     func snapshot() async throws -> MenuBarSnapshot {
+        try await observation(isFresh: false)
+    }
+
+    func snapshotForVerification() async throws -> MenuBarSnapshot {
+        freshObservationCount += 1
+        if nativeDeassertionCount > 0 {
+            freshRecoveryObservationCount += 1
+        }
+        return try await observation(isFresh: true)
+    }
+
+    private func observation(isFresh: Bool) async throws -> MenuBarSnapshot {
         if cancelsAfterMove {
             try Task.checkCancellation()
         }
@@ -367,10 +430,19 @@ private actor GroupedProfileBackend: MenuBarBackend {
                 throw error
             }
         }
+        var observedItems = items
+        if !isFresh, masksExternalEditInOrdinaryReads, visibilityMutationCount > 0 {
+            observedItems = observedItems.map {
+                $0.id.bundleIdentifier == "com.example.unrelated" ? $0.replacingSection(.visible) : $0
+            }
+        }
+        if isFresh, focusRecoveryFault == "unstable_focus_return", freshRecoveryObservationCount > 1 {
+            observedItems.removeAll { $0.id.bundleIdentifier == "com.apple.menubaragent" }
+        }
         generation &+= 1
         return MenuBarSnapshot(
             generation: generation, capturedAt: staleAfterMove && visibilityMutationCount > 0 ? .distantPast : Date(),
-            items: items, displayIDs: Set(items.compactMap(\.displayID)), activeSpaceIsValid: true,
+            items: observedItems, displayIDs: Set(items.compactMap(\.displayID)), activeSpaceIsValid: true,
             menuTrackingIsActive: trackingAfterMove && visibilityMutationCount > 0
         )
     }

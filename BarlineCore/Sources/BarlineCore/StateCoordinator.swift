@@ -466,7 +466,7 @@ public actor MenuBarStateCoordinator {
         for attempt in 0 ..< attemptCount {
             try Task.checkCancellation()
             do {
-                let candidate = try await normalizedBackendSnapshot()
+                let candidate = try await normalizedBackendSnapshot(requiresFreshObservation: false)
                 switch validator.validate(candidate, previous: currentSnapshot, now: now ?? Date()) {
                 case let .success(snapshot):
                     if let currentSnapshot,
@@ -658,7 +658,7 @@ public actor MenuBarStateCoordinator {
                 // proposal was staged. A compensating restore would overwrite
                 // state that this caller does not own with its stale `before`
                 // snapshot, defeating the backend's compare/rebase guard.
-                if let observed = try? await normalizedBackendSnapshot(),
+                if let observed = try? await normalizedBackendSnapshot(requiresFreshObservation: true),
                    case let .success(snapshot) = validator.validate(
                        observed,
                        previous: nil,
@@ -751,7 +751,7 @@ public actor MenuBarStateCoordinator {
         var mostRecentError: (any Error)?
         for attempt in 0 ..< max(2, retryPolicy.maximumAttempts + 2) {
             do {
-                let candidate = try await normalizedBackendSnapshot()
+                let candidate = try await normalizedBackendSnapshot(requiresFreshObservation: true)
                 let validationNow = now.addingTimeInterval(
                     Date().timeIntervalSince(validationClockStartedAt)
                 )
@@ -837,7 +837,7 @@ public actor MenuBarStateCoordinator {
         for attempt in 0 ..< attemptCount {
             try Task.checkCancellation()
             do {
-                let candidate = try await normalizedBackendSnapshot()
+                let candidate = try await normalizedBackendSnapshot(requiresFreshObservation: true)
                 // `now` is captured before the mutation starts so callers can
                 // deterministically bind validation to one transaction. The
                 // native Golden Gate inventory can take several seconds to
@@ -1297,7 +1297,7 @@ public actor MenuBarStateCoordinator {
         for attempt in 0 ..< attemptCount {
             try Task.checkCancellation()
             do {
-                let candidate = try await normalizedBackendSnapshot()
+                let candidate = try await normalizedBackendSnapshot(requiresFreshObservation: true)
                 let validationNow = now.addingTimeInterval(
                     Date().timeIntervalSince(validationClockStartedAt)
                 )
@@ -1363,7 +1363,7 @@ public actor MenuBarStateCoordinator {
             throw MenuBarBackendError.unavailableCapability("restore")
         }
         let validationClockStartedAt = Date()
-        let observed = try await normalizedBackendSnapshot()
+        let observed = try await normalizedBackendSnapshot(requiresFreshObservation: true)
         var current = try validator.validate(
             observed,
             previous: nil,
@@ -1388,7 +1388,7 @@ public actor MenuBarStateCoordinator {
             for attempt in 0 ..< attempts {
                 try Task.checkCancellation()
                 let candidate = try await validator.validate(
-                    normalizedBackendSnapshot(), previous: current,
+                    normalizedBackendSnapshot(requiresFreshObservation: true), previous: current,
                     now: now.addingTimeInterval(Date().timeIntervalSince(validationClockStartedAt))
                 ).get()
                 guard GoldenGateConcealmentPolicy.preservesUnownedRecoveryInventory(
@@ -1440,7 +1440,7 @@ public actor MenuBarStateCoordinator {
                 _ = try await backend.move(operation)
                 completedMoves += 1
                 let nextSnapshot = try await validator.validate(
-                    normalizedBackendSnapshot(), previous: executionSnapshot,
+                    normalizedBackendSnapshot(requiresFreshObservation: true), previous: executionSnapshot,
                     now: now.addingTimeInterval(Date().timeIntervalSince(validationClockStartedAt))
                 ).get()
                 try Self.validateLogicalProfileStep(operation: operation, before: executionSnapshot, after: nextSnapshot)
@@ -1453,7 +1453,7 @@ public actor MenuBarStateCoordinator {
                 _ = try await backend.move(operation)
             }
         }
-        let candidate = try await normalizedBackendSnapshot()
+        let candidate = try await normalizedBackendSnapshot(requiresFreshObservation: true)
         let restored = try validator.validate(
             candidate,
             previous: nil,
@@ -1479,7 +1479,7 @@ public actor MenuBarStateCoordinator {
         guard let displayID = environment.activeStableDisplayID else {
             throw DisplayVariantCapture.Failure.unavailable
         }
-        let candidate = try await normalizedBackendSnapshot()
+        let candidate = try await normalizedBackendSnapshot(requiresFreshObservation: true)
         let snapshot = try validator.validate(candidate, previous: currentSnapshot, now: Date()).get()
         guard try await backend.environment().activeStableDisplayID == displayID else {
             throw DisplayVariantCapture.Failure.unavailable
@@ -1671,7 +1671,7 @@ public actor MenuBarStateCoordinator {
                     _ = try await backend.move(operation)
                     completedLayoutMutationCount += 1
                     let nextSnapshot = try await validator.validate(
-                        normalizedBackendSnapshot(), previous: executionSnapshot,
+                        normalizedBackendSnapshot(requiresFreshObservation: true), previous: executionSnapshot,
                         now: (now ?? executionStartedAt).addingTimeInterval(Date().timeIntervalSince(executionStartedAt))
                     ).get()
                     try Self.validateLogicalProfileStep(operation: operation, before: executionSnapshot, after: nextSnapshot)
@@ -1802,7 +1802,7 @@ public actor MenuBarStateCoordinator {
                 verifiedRollbackSnapshot = before
             } else if layoutWasSuperseded {
                 do {
-                    let observed = try await normalizedBackendSnapshot()
+                    let observed = try await normalizedBackendSnapshot(requiresFreshObservation: true)
                     switch validator.validate(observed, previous: nil, now: now ?? Date()) {
                     case let .success(snapshot):
                         verifiedRollbackSnapshot = snapshot
@@ -1924,7 +1924,7 @@ public actor MenuBarStateCoordinator {
             } else {
                 restoredLastKnownGood = false
             }
-            let raw = try await backend.snapshot()
+            let raw = try await backend.snapshotForVerification()
             let priorGeneration = max(
                 preservedCurrent?.generation ?? 0,
                 preservedLastKnownGood?.generation ?? 0
@@ -2474,7 +2474,7 @@ public actor MenuBarStateCoordinator {
             }
             didBeginLayoutMutation = true
             _ = try await backend.restore(target.snapshot)
-            let candidate = try await normalizedBackendSnapshot()
+            let candidate = try await normalizedBackendSnapshot(requiresFreshObservation: true)
             // History restoration intentionally targets an older logical layout;
             // structural validation remains strict, but monotonic comparison with
             // the newer pre-undo snapshot would reject a correct restore.
@@ -2553,7 +2553,7 @@ public actor MenuBarStateCoordinator {
                 if layoutDidNotStart {
                     rollbackSnapshot = previous.snapshot
                 } else if layoutWasSuperseded {
-                    let observed = try await normalizedBackendSnapshot()
+                    let observed = try await normalizedBackendSnapshot(requiresFreshObservation: true)
                     switch validator.validate(observed, previous: nil, now: now ?? Date()) {
                     case let .success(snapshot):
                         rollbackSnapshot = snapshot
@@ -2825,13 +2825,20 @@ public actor MenuBarStateCoordinator {
         let backend = backend
         let snapshot = try await withCompensation {
             _ = try await backend.restore(target)
-            return try await backend.snapshot()
+            return try await backend.snapshotForVerification()
         }
         return try normalizeGeneration(of: snapshot)
     }
 
-    private func normalizedBackendSnapshot() async throws -> MenuBarSnapshot {
-        try await normalizeGeneration(of: backend.snapshot())
+    private func normalizedBackendSnapshot(
+        requiresFreshObservation: Bool
+    ) async throws -> MenuBarSnapshot {
+        let snapshot = if requiresFreshObservation {
+            try await backend.snapshotForVerification()
+        } else {
+            try await backend.snapshot()
+        }
+        return try normalizeGeneration(of: snapshot)
     }
 
     private func normalizeGeneration(of snapshot: MenuBarSnapshot) throws -> MenuBarSnapshot {

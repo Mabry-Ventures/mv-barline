@@ -1,5 +1,38 @@
 # Barline execution plan
 
+## Fresh verification and platform-presence contract — October 1, 2026
+
+Build 152 is frozen and remains production HOLD. Its clean fast gate,
+Developer ID/notarized packaging and exact installed failed-hide recovery
+passed. The installed lane proves restored fixture visibility and withheld
+authority, not successful activation or a direct complete-inventory inspection.
+Candidate-bound receipts are kept under its ignored qualification directory.
+
+A separate worktree repairs a verified proof defect: ordinary inventory cache
+hits increment generation while retaining the earlier AX observation. Mutation
+convergence must not count those hits as independent samples. A protocol-level
+verification request bypasses caches in both macOS 27 adapters. The coordinator
+uses it after individual/grouped moves, during convergence and compensation,
+after history restore/restart, and for superseded observation-only recovery.
+Ordinary UI refresh stays cached. This does not prove complete owner enumeration
+or authenticate Focus absence.
+
+The regression fails with ordinary cached reads: an unrelated native edit is
+masked and profile authority is falsely published. The fresh path rejects it.
+Additional tests cover cached single-move success, stalled undo/restart restore,
+profile convergence and unstable Focus-return recovery. All 786 Core tests and
+the Xcode 27 app/helper Debug compile pass. Initial fast validation rejected
+formatting in one new test file; it was formatted and the gate rerun.
+GPT 6 Astra High and Gemini Flash 3.8 High both approve the narrow freshness
+source change. Their approval does not cover installed operation or release.
+
+Successful Focus-compatible authority requires the connected, fail-closed
+implementation in [the platform-presence contract](MACOS_27_PLATFORM_PRESENCE_CONTRACT.md).
+There is no partial Focus exemption in this patch. New signed candidate and
+installed proof must be regenerated only after the integrated source is ready.
+OS 26, actual clock-panel visibility, XCUITest initialization, hardware and
+upgrade gates remain open. Public build 142 is unchanged.
+
 ## Build 152 native Focus boundary and conservative rollback — October 1, 2026
 
 The exact macOS 27.0.1/26A434 native catalogue has nine cases (0 through 8).

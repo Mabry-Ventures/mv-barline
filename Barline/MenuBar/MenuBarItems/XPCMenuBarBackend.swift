@@ -28,6 +28,14 @@ actor XPCMenuBarBackend: MenuBarBackend {
         return try await connection.snapshot()
     }
 
+    func snapshotForVerification() async throws -> MenuBarSnapshot {
+        if #available(macOS 27.0, *) {
+            return try await goldenGateProvider.snapshotForVerification()
+        }
+        // The Tahoe helper reads a new WindowServer inventory per request.
+        return try await connection.snapshot()
+    }
+
     func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
         if #available(macOS 27.0, *) {
             return try await goldenGateProvider.move(operation)

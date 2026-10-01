@@ -197,8 +197,8 @@ final class WindowServerClient: @unchecked Sendable {
     }
 
     @available(macOS 27.0, *)
-    func goldenGateSnapshot() throws -> MenuBarSnapshot {
-        let observations = try GoldenGateAXInventory.collect()
+    func goldenGateSnapshot(forceRefresh: Bool = false) throws -> MenuBarSnapshot {
+        let observations = try GoldenGateAXInventory.collect(forceRefresh: forceRefresh)
         let activeDisplays = activeDisplayIDs()
         let displayIdentities = activeDisplays.map { displayID in
             MenuBarDisplayIdentity(

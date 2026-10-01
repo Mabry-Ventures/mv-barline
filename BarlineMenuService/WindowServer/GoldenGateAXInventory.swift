@@ -51,9 +51,9 @@ enum GoldenGateAXInventory {
         initialState: (completedAt: UInt64?.none, observations: [Observation]())
     )
 
-    static func collect() throws -> [Observation] {
+    static func collect(forceRefresh: Bool = false) throws -> [Observation] {
         let now = DispatchTime.now().uptimeNanoseconds
-        if let cached = cache.withLock({ state -> [Observation]? in
+        if !forceRefresh, let cached = cache.withLock({ state -> [Observation]? in
             guard let completedAt = state.completedAt,
                   MenuBarInventoryCachePolicy.isReusable(
                       completedAt: completedAt,
