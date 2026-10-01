@@ -114,9 +114,10 @@ enum AXHelpers {
             )
             switch error {
             case .success:
-                guard let raw = value as! AXUIElement? else {
+                guard let value, CFGetTypeID(value) == AXUIElementGetTypeID() else {
                     return (nil, .wrongType)
                 }
+                let raw = unsafeDowncast(value, to: AXUIElement.self)
                 return (boundedMenuBarElement(UIElement(raw)), .success)
             case .noValue:
                 return (nil, .noValue)
@@ -139,6 +140,83 @@ enum AXHelpers {
             let children: [UIElement] = (try? element.arrayAttribute(.children)) ?? []
             return children.map(boundedMenuBarElement)
         }
+    }
+
+    /// Reads one node's exact identity tuple without combining descendants,
+    /// normalizing strings or converting a failed read into an absent value.
+    static func identityAttributes(
+        for element: UIElement, deadline: UInt64, cancellation: AXReadCancellation
+    ) -> AXIdentityRead {
+        guard !Task.isCancelled, !cancellation.isCancelled else { return .failure(AXReadFailure(.cancelled)) }
+        guard DispatchTime.now().uptimeNanoseconds < deadline else { return .failure(AXReadFailure(.deadlineExceeded)) }
+        let observed: AXIdentityRead = run(on: element.element) {
+            defer { _ = AXUIElementSetMessagingTimeout(element.element, 0.25) }
+            let result = AXIdentityReadSupport.perform(
+                deadline: deadline,
+                now: { DispatchTime.now().uptimeNanoseconds },
+                cancelled: { cancellation.isCancelled },
+                setTimeout: { AXUIElementSetMessagingTimeout(element.element, $0) }
+            ) {
+                var values: CFArray?
+                let status = AXUIElementCopyMultipleAttributeValues(
+                    element.element,
+                    [kAXIdentifierAttribute, kAXRoleAttribute, kAXSubroleAttribute] as CFArray,
+                    [], &values
+                )
+                return AXIdentityReadSupport.decodeIdentity(status: status, values: values)
+            }
+            switch result {
+            case let .success(attributes): return attributes
+            case let .failure(error): return .failure(error)
+            }
+        }
+        guard !Task.isCancelled, !cancellation.isCancelled else { return .failure(AXReadFailure(.cancelled)) }
+        guard DispatchTime.now().uptimeNanoseconds < deadline else { return .failure(AXReadFailure(.deadlineExceeded)) }
+        return observed
+    }
+
+    /// Unknown/unsupported is distinct from a successful empty sibling list.
+    /// The reader never fetches an unbounded array and truncates it afterward.
+    /// Matching counts do not attest membership; the scan must bind exact
+    /// identities, lifetimes and the observation receipt separately.
+    static func boundedChildren(
+        for element: UIElement, maximumCount: Int, deadline: UInt64, cancellation: AXReadCancellation
+    ) -> AXChildrenRead {
+        guard !Task.isCancelled, !cancellation.isCancelled else { return .failure(AXReadFailure(.cancelled)) }
+        guard DispatchTime.now().uptimeNanoseconds < deadline else { return .failure(AXReadFailure(.deadlineExceeded)) }
+        let observed: AXChildrenRead = run(on: element.element) {
+            defer { _ = AXUIElementSetMessagingTimeout(element.element, 0.25) }
+            let result = AXIdentityReadSupport.children(
+                maximumCount: maximumCount, deadline: deadline,
+                now: { DispatchTime.now().uptimeNanoseconds },
+                cancelled: { cancellation.isCancelled },
+                setTimeout: { AXUIElementSetMessagingTimeout(element.element, $0) },
+                count: {
+                    var count: CFIndex = 0
+                    let status = AXUIElementGetAttributeValueCount(element.element, kAXChildrenAttribute as CFString, &count)
+                    return (status, count)
+                },
+                copy: { maximum in
+                    var values: CFArray?
+                    let status = AXUIElementCopyAttributeValues(
+                        element.element, kAXChildrenAttribute as CFString, 0, maximum, &values
+                    )
+                    return (status, values)
+                }
+            )
+            if case let .elements(children) = result {
+                for child in children {
+                    guard !cancellation.isCancelled else { return .failure(AXReadFailure(.cancelled)) }
+                    guard DispatchTime.now().uptimeNanoseconds < deadline else { return .failure(AXReadFailure(.deadlineExceeded)) }
+                    let status = AXUIElementSetMessagingTimeout(child, 0.25)
+                    guard status == .success else { return .failure(AXIdentityReadSupport.failure(status)) }
+                }
+            }
+            return result
+        }
+        guard !Task.isCancelled, !cancellation.isCancelled else { return .failure(AXReadFailure(.cancelled)) }
+        guard DispatchTime.now().uptimeNanoseconds < deadline else { return .failure(AXReadFailure(.deadlineExceeded)) }
+        return observed
     }
 
     /// An app-level AX timeout does not carry over to the menu-bar descendants

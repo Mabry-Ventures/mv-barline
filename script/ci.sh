@@ -225,6 +225,7 @@ run_fast() {
     require_gate_script ./script/test-golden-gate-transaction-state.sh
     if [[ "$(uname -s)" == Darwin ]]; then
         run_step "service-recovery-coordinator" bash ./script/test-service-recovery.sh
+        run_step "typed-ax-identity-reads" bash ./script/test-ax-identity-reads.sh
     fi
     run_step "app-intents-topology-tests" ruby ./script/test-app-intents-topology.rb
     if [[ "$(uname -s)" == Darwin ]]; then

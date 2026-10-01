@@ -54,6 +54,14 @@ New helper/session lifetimes invalidate old proof.
 
 ### 2. Trusted runtime Focus observations
 
+Reader prerequisite implemented independently: exact three-slot identity and
+bounded child-list adapters distinguish AX errors, no value and unsupported
+attributes. They reject malformed, duplicate, oversized, changed-count,
+cancelled and late responses. Explicit scan cancellation survives dispatch
+thread hops; callers must wire its task cancellation handler. These helpers
+are not yet connected to publisher attestation or absence authority. Equal
+child counts alone do not attest equal membership.
+
 Preserve typed AX read outcomes and their actual errors. A failed children read
 is unknown, not an empty menu bar. Explicitly scan the relevant owner despite
 the normal owner-probe schedule. Read assertion receipts before and after the

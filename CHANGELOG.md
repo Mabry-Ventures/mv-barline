@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Authority-reader prerequisites preserve typed Accessibility errors, bounded
+  exact-node identities and children, and cancellation across dispatch hops.
+  Failed, late, duplicate or malformed reads cannot prove a control is absent.
+  This source slice does not yet authorize a macOS 27 Focus exception.
+
 - Native concealment exposes helper-owned, revisioned control acknowledgements.
   Activation, reveal, Clock restoration and uncertain failures invalidate older
   scan evidence without pretending to prove native Focus visibility.

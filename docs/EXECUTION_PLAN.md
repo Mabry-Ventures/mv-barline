@@ -1,5 +1,29 @@
 # Barline execution plan
 
+## Bounded typed Accessibility observations — October 1, 2026
+
+Exact-node identifier/role/subrole reads and bounded children reads now retain
+actual AX failures separately from no-value and unsupported attributes. The
+reader rejects wrong types, malformed tuples, oversized identities, duplicate
+elements, count drift and late responses. A scan-owned cancellation signal
+survives dispatch hops; future attestation callers must revoke it through their
+task cancellation handler. Parent and returned-child timeouts return to the
+existing bounded 250 ms policy, not the SDK's unbounded default.
+
+The 42-check Swift 6 reader executable, 796-test Core suite, fast gate and
+Xcode 27 app/helper Debug compile pass. Astra and Gemini approve the source
+slice, not its future call-site integration or installed AX behavior. Synthetic
+tests target the macOS 26 deployment floor but do not establish an OS 26 runtime
+pass. Existing coarse inventory helpers still cannot authorize absence.
+
+An exact, signature- and kernel-lifetime-verified read-only CODEX01 probe observed
+MenuBarAgent's Clock and Control Center AX tuples on 27.0.1/26A434. Focus was
+absent. Native Control Center inspection identified its Focus checkbox, not the
+menu-bar Focus surface. Neither probe activates a production catalogue. The
+inspection's panel-dismissal acknowledgement was inconclusive; cleanup and any
+reversible Focus diagnostic require explicit ownership and restoration proof.
+No new Barline binary is installed and no public artifact changes.
+
 ## Helper-owned concealment receipts — October 1, 2026
 
 The isolated presence-contract work now includes revisioned helper control
