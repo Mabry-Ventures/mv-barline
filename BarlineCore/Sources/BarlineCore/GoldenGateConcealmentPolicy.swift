@@ -243,6 +243,28 @@ public enum GoldenGateConcealmentPolicy {
         )
     }
 
+    /// Read-only canonicalization must preserve the original observation and
+    /// open-menu guard. It is not a proposed mutation or a new observation.
+    public static func canonicalizingSnapshot(
+        _ snapshot: MenuBarSnapshot, barlineBundleIdentifier: String
+    ) -> (snapshot: MenuBarSnapshot, repairedItemIDs: Set<MenuBarItemID>) {
+        let items = snapshot.items.filter { !$0.isBarlineControlItem }
+        let configuration = MenuBarConcealmentConfiguration(
+            visibleItemIDs: items.filter { $0.section == .visible }.map(\.id),
+            concealedItemIDs: items.filter { $0.section != .visible }.map(\.id)
+        )
+        let canonical = canonicalConfiguration(configuration, allItems: items.map(\.id), barlineBundleIdentifier: barlineBundleIdentifier)
+        let visible = Set(canonical.visibleItemIDs)
+        let repaired = Set(items.compactMap { $0.section != .visible && visible.contains($0.id) ? $0.id : nil })
+        guard !repaired.isEmpty else { return (snapshot, []) }
+        return (MenuBarSnapshot(
+            generation: snapshot.generation, capturedAt: snapshot.capturedAt,
+            items: snapshot.items.map { repaired.contains($0.id) ? $0.replacingSection(.visible) : $0 },
+            displayIDs: snapshot.displayIDs, displayIdentities: snapshot.displayIdentities,
+            activeSpaceIsValid: snapshot.activeSpaceIsValid, menuTrackingIsActive: snapshot.menuTrackingIsActive
+        ), repaired)
+    }
+
     /// Returns whether macOS 27 can independently assign an item between
     /// Barline's visible and concealed sections. Third-party applications are
     /// controlled at bundle granularity, so an application exposing multiple

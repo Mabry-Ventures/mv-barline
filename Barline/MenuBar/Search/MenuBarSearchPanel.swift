@@ -541,6 +541,11 @@ private struct MenuBarSearchContentView: View {
     private func updateDisplayedItems() {
         typealias SearchItem = (listItem: ListItem, document: SearchDocument?)
 
+        let liveItemIDs = itemManager.itemCache.managedItems.map(\.stableID)
+        model.updatePreferenceIdentityProjection(liveItemIDs: liveItemIDs)
+        let profileMemberships = profileManager.profiles.map { profile in
+            (profile: profile, identities: profile.searchableItemIdentityMap(liveIDs: liveItemIDs))
+        }
         var searchItems = [SearchItem]()
 
         if !profileManager.profiles.isEmpty {
@@ -602,25 +607,29 @@ private struct MenuBarSearchContentView: View {
                         .contextMenu {
                             itemPreferenceActions(for: item.stableID)
                         }
-                        .accessibilityAction(named: Text(model.personalization.isFavorite(item.stableID) ? "Remove Favorite" : "Favorite")) {
+                        .accessibilityAction(named: Text(model.isFavorite(item.stableID) ? "Remove Favorite" : "Favorite")) {
                             model.toggleFavorite(item.stableID)
                         }
                         .accessibilityAction(named: Text("Edit Search Alias")) {
                             model.editAlias(for: item.stableID)
                         }
                 }
-                let memberships = profileManager.profiles
-                    .filter { $0.searchableItemIDs.contains(item.stableID) }
-                    .map(\.name)
+                let memberships = profileMemberships.compactMap { membership -> String? in
+                    guard let archivedID = membership.identities[item.stableID],
+                          membership.profile.searchableItemIDs.contains(archivedID)
+                    else { return nil }
+                    return membership.profile.name
+                }
                 let document = SearchDocument(
                     id: item.stableID.searchDocumentID,
                     kind: .menuBarItem,
                     entity: .menuBarItem(item.stableID),
                     title: item.displayName,
                     bundleIdentifier: item.stableID.bundleIdentifier,
-                    aliases: [item.title, item.stableID.alias, model.personalization.alias(for: item.stableID)].compactMap(\.self),
-                    groups: profileManager.profiles.flatMap { profile in
-                        profile.searchableGroupNames(containing: item.stableID)
+                    aliases: [item.title, item.stableID.alias, model.alias(for: item.stableID)].compactMap(\.self),
+                    groups: profileMemberships.flatMap { membership -> [String] in
+                        guard let archivedID = membership.identities[item.stableID] else { return [] }
+                        return membership.profile.searchableGroupNames(containing: archivedID)
                     },
                     profileMemberships: memberships,
                     keywords: ["menu bar", "status item"]
@@ -635,7 +644,7 @@ private struct MenuBarSearchContentView: View {
             model.cancelRanking()
             let favorites = searchItems.filter { searchItem in
                 guard case let .menuBarItem(itemID)? = searchItem.document?.entity else { return false }
-                return model.personalization.isFavorite(itemID)
+                return model.isFavorite(itemID)
             }
             let favoriteIDs = Set(favorites.compactMap { $0.document?.id })
             let otherItems = searchItems.filter { searchItem in
@@ -686,12 +695,12 @@ private struct MenuBarSearchContentView: View {
 
     @ViewBuilder
     private func itemPreferenceActions(for itemID: MenuBarItemID) -> some View {
-        Button(model.personalization.isFavorite(itemID) ? "Remove Favorite" : "Favorite") {
+        Button(model.isFavorite(itemID) ? "Remove Favorite" : "Favorite") {
             model.toggleFavorite(itemID)
         }
-        .disabled(!model.preferencesAvailable || model.isSavingPreferences)
+        .disabled(!model.canEditPreferences(for: itemID))
         Button("Edit Search Alias…") { model.editAlias(for: itemID) }
-            .disabled(!model.preferencesAvailable || model.isSavingPreferences)
+            .disabled(!model.canEditPreferences(for: itemID))
     }
 
     private func performAction(for profile: BarlineProfile) {
@@ -1028,7 +1037,7 @@ private struct MenuBarSearchItemView: View {
             Label {
                 VStack(alignment: .leading, spacing: 2) {
                     labelText
-                    if let alias = model.personalization.alias(for: item.stableID) {
+                    if let alias = model.alias(for: item.stableID) {
                         Text(alias).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
                 }
@@ -1036,7 +1045,7 @@ private struct MenuBarSearchItemView: View {
                 labelIcon
             }
             Spacer()
-            if model.personalization.isFavorite(item.stableID) {
+            if model.isFavorite(item.stableID) {
                 Image(systemName: "star.fill")
                     .foregroundStyle(.secondary)
                     .accessibilityLabel("Favorite")

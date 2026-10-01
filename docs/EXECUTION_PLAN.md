@@ -1,5 +1,25 @@
 # Barline execution plan
 
+## Build 146 identity compatibility repair — October 1, 2026
+
+Build 145 is blocked by an installed, independently reproduced identity defect:
+distinct AX identifiers with the same numeric-normalized title exchanged
+occurrence aliases after reorder. Saved hidden assignments then coexisted with
+new visible identities. Build 146 counts occurrences by the complete normalized
+semantic identity, and uniquely reconciles legacy occurrence aliases before
+classification, retained-inventory merging and profile activation.
+
+Migrated assignments, remembered sections and sanitized inventory share one
+bounded authoritative preference value. Legacy mirrors cannot split authority
+after partial writes. Invalid authority fails closed; ambiguous saved identity
+is preserved rather than guessed. Strict workspace and temporary-reveal
+checkpoints remain unchanged and may require explicit recovery, not silent
+partial replay. The qualification record is
+[build 146 readiness](MACOS_27_BUILD_146_READINESS.md).
+
+No public release, website download or update feed has changed. Clean source,
+signing/notarization and installed evidence must be recaptured for build 146.
+
 ## Build 145 recovery hardening — September 30, 2026
 
 The isolated takeover worktree now contains the next 1.0.66 qualification

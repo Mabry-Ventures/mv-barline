@@ -54,13 +54,23 @@ final class MenuBarSearchModel: ObservableObject {
     private var rankingSequence: UInt64 = 0
     private let preferences = SearchItemPreferences()
     private var hasRequestedPreferences = false
+    private var livePreferenceItemIDs = [MenuBarItemID]()
+    private var preferenceIdentityProjection = SearchPreferenceIdentityProjection(
+        storedIDs: [],
+        liveIDs: []
+    )
+    private var aliasEditorStorageItemID: MenuBarItemID?
 
     init(commandInterpreter: any MenuBarCommandInterpreting = FoundationModelCommandInterpreter()) {
         self.commandInterpreter = commandInterpreter
     }
 
     var canSaveAlias: Bool {
-        guard preferencesAvailable, !isSavingPreferences, aliasEditorItemID != nil else { return false }
+        guard preferencesAvailable, !isSavingPreferences,
+              let itemID = aliasEditorItemID,
+              let storageID = aliasEditorStorageItemID,
+              preferenceStorageID(for: itemID) == storageID
+        else { return false }
         do {
             _ = try SearchItemPersonalization.validatedAlias(aliasDraft)
             return true
@@ -74,6 +84,7 @@ final class MenuBarSearchModel: ObservableObject {
         hasRequestedPreferences = true
         do {
             personalization = try await preferences.load()
+            rebuildPreferenceIdentityProjection()
             preferencesAvailable = true
         } catch {
             preferencesNotice = "Saved favorites and aliases couldn’t be read. Existing data was left unchanged."
@@ -81,14 +92,17 @@ final class MenuBarSearchModel: ObservableObject {
     }
 
     func toggleFavorite(_ itemID: MenuBarItemID) {
-        guard preferencesAvailable, !isSavingPreferences else { return }
-        let desired = !personalization.isFavorite(itemID)
+        guard canEditPreferences(for: itemID),
+              let storageID = preferenceStorageID(for: itemID)
+        else { return }
+        let desired = !personalization.isFavorite(storageID)
         isSavingPreferences = true
         preferencesNotice = nil
         Task {
             defer { isSavingPreferences = false }
             do {
-                personalization = try await preferences.setFavorite(desired, for: itemID)
+                personalization = try await preferences.setFavorite(desired, for: storageID)
+                rebuildPreferenceIdentityProjection()
             } catch {
                 preferencesNotice = "Couldn’t save this favorite. Your saved preferences were not replaced."
             }
@@ -96,34 +110,82 @@ final class MenuBarSearchModel: ObservableObject {
     }
 
     func editAlias(for itemID: MenuBarItemID) {
-        guard preferencesAvailable, !isSavingPreferences else { return }
-        aliasDraft = personalization.alias(for: itemID) ?? ""
+        guard canEditPreferences(for: itemID),
+              let storageID = preferenceStorageID(for: itemID)
+        else { return }
+        aliasDraft = personalization.alias(for: storageID) ?? ""
         aliasEditorItemID = itemID
+        aliasEditorStorageItemID = storageID
         selection = nil
     }
 
     func cancelAliasEditing() {
         aliasEditorItemID = nil
+        aliasEditorStorageItemID = nil
         aliasDraft = ""
         selection = displayedItems.first { $0.isSelectable }?.id
     }
 
     func saveAlias() {
-        guard canSaveAlias, let itemID = aliasEditorItemID else { return }
+        guard canSaveAlias,
+              let itemID = aliasEditorItemID,
+              let storageID = aliasEditorStorageItemID
+        else { return }
         let draft = aliasDraft
         isSavingPreferences = true
         preferencesNotice = nil
         Task {
             defer { isSavingPreferences = false }
             do {
-                personalization = try await preferences.setAlias(draft, for: itemID)
-                if aliasEditorItemID == itemID {
+                personalization = try await preferences.setAlias(draft, for: storageID)
+                rebuildPreferenceIdentityProjection()
+                if aliasEditorItemID == itemID,
+                   aliasEditorStorageItemID == storageID
+                {
                     cancelAliasEditing()
                 }
             } catch {
                 preferencesNotice = "Couldn’t save this alias. Your saved preferences were not replaced."
             }
         }
+    }
+
+    func updatePreferenceIdentityProjection(liveItemIDs: [MenuBarItemID]) {
+        livePreferenceItemIDs = liveItemIDs
+        rebuildPreferenceIdentityProjection()
+    }
+
+    func isFavorite(_ itemID: MenuBarItemID) -> Bool {
+        guard case let .stored(storageID) = preferenceIdentityProjection.resolution(for: itemID) else {
+            return false
+        }
+        return personalization.isFavorite(storageID)
+    }
+
+    func alias(for itemID: MenuBarItemID) -> String? {
+        guard case let .stored(storageID) = preferenceIdentityProjection.resolution(for: itemID) else {
+            return nil
+        }
+        return personalization.alias(for: storageID)
+    }
+
+    func canEditPreferences(for itemID: MenuBarItemID) -> Bool {
+        preferencesAvailable && !isSavingPreferences && preferenceStorageID(for: itemID) != nil
+    }
+
+    private func preferenceStorageID(for itemID: MenuBarItemID) -> MenuBarItemID? {
+        switch preferenceIdentityProjection.resolution(for: itemID) {
+        case let .stored(storageID): storageID
+        case .new: itemID
+        case .ambiguous: nil
+        }
+    }
+
+    private func rebuildPreferenceIdentityProjection() {
+        preferenceIdentityProjection = SearchPreferenceIdentityProjection(
+            storedIDs: personalization.entries.map(\.itemID),
+            liveIDs: livePreferenceItemIDs
+        )
     }
 
     func rankResults(

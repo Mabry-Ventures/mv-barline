@@ -269,6 +269,9 @@ actor GoldenGateAXSnapshotProvider {
     private static let rememberedSectionsKey = "GoldenGateRememberedMenuBarSections"
     private static let explicitLayoutKey = "GoldenGateExplicitMenuBarLayout"
     private static let retainedInventoryKey = "GoldenGateRetainedMenuBarInventory"
+    private static let identityStateKey = "GoldenGatePersistedIdentityState"
+    private static let identityStateBackupKey = "GoldenGatePersistedIdentityStateBackup"
+    private static let identityStateQuarantineKey = "GoldenGatePersistedIdentityStateQuarantine"
     private static let maximumRememberedBytes = 256 * 1024
     private static let maximumRememberedAssignments = 512
 
@@ -283,9 +286,10 @@ actor GoldenGateAXSnapshotProvider {
     private var cachedSnapshot: MenuBarSnapshot?
     private var cachedEnvironment: MenuBarEnvironmentSnapshot?
     private var cachedDisplayBounds: [MenuBarDisplayID: MenuBarRect] = [:]
-    private var rememberedSections = GoldenGateAXSnapshotProvider.loadRememberedSections()
-    private var explicitAssignments = GoldenGateAXSnapshotProvider.loadExplicitAssignments()
-    private var retainedDescriptors = GoldenGateAXSnapshotProvider.loadRetainedInventory()
+    private var rememberedSections: [MenuBarItemID: BarlineCore.MenuBarSection]
+    private var explicitAssignments: [MenuBarItemID: GoldenGateLogicalAssignment]
+    private var retainedDescriptors: [MenuBarItemID: MenuBarItemDescriptor]
+    private var hasInvalidIdentityState: Bool
     /// Proposed assignments are visible only to the bounded post-write
     /// verifier. They are never written to UserDefaults or retained inventory
     /// until the native position transaction is durably verified.
@@ -298,6 +302,26 @@ actor GoldenGateAXSnapshotProvider {
     /// Limits each inventory to processes that own menu bar items; see
     /// `MenuBarOwnerProbePolicy`.
     private var ownerProbePolicy = MenuBarOwnerProbePolicy()
+
+    init() {
+        do {
+            if let state = try Self.loadIdentityState() {
+                rememberedSections = Dictionary(uniqueKeysWithValues: state.remembered.map { ($0.itemID, $0.section) })
+                explicitAssignments = Dictionary(uniqueKeysWithValues: state.assignments.map { ($0.itemID, $0) })
+                retainedDescriptors = Dictionary(uniqueKeysWithValues: state.descriptors.map { ($0.id, Self.sanitizedDescriptor($0)) })
+            } else {
+                rememberedSections = Self.loadRememberedSections()
+                explicitAssignments = Self.loadExplicitAssignments()
+                retainedDescriptors = Self.loadRetainedInventory()
+            }
+            hasInvalidIdentityState = false
+        } catch {
+            rememberedSections = [:]
+            explicitAssignments = [:]
+            retainedDescriptors = [:]
+            hasInvalidIdentityState = true
+        }
+    }
 
     var capabilities: MenuBarCapabilities {
         get async {
@@ -329,6 +353,9 @@ actor GoldenGateAXSnapshotProvider {
     }
 
     private func snapshot(forceRefresh: Bool) async throws -> MenuBarSnapshot {
+        guard !hasInvalidIdentityState else {
+            throw MenuBarBackendError.operationFailed("saved menu bar identity state requires recovery")
+        }
         let initialEnvironment = try await serviceConnection.environment()
         let activeDisplays = activeDisplayIDs()
         let displayIdentities = activeDisplays.map { displayID in
@@ -416,7 +443,18 @@ actor GoldenGateAXSnapshotProvider {
         generation &+= 1
         let signingIdentifier = Bundle.main.bundleIdentifier
             ?? "com.mabryventures.Barline"
-        let effectiveAssignments = explicitAssignments.merging(
+        let liveIDs = GoldenGateMenuBarSnapshotBuilder.identifiers(for: observations)
+        let assignmentMigration = GoldenGateIdentityMigration(
+            storedIDs: Array(explicitAssignments.keys), liveIDs: liveIDs
+        )
+        let rememberedMigration = GoldenGateIdentityMigration(
+            storedIDs: Array(rememberedSections.keys), liveIDs: liveIDs
+        )
+        let migratedAssignments = try assignmentMigration.rebinding(explicitAssignments, rejectingConflicts: false)
+        let migratedRemembered = try rememberedMigration.rebinding(rememberedSections, rejectingConflicts: false)
+        let ambiguousBundles = Set(assignmentMigration.conflictingStoredIDs
+            .union(rememberedMigration.conflictingStoredIDs).map(\.bundleIdentifier))
+        let effectiveAssignments = migratedAssignments.merging(
             verificationAssignments ?? [:],
             uniquingKeysWith: { _, proposed in proposed }
         )
@@ -430,7 +468,7 @@ actor GoldenGateAXSnapshotProvider {
                 activeSpaceIsValid: finalEnvironment.activeSpaceIsValid,
                 menuTrackingIsActive: initialEnvironment.menuTrackingIsActive || finalEnvironment.menuTrackingIsActive,
                 appSigningIdentifier: signingIdentifier,
-                rememberedSections: rememberedSections,
+                rememberedSections: migratedRemembered,
                 assignedSections: effectiveAssignments.mapValues(\.section),
                 generation: generation
             )
@@ -445,6 +483,13 @@ actor GoldenGateAXSnapshotProvider {
                 } ? "snapshot_builder_rejected_geometry" : "missing_hidden_control"
             )
             throw error
+        }
+        if verificationAssignments == nil {
+            try commitIdentityMigrationIfNeeded(
+                assignments: migratedAssignments,
+                remembered: migratedRemembered,
+                live: built
+            )
         }
         var result = GoldenGateRetainedInventoryPolicy.merging(
             live: built,
@@ -462,7 +507,15 @@ actor GoldenGateAXSnapshotProvider {
         let canonicalization = canonicalizingUnsupportedConcealment(in: result)
         result = canonicalization.snapshot
         result = applyingNativeArrangementCapabilities(to: result)
-        if explicitAssignments.isEmpty {
+        if !ambiguousBundles.isEmpty {
+            // Preserve conflicting saved instructions, but isolate their entire
+            // app group visible and noneditable. One ambiguous app must not take
+            // down discovery or authorize concealment for unrelated apps.
+            result = GoldenGateIdentityMigration.isolatingAmbiguousBundles(ambiguousBundles, in: result)
+        }
+        // A fail-visible projection must never overwrite unresolved remembered
+        // intent. Leave that document unchanged until the ambiguity is resolved.
+        if explicitAssignments.isEmpty, ambiguousBundles.isEmpty {
             rememberSections(from: result)
         }
         if verificationAssignments == nil {
@@ -1032,6 +1085,12 @@ actor GoldenGateAXSnapshotProvider {
     func restart() {
         cachedAt = nil
         cachedSnapshot = nil
+        if hasInvalidIdentityState, let state = try? Self.loadIdentityState() {
+            rememberedSections = Dictionary(uniqueKeysWithValues: state.remembered.map { ($0.itemID, $0.section) })
+            explicitAssignments = Dictionary(uniqueKeysWithValues: state.assignments.map { ($0.itemID, $0) })
+            retainedDescriptors = Dictionary(uniqueKeysWithValues: state.descriptors.map { ($0.id, Self.sanitizedDescriptor($0)) })
+            hasInvalidIdentityState = false
+        }
     }
 
     private static func loadRememberedSections() -> [MenuBarItemID: BarlineCore.MenuBarSection] {
@@ -1087,6 +1146,15 @@ actor GoldenGateAXSnapshotProvider {
         return result
     }
 
+    private static func loadIdentityState() throws -> GoldenGatePersistedIdentityState? {
+        try GoldenGatePersistedIdentityState.loadAuthority(
+            from: .standard,
+            key: identityStateKey,
+            backupKey: identityStateBackupKey,
+            quarantineKey: identityStateQuarantineKey
+        )
+    }
+
     private func preparePersistence(
         from snapshot: MenuBarSnapshot,
         requiredItemIDs: Set<MenuBarItemID>,
@@ -1120,7 +1188,14 @@ actor GoldenGateAXSnapshotProvider {
         }
         let retained = try prepareRetainedInventory(
             from: snapshot,
-            requiredItemIDs: requiredItemIDs
+            requiredItemIDs: requiredItemIDs.union(
+                assignmentSelection.elements.filter { $0.section != .visible }.map(\.itemID)
+            )
+        )
+        _ = try identityStateData(
+            assignments: assignmentSelection.elements,
+            remembered: rememberedSections,
+            descriptors: retained.elements
         )
         return PreparedPersistence(
             assignments: assignmentSelection.elements,
@@ -1132,22 +1207,16 @@ actor GoldenGateAXSnapshotProvider {
 
     @discardableResult
     private func commitPersistence(_ prepared: PreparedPersistence) -> Bool {
-        guard VerifiedUserDefaultsDataCommit.commit(
-            [
-                Self.explicitLayoutKey: prepared.assignmentData,
-                Self.retainedInventoryKey: prepared.descriptorData,
-            ],
-            to: .standard,
-            synchronize: { UserDefaults.standard.synchronize() }
-        ) else {
-            return false
-        }
-        explicitAssignments = Dictionary(uniqueKeysWithValues: prepared.assignments.map {
-            ($0.itemID, $0)
-        })
-        retainedDescriptors = Dictionary(uniqueKeysWithValues: prepared.descriptors.map {
-            ($0.id, $0)
-        })
+        guard commitIdentityState(
+            assignments: prepared.assignments,
+            remembered: rememberedSections,
+            descriptors: prepared.descriptors
+        ) else { return false }
+        // Compatibility mirrors are not the authority after migration.
+        UserDefaults.standard.set(prepared.assignmentData, forKey: Self.explicitLayoutKey)
+        UserDefaults.standard.set(prepared.descriptorData, forKey: Self.retainedInventoryKey)
+        explicitAssignments = Dictionary(uniqueKeysWithValues: prepared.assignments.map { ($0.itemID, $0) })
+        retainedDescriptors = Dictionary(uniqueKeysWithValues: prepared.descriptors.map { ($0.id, $0) })
         return true
     }
 
@@ -1223,9 +1292,10 @@ actor GoldenGateAXSnapshotProvider {
 
     private func prepareRetainedInventory(
         from snapshot: MenuBarSnapshot,
-        requiredItemIDs: Set<MenuBarItemID>
+        requiredItemIDs: Set<MenuBarItemID>,
+        preserving inventory: [MenuBarItemID: MenuBarItemDescriptor]? = nil
     ) throws -> (elements: [MenuBarItemDescriptor], data: Data) {
-        var merged = retainedDescriptors
+        var merged = inventory ?? retainedDescriptors
         for (id, descriptor) in merged {
             merged[id] = Self.sanitizedDescriptor(descriptor)
         }
@@ -1238,6 +1308,7 @@ actor GoldenGateAXSnapshotProvider {
         let requiredDescriptorIndices = Set(descriptorCandidates.indices.filter { index in
             let descriptor = descriptorCandidates[index]
             return requiredItemIDs.contains(descriptor.id) ||
+                explicitAssignments[descriptor.id].map { $0.section != .visible } == true ||
                 descriptor.isBarlineControlItem ||
                 descriptor.section != .visible
         })
@@ -1254,13 +1325,98 @@ actor GoldenGateAXSnapshotProvider {
         }
     }
 
+    /// Alias migration is not a layout edit: retain exact saved sections and
+    /// ranks, including absent apps, and commit all three identity documents
+    /// together before the new projection can authorize native concealment.
+    private func commitIdentityMigrationIfNeeded(
+        assignments: [MenuBarItemID: GoldenGateLogicalAssignment],
+        remembered: [MenuBarItemID: BarlineCore.MenuBarSection],
+        live snapshot: MenuBarSnapshot
+    ) throws {
+        let inventory = GoldenGateIdentityMigration.reconcilingRetainedDescriptors(
+            retainedDescriptors,
+            preserving: Set(assignments.keys).union(remembered.keys),
+            liveItems: snapshot.items
+        )
+        let removedLegacyIDs = Set(retainedDescriptors.keys).subtracting(inventory.keys)
+        guard assignments != explicitAssignments || remembered != rememberedSections ||
+            !removedLegacyIDs.isEmpty
+        else { return }
+        let layoutData = try JSONEncoder().encode(ExplicitLayout(
+            version: 1, assignments: assignments.values.sorted(by: Self.persistencePriority)
+        ))
+        let rememberedData = try JSONEncoder().encode(RememberedAssignments(
+            version: 1,
+            assignments: remembered.map { RememberedAssignment(itemID: $0.key, section: $0.value) }
+                .sorted { $0.itemID.searchDocumentID.value < $1.itemID.searchDocumentID.value }
+        ))
+        guard layoutData.count <= Self.maximumRememberedBytes,
+              rememberedData.count <= Self.maximumRememberedBytes
+        else { throw MenuBarBackendError.operationFailed("menu bar identities cannot be saved safely") }
+        let retained = try prepareRetainedInventory(
+            from: snapshot,
+            requiredItemIDs: Set(assignments.values.filter { $0.section != .visible }.map(\.itemID)),
+            preserving: inventory
+        )
+        guard commitIdentityState(
+            assignments: assignments.values.sorted(by: Self.persistencePriority),
+            remembered: remembered,
+            descriptors: retained.elements
+        ) else { throw MenuBarBackendError.operationFailed("menu bar identity migration could not be synchronized") }
+        UserDefaults.standard.set(layoutData, forKey: Self.explicitLayoutKey)
+        UserDefaults.standard.set(rememberedData, forKey: Self.rememberedSectionsKey)
+        UserDefaults.standard.set(retained.data, forKey: Self.retainedInventoryKey)
+        explicitAssignments = assignments
+        rememberedSections = remembered
+        retainedDescriptors = Dictionary(uniqueKeysWithValues: retained.elements.map { ($0.id, $0) })
+    }
+
     private func commitRetainedInventory(
         _ prepared: (elements: [MenuBarItemDescriptor], data: Data)
     ) {
+        if !commitIdentityState(
+            assignments: explicitAssignments.values.sorted(by: Self.persistencePriority),
+            remembered: rememberedSections,
+            descriptors: prepared.elements
+        ) {
+            return
+        }
         retainedDescriptors = Dictionary(uniqueKeysWithValues: prepared.elements.map {
             ($0.id, $0)
         })
         UserDefaults.standard.set(prepared.data, forKey: Self.retainedInventoryKey)
+    }
+
+    private func commitIdentityState(
+        assignments: [GoldenGateLogicalAssignment],
+        remembered: [MenuBarItemID: BarlineCore.MenuBarSection],
+        descriptors: [MenuBarItemDescriptor]
+    ) -> Bool {
+        let state = identityState(
+            assignments: assignments, remembered: remembered, descriptors: descriptors
+        )
+        return state.commitAuthority(to: .standard, key: Self.identityStateKey, backupKey: Self.identityStateBackupKey)
+    }
+
+    private func identityStateData(
+        assignments: [GoldenGateLogicalAssignment],
+        remembered: [MenuBarItemID: BarlineCore.MenuBarSection],
+        descriptors: [MenuBarItemDescriptor]
+    ) throws -> Data {
+        try identityState(assignments: assignments, remembered: remembered, descriptors: descriptors).encoded()
+    }
+
+    private func identityState(
+        assignments: [GoldenGateLogicalAssignment],
+        remembered: [MenuBarItemID: BarlineCore.MenuBarSection],
+        descriptors: [MenuBarItemDescriptor]
+    ) -> GoldenGatePersistedIdentityState {
+        GoldenGatePersistedIdentityState(
+            assignments: assignments,
+            remembered: remembered.map { GoldenGateLogicalAssignment(itemID: $0.key, section: $0.value, rank: 0) }
+                .sorted { $0.itemID.searchDocumentID.value < $1.itemID.searchDocumentID.value },
+            descriptors: descriptors
+        )
     }
 
     /// Live readings can change a descriptor's title without changing its
@@ -1371,31 +1527,10 @@ actor GoldenGateAXSnapshotProvider {
     private func canonicalizingUnsupportedConcealment(
         in snapshot: MenuBarSnapshot
     ) -> (snapshot: MenuBarSnapshot, repairedItemIDs: Set<MenuBarItemID>) {
-        let items = snapshot.items.filter { !$0.isBarlineControlItem }
-        let configuration = concealmentConfiguration(for: snapshot)
-        let canonical = GoldenGateConcealmentPolicy.canonicalConfiguration(
-            configuration,
-            allItems: items.map(\.id),
+        GoldenGateConcealmentPolicy.canonicalizingSnapshot(
+            snapshot,
             barlineBundleIdentifier: Bundle.main.bundleIdentifier
                 ?? "com.mabryventures.Barline"
-        )
-        let canonicalVisible = Set(canonical.visibleItemIDs)
-        let repairedItemIDs = Set(items.compactMap { item in
-            item.section != .visible && canonicalVisible.contains(item.id) ? item.id : nil
-        })
-        guard !repairedItemIDs.isEmpty else {
-            return (snapshot, [])
-        }
-        return (
-            self.snapshot(
-                replacing: snapshot.items.map { item in
-                    repairedItemIDs.contains(item.id)
-                        ? item.replacingSection(.visible)
-                        : item
-                },
-                in: snapshot
-            ),
-            repairedItemIDs
         )
     }
 
@@ -1676,9 +1811,17 @@ actor GoldenGateAXSnapshotProvider {
         else {
             return
         }
-        rememberedSections = Dictionary(uniqueKeysWithValues: assignments.map {
+        let proposed = Dictionary(uniqueKeysWithValues: assignments.map {
             ($0.itemID, $0.section)
         })
+        if !commitIdentityState(
+            assignments: explicitAssignments.values.sorted(by: Self.persistencePriority),
+            remembered: proposed,
+            descriptors: retainedDescriptors.values.sorted(by: Self.persistencePriority)
+        ) {
+            return
+        }
+        rememberedSections = proposed
         UserDefaults.standard.set(data, forKey: Self.rememberedSectionsKey)
     }
 

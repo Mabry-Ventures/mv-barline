@@ -503,10 +503,16 @@ public struct ResolvedProfilePresentation: Codable, Hashable, Sendable {
         in snapshot: MenuBarSnapshot,
         requireCompleteInventory: Bool = true
     ) throws -> Self {
+        let aliasMigration = GoldenGateIdentityMigration(
+            storedIDs: layout.allItemIDs, liveIDs: snapshot.items.map(\.id)
+        )
+        guard aliasMigration.conflictingStoredIDs.isEmpty else {
+            throw MenuBarBackendError.operationFailed("saved menu bar identities are ambiguous")
+        }
         var mapping = [MenuBarItemID: MenuBarItemID]()
         var resolvedIDs = Set<MenuBarItemID>()
         for storedID in layout.allItemIDs {
-            let resolvedID = snapshot.resolvedItemID(for: storedID)
+            let resolvedID = aliasMigration.replacements[storedID] ?? snapshot.resolvedItemID(for: storedID)
             guard resolvedID != nil || !requireCompleteInventory,
                   resolvedIDs.insert(resolvedID ?? storedID).inserted
             else { throw MenuBarBackendError.staleItem(storedID) }
@@ -968,6 +974,20 @@ public struct BarlineProfile: Codable, Hashable, Sendable, Identifiable {
                 .filter { $0.itemIDs.contains(itemID) }
                 .map(\.name)
         )
+    }
+
+    /// Point-of-use search membership only. The archive remains unchanged, and
+    /// the complete reference/live families must pass the same uniqueness gate
+    /// as saved search preferences. Build once per profile/inventory refresh.
+    public func searchableItemIdentityMap(liveIDs: [MenuBarItemID]) -> [MenuBarItemID: MenuBarItemID] {
+        let projection = SearchPreferenceIdentityProjection(
+            storedIDs: stableUnique(searchableItemIDs + searchableGroups.flatMap(\.itemIDs)),
+            liveIDs: liveIDs
+        )
+        return Dictionary(uniqueKeysWithValues: Set(liveIDs).compactMap { liveID in
+            guard case let .stored(archivedID) = projection.resolution(for: liveID) else { return nil }
+            return (liveID, archivedID)
+        })
     }
 
     private func stableUnique<Value: Hashable>(_ values: [Value]) -> [Value] {

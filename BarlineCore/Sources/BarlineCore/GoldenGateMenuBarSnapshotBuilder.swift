@@ -79,9 +79,18 @@ public enum GoldenGateMenuBarSnapshotBuilder {
     public static func identifiers(
         for observations: [GoldenGateMenuBarObservation]
     ) -> [MenuBarItemID] {
-        var occurrenceBySemanticKey = [String: Int]()
+        var occurrenceBySemanticKey = [MenuBarItemID: Int]()
         return observations.map { observation in
-            let semanticKey = "\(observation.bundleIdentifier.lowercased())|\(observation.stableTitle.lowercased())"
+            // Count only indistinguishable items. Distinct AX identifiers must
+            // not exchange aliases when geometry or sibling inventory changes.
+            // The structured key shares MenuBarItemID's canonical normalization
+            // and cannot collide through separators embedded in a field.
+            let semanticKey = MenuBarItemID(
+                bundleIdentifier: observation.bundleIdentifier,
+                accessibilityIdentifier: observation.identifier,
+                title: observation.stableTitle,
+                fallbackFingerprint: observation.fallbackFingerprint
+            )
             let occurrence = occurrenceBySemanticKey[semanticKey, default: 0]
             occurrenceBySemanticKey[semanticKey] = occurrence + 1
             return MenuBarItemID(

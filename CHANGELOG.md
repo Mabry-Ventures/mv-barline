@@ -1,9 +1,17 @@
 # Changelog
 
-## 1.0.66 (build 145) — qualification candidate, September 30, 2026
+## 1.0.66 (build 146) — qualification candidate, October 1, 2026
 
 ### macOS 27
 
+- Distinct menu bar items keep their saved visibility when macOS changes their
+  order. Older order-derived IDs are repaired only when the live item is unique.
+- Saved visibility, remembered sections and item metadata share one validated
+  preference record. Recovery preserves damaged data and uses a complete backup.
+- Read-only inventory ordering and safety projections preserve the open-menu
+  guard instead of admitting edits while another menu is being tracked.
+- Saved search favorites, aliases, profile names and group names follow uniquely
+  repaired item identities without rewriting the search or profile archives.
 - Clicking the clock opens Notification Center again while Barline is hiding
   items. macOS blocks the clock during Barline's native hiding, so Barline
   briefly lifts it to open the panel and hides your items again straight away.
@@ -33,7 +41,7 @@
   occupancy is capped even when cancellation does not immediately release a read.
 
 These changes are an internal qualification candidate, not a published release.
-Installed tests from build 144 do not qualify this candidate. Both OS runtime
+Installed tests from builds 144 and 145 do not qualify this candidate. Both OS runtime
 lanes and the remaining release gates must pass before publication.
 
 ## 1.0.65 (build 142) — September 27, 2026

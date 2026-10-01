@@ -130,6 +130,48 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
         #expect(duplicates.map(\.id.alias) == ["occurrence-0", "occurrence-1"])
     }
 
+    @Test("Distinct numeric AX identifiers keep their identities through reorder and sibling changes")
+    func distinctNumericIdentifiersAreOrderIndependent() {
+        let observations = (0 ..< 3).map { index in
+            GoldenGateMenuBarObservation(
+                bundleIdentifier: "com.example.multiple",
+                localizedApplicationName: "Example",
+                identifier: "status-item-\(index)",
+                displayTitle: "Status",
+                stableTitle: "status-item-<n>",
+                fallbackFingerprint: "same-semantic-fingerprint",
+                bounds: MenuBarRect(x: Double(1500 + index * 30), y: 3, width: 24, height: 24),
+                ownerProcessIdentifier: 42
+            )
+        }
+        let ids = GoldenGateMenuBarSnapshotBuilder.identifiers(for: observations)
+        #expect(GoldenGateMenuBarSnapshotBuilder.identifiers(for: observations.reversed()) == ids.reversed())
+        #expect(GoldenGateMenuBarSnapshotBuilder.identifiers(for: [observations[1]]) == [ids[1]])
+        #expect(GoldenGateMenuBarSnapshotBuilder.identifiers(for: [observations[2], observations[0]]) == [ids[2], ids[0]])
+        #expect(ids.allSatisfy { $0.alias == "occurrence-0" })
+    }
+
+    @Test("Occurrence buckets use normalized structured identities including fingerprints")
+    func structuredIdentityBuckets() {
+        func observed(_ bundle: String, _ identifier: String?, _ title: String, _ fingerprint: String) -> GoldenGateMenuBarObservation {
+            GoldenGateMenuBarObservation(
+                bundleIdentifier: bundle, localizedApplicationName: nil,
+                identifier: identifier, displayTitle: title, stableTitle: title,
+                fallbackFingerprint: fingerprint, bounds: .zero, ownerProcessIdentifier: 42
+            )
+        }
+        let ids = GoldenGateMenuBarSnapshotBuilder.identifiers(for: [
+            observed(" COM.EXAMPLE.APP ", " AX-ID ", " Status ", " One "),
+            observed("com.example.app", "ax-id", "status", "one"),
+            observed("com.example.app", "ax-id", "status", "two"),
+            observed("com.example|app", nil, "status", "one"),
+            observed("com.example", nil, "app|status", "one"),
+            observed("com.example.nil", nil, "status", "one"),
+            observed("com.example.nil", "  ", "status", "one"),
+        ])
+        #expect(ids.map(\.alias) == ["occurrence-0", "occurrence-1", "occurrence-0", "occurrence-0", "occurrence-0", "occurrence-0", "occurrence-1"])
+    }
+
     @Test("Rebinds a uniquely identified item after its occurrence alias changes")
     func rebindsChangedOccurrenceAlias() {
         let requested = itemID(bundle: "com.example.item", title: "Status", alias: "occurrence-1")

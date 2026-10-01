@@ -269,13 +269,25 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
         else {
             throw MenuBarBackendError.operationFailed("saved layout contains duplicate menu bar items")
         }
-        let targetByID = Dictionary(uniqueKeysWithValues: target.items.map { ($0.id, $0) })
+        let aliasMigration = GoldenGateIdentityMigration(
+            storedIDs: target.items.map(\.id), liveIDs: current.items.map(\.id)
+        )
+        guard aliasMigration.conflictingStoredIDs.isEmpty else {
+            throw MenuBarBackendError.operationFailed("saved menu bar identities are ambiguous")
+        }
+        func resolved(_ id: MenuBarItemID) -> MenuBarItemID {
+            aliasMigration.replacements[id] ?? id
+        }
+        let targetByID = Dictionary(uniqueKeysWithValues: target.items.map { (resolved($0.id), $0) })
         guard current.items.allSatisfy({ targetByID[$0.id] != nil }) else {
             throw MenuBarBackendError.operationFailed("saved layout no longer matches the menu bar")
         }
         let ordered: [MenuBarItemDescriptor] = try current.items.enumerated().map { index, currentItem in
             guard let targetItem = targetByID[currentItem.id] else {
                 throw MenuBarBackendError.operationFailed("saved layout no longer matches the menu bar")
+            }
+            if currentItem.id != targetItem.id, currentItem.displayID != targetItem.displayID {
+                throw MenuBarBackendError.operationFailed("saved menu bar item changed display")
             }
             if currentItem.section != targetItem.section {
                 guard currentItem.isMovable else {
@@ -294,8 +306,8 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
         let currentIDs = Set(current.items.map(\.id))
         for section in MenuBarSection.allCases {
             let requestedOrder = target.items
-                .filter { $0.section == section && currentIDs.contains($0.id) }
-                .map(\.id)
+                .filter { $0.section == section && currentIDs.contains(resolved($0.id)) }
+                .map { resolved($0.id) }
             let nativeOrder = ordered.filter { $0.section == section }.map(\.id)
             guard requestedOrder == nativeOrder else {
                 throw MenuBarBackendError.operationFailed(
@@ -317,12 +329,12 @@ public struct GoldenGateLogicalLayoutPlanner: Sendable {
     ) -> MenuBarSnapshot {
         MenuBarSnapshot(
             generation: generation ?? snapshot.generation,
-            capturedAt: Date(),
+            capturedAt: generation == nil ? snapshot.capturedAt : Date(),
             items: items.enumerated().map { index, item in item.replacing(order: index) },
             displayIDs: snapshot.displayIDs,
             displayIdentities: snapshot.displayIdentities,
             activeSpaceIsValid: snapshot.activeSpaceIsValid,
-            menuTrackingIsActive: false
+            menuTrackingIsActive: snapshot.menuTrackingIsActive
         )
     }
 }
