@@ -4,6 +4,9 @@ import Foundation
 /// description, userInfo, identity, title, path, or a nested error in a log.
 public enum PrivacySafeDiagnostics {
     public static func errorCode(_ error: any Error) -> String {
+        if error is ProfileAuthorityPersistenceError {
+            return "profile_authority_persistence_failed"
+        }
         if let recoveryError = error as? WorkspaceRecoveryPlanner.Failure {
             switch recoveryError {
             case .ambiguousIdentity: return "recovery_ambiguous_identity"

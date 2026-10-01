@@ -1,6 +1,6 @@
 # Changelog
 
-## 1.0.66 (build 146) — qualification candidate, October 1, 2026
+## 1.0.66 (build 147) — qualification candidate, October 1, 2026
 
 ### macOS 27
 
@@ -32,6 +32,9 @@
 
 ### Both
 
+- Saved layouts are marked Active only after their authority record and token
+  are verified. Failed saves stop automatic retries without consuming a pending
+  Focus recovery checkpoint or pretending the applied layout was saved.
 - Click shortcuts ignore incidental Caps Lock state while still rejecting
   conflicting modifiers.
 - Display reconnect observation retries are bounded and coalesced. A newer
@@ -41,7 +44,7 @@
   occupancy is capped even when cancellation does not immediately release a read.
 
 These changes are an internal qualification candidate, not a published release.
-Installed tests from builds 144 and 145 do not qualify this candidate. Both OS runtime
+Installed tests from builds 144 through 146 do not qualify this candidate. Both OS runtime
 lanes and the remaining release gates must pass before publication.
 
 ## 1.0.65 (build 142) — September 27, 2026

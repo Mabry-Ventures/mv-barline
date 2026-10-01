@@ -11,6 +11,9 @@ public enum IntentCommandFailurePolicy {
     }
 
     public static func requiresUserReview(_ error: any Error) -> Bool {
+        if error is ProfileAuthorityPersistenceError {
+            return true
+        }
         guard let backend = error as? MenuBarBackendError else { return false }
         if case .staleItem = backend {
             return true

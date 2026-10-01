@@ -252,6 +252,7 @@ final class ProfileManager: ObservableObject {
                 throw MenuBarBackendError.operationFailed("requested profile is unavailable")
             }
             let priorAuthorityToken = self.activeProfileAuthorityToken()
+            var authorityPublicationAttempted = false
             do {
                 let snapshot = try await appState.compatibilityCoordinator.activate(
                     profile: resolvedProfile,
@@ -289,18 +290,33 @@ final class ProfileManager: ObservableObject {
                     self.setActiveProfileAuthorityToken(nil)
                     throw MenuBarWorkspaceTransactionError.superseded
                 }
+                // The layout is already applied. Commit durable authority before
+                // publishing Active or returning success to an Intent delivery.
+                authorityPublicationAttempted = true
+                try await self.persistActiveProfileAuthority(
+                    profileID: resolvedProfile.id,
+                    token: resolvedAuthorityToken
+                )
                 return (
                     profileID: resolvedProfile.id,
                     authorityToken: resolvedAuthorityToken,
                     profiles: publishedProfiles
                 )
             } catch {
-                if let priorRequest {
+                let failedPublication = authorityPublicationAttempted && error is ProfileAuthorityPersistenceError
+                if failedPublication {
+                    // Never resurrect a prior token over the newly applied
+                    // workspace or replay a layout to repair a rejected write.
+                    self.activationRequests.removeAll()
+                } else if let priorRequest {
                     self.activationRequests[source] = priorRequest
                 } else {
                     self.activationRequests.removeValue(forKey: source)
                 }
-                if self.pendingFocusAuthority(matching: resolvedAuthorityToken) != nil {
+                if failedPublication {
+                    // persistActiveProfileAuthority already withdrew publication
+                    // while retaining the last envelope and recovery journal.
+                } else if self.pendingFocusAuthority(matching: resolvedAuthorityToken) != nil {
                     self.activeProfileID = nil
                     self.activeProfileActivatedAt = nil
                     // Keep the workspace presentation actually left by apply/rollback.
@@ -324,11 +340,6 @@ final class ProfileManager: ObservableObject {
             profiles = result.profiles
             activeProfileID = result.profileID
             activeProfileActivatedAt = Date()
-            setActiveProfileAuthorityToken(result.authorityToken)
-            persistActiveProfileAuthority(
-                profileID: result.profileID,
-                token: result.authorityToken
-            )
             didActivate = true
         }
         return didActivate
@@ -508,10 +519,10 @@ final class ProfileManager: ObservableObject {
                 Logger(category: "Profiles").error("Focus recovery final verification failed")
                 throw MenuBarWorkspaceTransactionError.superseded
             }
+            try await self.restorePriorAuthorityAfterVerifiedRollback(checkpoint: checkpoint)
             return checkpoint
-        } completion: { [weak self] checkpoint in
+        } completion: { [weak self] _ in
             guard let self else { return }
-            restorePriorAuthorityAfterVerifiedRollback(checkpoint: checkpoint)
             activationRequests.removeValue(forKey: .focus)
             clearProfileBeforeFocus()
             manualRecoveryStore.remove(ifMatching: confirmedToken)
@@ -1379,11 +1390,10 @@ final class ProfileManager: ObservableObject {
                     }
                 )
                 guard displayReconnectRetry.isCurrent(ticket) else { return .finished }
+                try await persistActiveProfileAuthority(profileID: intent.profile.id, token: intent.authorityToken)
                 activeProfileID = intent.profile.id
                 activeProfileActivatedAt = Date()
                 activationRequests = intent.activationRequests
-                setActiveProfileAuthorityToken(intent.authorityToken)
-                persistActiveProfileAuthority(profileID: intent.profile.id, token: intent.authorityToken)
                 reconciled = profilesReconcilingDisplayAliases(
                     after: reactivated,
                     activeProfileID: intent.profile.id
@@ -1530,7 +1540,9 @@ final class ProfileManager: ObservableObject {
             }
             activeProfileID = nil
             activeProfileActivatedAt = nil
-            activePresentation = nil
+            if !(error is ProfileAuthorityPersistenceError) {
+                activePresentation = nil
+            }
             activationRequests.removeAll()
         }
     }
@@ -1670,7 +1682,7 @@ final class ProfileManager: ObservableObject {
     }
 
     private func applyFocusProfile(_ profileID: UUID?, onFailure: ((any Error) -> Void)? = nil) async -> Bool {
-        switch await recoverPendingFocusAuthority() {
+        switch await recoverPendingFocusAuthority(onFailure: onFailure) {
         case .promoted:
             if let profileID, activeFocusProfile()?.id == profileID {
                 return true
@@ -1777,8 +1789,14 @@ final class ProfileManager: ObservableObject {
                    let checkpoint = decodeFocusCheckpoint(data),
                    await currentWorkspaceMatches(checkpoint)
                 {
-                    restorePriorAuthorityAfterVerifiedRollback(checkpoint: checkpoint)
-                    clearProfileBeforeFocus()
+                    do {
+                        try await restorePriorAuthorityAfterVerifiedRollback(checkpoint: checkpoint)
+                        clearProfileBeforeFocus()
+                    } catch {
+                        onFailure?(error)
+                        lastOperationErrorCode = PrivacySafeDiagnostics.errorCode(error)
+                        statusMessage = Self.authorityPersistenceFailureMessage
+                    }
                 }
                 return false
             }
@@ -1836,25 +1854,28 @@ final class ProfileManager: ObservableObject {
             let priorAuthorityToken = self.processedDefaults
                 .string(forKey: Self.profileBeforeFocusAuthorityTokenKey)
                 .flatMap(UUID.init(uuidString:))
+            let restoredToken = retainedProfileID == checkpoint.activeProfileID ? priorAuthorityToken : nil
+            if let profileID = retainedProfileID, let restoredToken {
+                try await self.persistActiveProfileAuthority(profileID: profileID, token: restoredToken)
+            }
             return (
                 restored: true,
-                profileID: retainedProfileID,
-                authorityToken: retainedProfileID == checkpoint.activeProfileID
-                    ? priorAuthorityToken
-                    : nil
+                profileID: restoredToken == nil ? nil : retainedProfileID,
+                authorityToken: restoredToken
             )
         } completion: { [weak self] result in
             guard let self else { return }
             activeProfileID = result.profileID
             activeProfileActivatedAt = result.profileID == nil ? nil : Date()
-            setActiveProfileAuthorityToken(result.profileID == nil ? nil : result.authorityToken)
-            if let profileID = result.profileID, let token = result.authorityToken {
-                persistActiveProfileAuthority(profileID: profileID, token: token)
+            if result.profileID == nil {
+                setActiveProfileAuthorityToken(nil)
             }
             didFinish = true
         }
         guard didFinish else {
-            statusMessage = "Barline could not restore the pre-Focus workspace."
+            if lastOperationErrorCode != "profile_authority_persistence_failed" {
+                statusMessage = "Barline could not restore the pre-Focus workspace."
+            }
             return false
         }
         activationRequests.removeValue(forKey: .focus)
@@ -2001,9 +2022,11 @@ final class ProfileManager: ObservableObject {
             setActiveProfileAuthorityToken(nil)
             return nil
         }
-        if let token = activeProfileAuthorityToken() {
-            persistActiveProfileAuthority(profileID: profileID, token: token)
+        guard let token = activeProfileAuthorityToken() else {
+            await withdrawUnpersistedProfileAuthority(profileID: profileID)
+            return nil
         }
+        try await persistActiveProfileAuthority(profileID: profileID, token: token)
         return profileID
     }
 
@@ -2074,42 +2097,60 @@ final class ProfileManager: ObservableObject {
         ))
     }
 
-    private func persistActiveProfileAuthority(profileID: UUID, token: UUID) {
+    private static let authorityPersistenceFailureMessage =
+        "The layout's active state could not be saved. Automatic retries stopped; any recovery checkpoint is retained."
+
+    private func withdrawUnpersistedProfileAuthority(profileID: UUID) async {
+        _ = await appState?.compatibilityCoordinator.clearActiveProfileAuthority(ifMatches: profileID)
+        activeProfileID = nil
+        activeProfileActivatedAt = nil
+        activationRequests.removeAll()
+        // The store first compensates its own rejected writes. This separate
+        // post-apply withdrawal revokes that restored token because the physical
+        // workspace has changed; it is not a second storage rollback.
+        // Retain the actual presentation and previous envelope. In particular,
+        // a pending Focus envelope contains the recovery checkpoint.
+        processedDefaults.removeObject(forKey: Self.activeProfileAuthorityTokenKey)
+    }
+
+    private func persistActiveProfileAuthority(profileID: UUID, token: UUID) async throws {
         guard let activePresentation else {
-            setActiveProfileAuthorityToken(nil)
-            return
+            await withdrawUnpersistedProfileAuthority(profileID: profileID)
+            lastOperationErrorCode = "profile_authority_persistence_failed"
+            statusMessage = Self.authorityPersistenceFailureMessage
+            throw ProfileAuthorityPersistenceError.writeNotVerified
         }
         do {
-            try persistProfileAuthority(ProfileAuthorityEnvelope(active: ProfileActiveAuthority(
+            try authorityStore.save(ProfileAuthorityEnvelope(active: ProfileActiveAuthority(
                 profileID: profileID,
                 token: token,
                 presentation: activePresentation
-            )))
+            )), activeTokenKey: Self.activeProfileAuthorityTokenKey)
         } catch {
-            setActiveProfileAuthorityToken(nil)
+            await withdrawUnpersistedProfileAuthority(profileID: profileID)
+            lastOperationErrorCode = PrivacySafeDiagnostics.errorCode(error)
+            statusMessage = Self.authorityPersistenceFailureMessage
+            throw error
         }
     }
 
     private func restorePriorAuthorityAfterVerifiedRollback(
         checkpoint: MenuBarWorkspaceCheckpoint
-    ) {
+    ) async throws {
         let priorAuthority = pendingFocusAuthority()?.priorAuthority
-        activeProfileID = checkpoint.activeProfileID
-        activeProfileActivatedAt = checkpoint.activeProfileID == nil ? nil : Date()
         activePresentation = checkpoint.workspace.presentation
         guard let priorAuthority,
               priorAuthority.profileID == checkpoint.activeProfileID,
               priorAuthority.presentation == checkpoint.workspace.presentation
         else {
+            activeProfileID = nil
+            activeProfileActivatedAt = nil
             setActiveProfileAuthorityToken(nil)
             return
         }
-        setActiveProfileAuthorityToken(priorAuthority.token)
-        do {
-            try persistProfileAuthority(ProfileAuthorityEnvelope(active: priorAuthority))
-        } catch {
-            setActiveProfileAuthorityToken(nil)
-        }
+        try await persistActiveProfileAuthority(profileID: priorAuthority.profileID, token: priorAuthority.token)
+        activeProfileID = priorAuthority.profileID
+        activeProfileActivatedAt = Date()
     }
 
     private func finishArchivedFocusRecovery(_ pending: ProfileAuthorityEnvelope) throws {
@@ -2126,7 +2167,9 @@ final class ProfileManager: ObservableObject {
         setActiveProfileAuthorityToken(nil)
     }
 
-    private func recoverPendingFocusAuthority() async -> PendingFocusRecoveryOutcome {
+    private func recoverPendingFocusAuthority(
+        onFailure: ((any Error) -> Void)? = nil
+    ) async -> PendingFocusRecoveryOutcome {
         defer { interruptedFocusRecoveryToken = recoverableFocusAuthority()?.token }
         guard let appState, let pending = pendingFocusAuthority() else { return .none }
         // Crash after writing the manual receipt but before clearing active keys:
@@ -2191,23 +2234,18 @@ final class ProfileManager: ObservableObject {
                     forKey: Self.profileBeforeFocusAuthorityTokenKey
                 )
                 activePresentation = presentation
+                try await persistActiveProfileAuthority(profileID: profile.id, token: pending.token)
                 activeProfileID = profile.id
                 activeProfileActivatedAt = Date()
-                setActiveProfileAuthorityToken(pending.token)
-                try persistProfileAuthority(ProfileAuthorityEnvelope(active: ProfileActiveAuthority(
-                    profileID: profile.id,
-                    token: pending.token,
-                    presentation: presentation
-                )))
                 processedDefaults.set(true, forKey: Self.presentationFocusActiveKey)
                 processedDefaults.set(profile.id.uuidString, forKey: Self.activeFocusProfileIDKey)
                 return .promoted
             case .restored:
-                restorePriorAuthorityAfterVerifiedRollback(checkpoint: checkpoint)
+                try await restorePriorAuthorityAfterVerifiedRollback(checkpoint: checkpoint)
                 clearProfileBeforeFocus()
                 return .restored
             case .unchanged:
-                restorePriorAuthorityAfterVerifiedRollback(checkpoint: checkpoint)
+                try await restorePriorAuthorityAfterVerifiedRollback(checkpoint: checkpoint)
                 clearProfileBeforeFocus()
                 return .restored
             case .inconclusive:
@@ -2220,11 +2258,14 @@ final class ProfileManager: ObservableObject {
                 return .failed
             }
         } catch {
+            onFailure?(error)
             activeProfileID = nil
             activeProfileActivatedAt = nil
             // Recovery failure cannot author a replacement workspace either.
             processedDefaults.removeObject(forKey: Self.activeProfileAuthorityTokenKey)
-            statusMessage = "Barline could not recover an interrupted Focus profile activation."
+            statusMessage = error is ProfileAuthorityPersistenceError
+                ? Self.authorityPersistenceFailureMessage
+                : "Barline could not recover an interrupted Focus profile activation."
             return .failed
         }
     }
@@ -2258,14 +2299,16 @@ final class ProfileManager: ObservableObject {
                 return
             }
             activePresentation = normalizedPresentation
+            try await persistActiveProfileAuthority(profileID: profile.id, token: authority.token)
             activeProfileID = profile.id
             activeProfileActivatedAt = Date()
-            persistActiveProfileAuthority(profileID: profile.id, token: authority.token)
         } catch {
             activeProfileID = nil
             activeProfileActivatedAt = nil
-            activePresentation = nil
-            setActiveProfileAuthorityToken(nil)
+            if !(error is ProfileAuthorityPersistenceError) {
+                activePresentation = nil
+                setActiveProfileAuthorityToken(nil)
+            }
         }
     }
 
@@ -2294,7 +2337,9 @@ final class ProfileManager: ObservableObject {
         } catch {
             activeProfileID = nil
             activeProfileActivatedAt = nil
-            activePresentation = nil
+            if !(error is ProfileAuthorityPersistenceError) {
+                activePresentation = nil
+            }
             Logger(category: "Profiles").error("Profile authority reconciliation failed")
         }
     }
@@ -2387,7 +2432,9 @@ final class ProfileManager: ObservableObject {
         } catch {
             onFailure?(error)
             lastOperationErrorCode = PrivacySafeDiagnostics.errorCode(error)
-            statusMessage = IntentCommandFailurePolicy.requiresUserReview(error)
+            statusMessage = error is ProfileAuthorityPersistenceError
+                ? Self.authorityPersistenceFailureMessage
+                : IntentCommandFailurePolicy.requiresUserReview(error)
                 ? "A saved menu bar item is unavailable. Open its app or update the saved layout, then try again. Automatic retries stopped; any recovery checkpoint is retained."
                 : error is WorkspaceRecoveryPlanner.Failure
                 ? "The saved layout no longer matches the available items or displays. Restoration could not be verified; the recovery checkpoint is retained."

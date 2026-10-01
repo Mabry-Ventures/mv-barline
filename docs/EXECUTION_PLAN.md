@@ -1,5 +1,25 @@
 # Barline execution plan
 
+## Build 147 authority publication repair — October 1, 2026
+
+Build 146's installed profile happy path passed, but a source audit identified
+an independent failure path: a rejected authority save was swallowed after the
+physical workspace had been applied, allowing an Active/success publication.
+Build 147 commits and verifies the authority envelope and token before success,
+withdraws active publication on rejection, retains pending Focus recovery, and
+classifies these failures as user-review-required rather than replayable.
+
+Store rollback restores storage values; the caller then withdraws the restored
+token because the physical workspace has already changed. These are separate
+compensation boundaries, not reactivation of the prior profile. UserDefaults
+does not provide a crash-atomic or fsync-backed two-key transaction.
+
+The source patch has Astra High review and a Gemini Flash 3.8 High second review.
+Store fault injection is not Manager/Intent runtime proof. Exact build 147
+signing, installed journeys, profile restart/manual revocation, native clock
+positive control, both OS runtime lanes and hardware qualification remain
+required. See [build 147 readiness](MACOS_27_BUILD_147_READINESS.md).
+
 ## Build 146 identity compatibility repair — October 1, 2026
 
 Build 145 is blocked by an installed, independently reproduced identity defect:
