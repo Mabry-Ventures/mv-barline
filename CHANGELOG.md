@@ -1,9 +1,13 @@
 # Changelog
 
-## 1.0.66 (build 148) — qualification candidate, October 1, 2026
+## 1.0.66 (build 149) — qualification candidate, October 1, 2026
 
 ### macOS 27
 
+- Saved layouts validate newly discovered items at their current visibility,
+  consistent with the layout planner. An unchanged visible application group
+  no longer rejects a transition merely because another member appeared.
+  Unsupported mixed hiding within an application remains rejected.
 - Distinct menu bar items keep their saved visibility when macOS changes their
   order. Older order-derived IDs are repaired only when the live item is unique.
 - Saved visibility, remembered sections and item metadata share one validated
@@ -32,6 +36,9 @@
 
 ### Both
 
+- Rejected saved-layout plans report a specific, privacy-safe explanation and
+  stop automatic command replay until a fresh request is made. Recovery data
+  and previous authority are not discarded to make a rejected plan succeed.
 - Capturing a layout keeps the new-layout name editable while competing actions
   are locked. Rapid duplicate captures are rejected and the submitted name is
   preserved even if the draft changes while capture runs. This is a mitigation
@@ -51,7 +58,7 @@
   occupancy is capped even when cancellation does not immediately release a read.
 
 These changes are an internal qualification candidate, not a published release.
-Installed tests from builds 144 through 147 do not qualify this candidate. Both OS runtime
+Installed tests from builds 144 through 148 do not qualify this candidate. Both OS runtime
 lanes and the remaining release gates must pass before publication.
 
 ## 1.0.65 (build 142) — September 27, 2026

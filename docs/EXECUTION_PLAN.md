@@ -1,5 +1,27 @@
 # Barline execution plan
 
+## Build 149 saved-layout admission repair — October 1, 2026
+
+Build 148 failed a real installed visible-to-hidden saved-layout transition.
+Earlier Capture/Apply passes used an already-matching layout and did not qualify
+that transition. A source-level inconsistency is reproduced by two failing
+policy regressions: the reconciler preserves omitted live items, while native
+visibility admission checked only the saved subset. Build 149 completes native
+visibility validation with omitted items at their current sections. Mixed
+per-application hiding remains rejected; no safety guard is relaxed.
+
+All eight typed layout/arrangement planning failures now use closed diagnostic
+codes, specific UI explanations, and fresh-command-only retry semantics. The
+full core suite passes 759 tests. This does not yet establish the installed
+failure's exact live inputs or qualify the new binary. See
+[build 149 readiness](MACOS_27_BUILD_149_READINESS.md).
+
+The single bounded build-148 XCUITest retry again timed out enabling automation
+before any app test ran. Both result bundles are retained. Do not restart the
+Mac, change privacy permissions, or repeatedly rerun this setup failure.
+Clock visibility, macOS 26 runtime and hardware qualification remain open.
+No public release, download or update feed has changed.
+
 ## Build 148 profile-capture mitigation — October 1, 2026
 
 Build 147 exposed an intermittent Settings capture freeze after the synthetic

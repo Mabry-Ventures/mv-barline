@@ -38,9 +38,19 @@ public struct MenuBarArrangementPolicy: Sendable {
         capabilities: MenuBarArrangementCapabilities,
         barlineBundleIdentifier: String
     ) throws -> MenuBarArrangementExecutionPlan {
-        let known = Set(snapshot.items.filter { !$0.isBarlineControlItem }.map(\.id))
-        let visible = layout.visible.filter(known.contains)
-        let concealed = (layout.hidden + layout.alwaysHidden).filter(known.contains)
+        let items = snapshot.items.filter { !$0.isBarlineControlItem }
+        let known = Set(items.map(\.id))
+        let requestedVisible = layout.visible.filter(known.contains)
+        let requestedConcealed = (layout.hidden + layout.alwaysHidden).filter(known.contains)
+        let requested = Set(requestedVisible + requestedConcealed)
+        // Saved layouts are partial: newly discovered items remain at their
+        // current sections in the reconciler's target. Validate that same full
+        // target here, rather than rejecting an unchanged visible app because
+        // it now publishes another item. Never hide an omitted visible sibling
+        // merely to make application-level concealment representable.
+        let omitted = items.filter { !requested.contains($0.id) }
+        let visible = requestedVisible + omitted.filter { $0.section == .visible }.map(\.id)
+        let concealed = requestedConcealed + omitted.filter { $0.section != .visible }.map(\.id)
         let configuration = MenuBarConcealmentConfiguration(
             visibleItemIDs: visible,
             concealedItemIDs: concealed

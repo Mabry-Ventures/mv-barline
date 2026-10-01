@@ -7,6 +7,22 @@ public enum PrivacySafeDiagnostics {
         if error is ProfileAuthorityPersistenceError {
             return "profile_authority_persistence_failed"
         }
+        if let layoutError = error as? ProfileLayoutReconciler.Failure {
+            switch layoutError {
+            case .ambiguousIdentity: return "layout_ambiguous_identity"
+            case .missingItem: return "layout_missing_item"
+            case .immovableSectionChange: return "layout_fixed_section"
+            case .immovableOrderChange: return "layout_fixed_order"
+            case .cannotHideItem: return "layout_item_not_hideable"
+            case .unsupportedDestination: return "layout_destination_unsupported"
+            }
+        }
+        if let arrangementError = error as? MenuBarArrangementPolicyError {
+            switch arrangementError {
+            case .visibilityUnavailable: return "layout_visibility_unavailable"
+            case .unsupportedVisibilityAssignment: return "layout_visibility_assignment_unsupported"
+            }
+        }
         if let recoveryError = error as? WorkspaceRecoveryPlanner.Failure {
             switch recoveryError {
             case .ambiguousIdentity: return "recovery_ambiguous_identity"

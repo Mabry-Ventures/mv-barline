@@ -9,6 +9,75 @@ import Testing
 
 @Suite("Transactional state coordinator")
 struct StateCoordinatorTests {
+    @Test("Saved visibility transitions preserve newly observed and omitted items", arguments: [false, true])
+    func reconcilesCompleteGoldenGateVisibility(rejectMixedGroup: Bool) async throws {
+        let display = MenuBarDisplayID("test-display")
+        let ids = [
+            MenuBarItemID(bundleIdentifier: "com.example.multi", title: "saved"),
+            MenuBarItemID(bundleIdentifier: "com.example.multi", title: "new"),
+            MenuBarItemID(bundleIdentifier: "com.example.target", title: "target"),
+            MenuBarItemID(bundleIdentifier: "com.example.omitted-hidden", title: "hidden"),
+            MenuBarItemID(bundleIdentifier: "com.example.omitted-always", title: "always"),
+        ]
+        let before = MenuBarSnapshot(
+            generation: 1, capturedAt: Date(),
+            items: ids.enumerated().map { index, id in
+                MenuBarItemDescriptor(
+                    id: id, section: index == 3 ? .hidden : index == 4 ? .alwaysHidden : .visible,
+                    order: index, displayID: display
+                )
+            },
+            displayIDs: [display], activeSpaceIsValid: true
+        )
+        let after = MenuBarSnapshot(
+            generation: 2, capturedAt: before.capturedAt,
+            items: before.items.map { $0.id == ids[2] ? $0.replacingSection(.hidden) : $0 },
+            displayIDs: [display], activeSpaceIsValid: true
+        )
+        let backend = FakeBackend(
+            snapshots: [before, after, after, after],
+            capabilities: MenuBarCapabilities(
+                canSnapshot: true, canMove: true, canReveal: false, canActivate: true, canRestore: false,
+                moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+                arrangement: MenuBarArrangementCapabilities(
+                    canReorderNativeItems: false,
+                    visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                    canReorderShelfItems: true, canApplySavedNativeOrder: false
+                )
+            )
+        )
+        let workspace = WorkspaceRecorder(initial: ProfileWorkspaceState(profile: BarlineProfile(name: "Original")))
+        let transaction = MenuBarWorkspaceTransaction(
+            capture: { await workspace.capture() }, apply: { try await workspace.apply($0) }
+        )
+        let profile = BarlineProfile(
+            name: "Partial", layout: ProfileLayout(
+                visible: rejectMixedGroup ? [] : [ids[0]],
+                hidden: rejectMixedGroup ? [ids[0], ids[2]] : [ids[2]]
+            )
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        if rejectMixedGroup {
+            await #expect(throws: MenuBarArrangementPolicyError.unsupportedVisibilityAssignment) {
+                try await coordinator.activate(
+                    profile: profile, workspaceTransaction: transaction,
+                    prepareCheckpoint: { _, _ in Issue.record("Rejected planning must not prepare recovery state") }
+                )
+            }
+            #expect(await backend.moveOperations.isEmpty)
+            #expect(await backend.concealmentConfigurations.isEmpty)
+            #expect(await workspace.values.isEmpty)
+            #expect(await coordinator.activeProfileID == nil)
+        } else {
+            let result = try await coordinator.activate(profile: profile, workspaceTransaction: transaction)
+            #expect(result.items == after.items)
+            #expect(await backend.moveOperations.count == 1)
+            #expect(await backend.moveOperations.first?.itemID == ids[2])
+            #expect(await coordinator.activeProfileID == profile.id)
+            #expect(await workspace.values.count == 1)
+        }
+    }
+
     @Test("macOS 27 accepts a verified whole-application visibility assignment")
     func acceptsGoldenGateApplicationGroupAssignment() async throws {
         let display = MenuBarDisplayID("test-display")

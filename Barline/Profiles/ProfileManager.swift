@@ -2441,15 +2441,19 @@ final class ProfileManager: ObservableObject {
         } catch {
             onFailure?(error)
             lastOperationErrorCode = PrivacySafeDiagnostics.errorCode(error)
-            statusMessage = error is ProfileAuthorityPersistenceError
-                ? Self.authorityPersistenceFailureMessage
-                : IntentCommandFailurePolicy.requiresUserReview(error)
-                ? "A saved menu bar item is unavailable. Open its app or update the saved layout, then try again. Automatic retries stopped; any recovery checkpoint is retained."
-                : error is WorkspaceRecoveryPlanner.Failure
-                ? "The saved layout no longer matches the available items or displays. Restoration could not be verified; the recovery checkpoint is retained."
-                : appState?.itemManager.hasPendingRestorations == true
-                ? "Finish item restoration in Recovery, then apply the layout again."
-                : "The profile operation could not be completed."
+            if error is ProfileAuthorityPersistenceError {
+                statusMessage = Self.authorityPersistenceFailureMessage
+            } else if let message = IntentCommandFailurePolicy.planningFailureMessage(error) {
+                statusMessage = message
+            } else if IntentCommandFailurePolicy.requiresUserReview(error) {
+                statusMessage = "A saved menu bar item is unavailable. Open its app or update the saved layout, then try again. Automatic retries stopped; any recovery checkpoint is retained."
+            } else if error is WorkspaceRecoveryPlanner.Failure {
+                statusMessage = "The saved layout no longer matches the available items or displays. Restoration could not be verified; the recovery checkpoint is retained."
+            } else if appState?.itemManager.hasPendingRestorations == true {
+                statusMessage = "Finish item restoration in Recovery, then apply the layout again."
+            } else {
+                statusMessage = "The profile operation could not be completed."
+            }
             Logger(category: "Profiles").error("Profile operation failed: \(PrivacySafeDiagnostics.errorCode(error), privacy: .public)")
         }
     }
