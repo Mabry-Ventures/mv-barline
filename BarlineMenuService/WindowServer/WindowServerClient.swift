@@ -322,8 +322,8 @@ final class WindowServerClient: @unchecked Sendable {
             items: descriptors,
             displayIDs: displayIDs,
             displayIdentities: displayIdentities,
-            activeSpaceIsValid: !displayIDs.isEmpty,
-            menuTrackingIsActive: false
+            activeSpaceIsValid: Bridging.getActiveSpaceID() > 0,
+            menuTrackingIsActive: (try? currentWindows()).map { menuTrackingIsActive(menuBarWindows: $0) } ?? true
         )
     }
 
@@ -708,11 +708,16 @@ final class WindowServerClient: @unchecked Sendable {
     func environment() -> MenuBarEnvironmentSnapshot {
         let activeSpace = Bridging.getActiveSpaceID()
         let activeDisplayID = Bridging.getActiveMenuBarDisplayID()
+        let observedTracking = (try? currentWindows()).map {
+            menuTrackingIsActive(menuBarWindows: $0)
+        } ?? true
         return MenuBarEnvironmentSnapshot(
             activeDisplayID: activeDisplayID,
             activeStableDisplayID: activeDisplayID.map(stableDisplayID),
             activeSpaceToken: activeSpace,
-            activeSpaceIsFullscreen: Bridging.isSpaceFullscreen(activeSpace)
+            activeSpaceIsFullscreen: Bridging.isSpaceFullscreen(activeSpace),
+            activeSpaceIsValid: activeSpace > 0,
+            menuTrackingIsActive: observedTracking
         )
     }
 

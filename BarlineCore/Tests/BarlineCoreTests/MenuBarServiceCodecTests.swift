@@ -9,6 +9,32 @@ import Testing
 
 @Suite("Typed menu service codec")
 struct MenuBarServiceCodecTests {
+    @Test("Legacy environment decoding cannot grant mutation safety")
+    func legacyEnvironmentDefaultsFailClosed() throws {
+        let legacy = Data(#"{"activeDisplayID":1,"activeSpaceToken":7,"activeSpaceIsFullscreen":false}"#.utf8)
+        let decoded = try JSONDecoder().decode(MenuBarEnvironmentSnapshot.self, from: legacy)
+        #expect(!decoded.activeSpaceIsValid)
+        #expect(decoded.menuTrackingIsActive)
+    }
+
+    @Test("Inventory scene continuity requires matching observed display and Space")
+    func sceneContinuity() {
+        let baseline = MenuBarEnvironmentSnapshot(
+            activeDisplayID: 1, activeStableDisplayID: MenuBarDisplayID("a"),
+            activeSpaceToken: 7, activeSpaceIsFullscreen: false,
+            activeSpaceIsValid: true, menuTrackingIsActive: false
+        )
+        #expect(baseline.hasSameValidScene(as: baseline))
+        for changed in [
+            MenuBarEnvironmentSnapshot(activeDisplayID: 2, activeStableDisplayID: MenuBarDisplayID("b"), activeSpaceToken: 7, activeSpaceIsFullscreen: false),
+            MenuBarEnvironmentSnapshot(activeDisplayID: 1, activeStableDisplayID: MenuBarDisplayID("a"), activeSpaceToken: 8, activeSpaceIsFullscreen: false),
+            MenuBarEnvironmentSnapshot(activeDisplayID: 1, activeSpaceToken: 7, activeSpaceIsFullscreen: false),
+            MenuBarEnvironmentSnapshot(activeDisplayID: 1, activeStableDisplayID: MenuBarDisplayID("a"), activeSpaceToken: 7, activeSpaceIsFullscreen: false, activeSpaceIsValid: false),
+        ] {
+            #expect(!baseline.hasSameValidScene(as: changed))
+        }
+    }
+
     private let itemID = MenuBarItemID(
         bundleIdentifier: "com.example.status",
         accessibilityIdentifier: "primary-status-item"

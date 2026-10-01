@@ -4,6 +4,31 @@ import Testing
 
 @Suite("Menu bar display ownership")
 struct MenuBarDisplayOwnershipPolicyTests {
+    @Test("Inventory completion rejects changed geometry with unchanged display IDs")
+    func stableInventoryGeometry() {
+        let id = MenuBarDisplayID("a")
+        let initial = [id: MenuBarRect(x: 0, y: 0, width: 1920, height: 1080)]
+        #expect(MenuBarDisplayOwnershipPolicy.hasStableGeometry(before: initial, after: initial))
+        #expect(!MenuBarDisplayOwnershipPolicy.hasStableGeometry(before: initial, after: [
+            id: MenuBarRect(x: 1920, y: 0, width: 1920, height: 1080),
+        ]))
+        #expect(!MenuBarDisplayOwnershipPolicy.hasStableGeometry(before: initial, after: [
+            id: MenuBarRect(x: 0, y: 0, width: 960, height: 540),
+        ]))
+        #expect(!MenuBarDisplayOwnershipPolicy.hasStableGeometry(before: initial, after: [:]))
+    }
+
+    @Test("Logical moves reject transfers and unknown source ownership")
+    func logicalMoveDestination() {
+        let first = MenuBarDisplayID("a")
+        let second = MenuBarDisplayID("b")
+        #expect(MenuBarDisplayOwnershipPolicy.permitsLogicalMove(sourceDisplayID: first, destinationDisplayID: nil))
+        #expect(MenuBarDisplayOwnershipPolicy.permitsLogicalMove(sourceDisplayID: nil, destinationDisplayID: nil))
+        #expect(MenuBarDisplayOwnershipPolicy.permitsLogicalMove(sourceDisplayID: first, destinationDisplayID: first))
+        #expect(!MenuBarDisplayOwnershipPolicy.permitsLogicalMove(sourceDisplayID: first, destinationDisplayID: second))
+        #expect(!MenuBarDisplayOwnershipPolicy.permitsLogicalMove(sourceDisplayID: nil, destinationDisplayID: first))
+    }
+
     private let primary = MenuBarDisplayID("primary")
     private let secondary = MenuBarDisplayID("secondary")
     private let mainBounds = MenuBarRect(x: 0, y: 0, width: 1728, height: 1117)

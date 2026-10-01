@@ -4,6 +4,28 @@
 //
 
 public enum MenuBarClickArbitrationPolicy {
+    public enum EmptySpaceAction: Equatable, Sendable {
+        case hidden, alwaysHidden, secondaryContextMenu
+    }
+
+    /// Routing modifiers exclude incidental device flags such as Caps Lock,
+    /// numeric-pad and function. Ambiguous shortcuts must not toggle a shelf.
+    public static func emptySpaceAction(
+        control: Bool,
+        option: Bool,
+        command: Bool,
+        shift: Bool
+    ) -> EmptySpaceAction? {
+        guard !command, !shift, !(control && option) else { return nil }
+        if control {
+            return .secondaryContextMenu
+        }
+        if option {
+            return .alwaysHidden
+        }
+        return .hidden
+    }
+
     /// An asynchronous hit test describes the current window stack, not the
     /// stack that received mouse-down. Never reinterpret a dismissed popup's
     /// click as a new empty-space request or carry it into a newer presentation.

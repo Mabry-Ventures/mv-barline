@@ -8,6 +8,58 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
     private let displayBounds = MenuBarRect(x: 0, y: 0, width: 1800, height: 1200)
     private let appID = "com.mabryventures.Barline"
 
+    @Test("Visible ownership and divider classification are independent per display")
+    func perDisplayDividerGeometry() throws {
+        let secondDisplay = MenuBarDisplayID("display-b")
+        let observations = [
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 1550),
+            observation(bundle: "com.example.a", title: "A", x: 1500),
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 2150),
+            observation(bundle: "com.example.b", title: "B", x: 1900),
+        ]
+        let snapshot = try GoldenGateMenuBarSnapshotBuilder.build(
+            observations: observations,
+            displayIdentities: [MenuBarDisplayIdentity(runtimeID: displayID), MenuBarDisplayIdentity(runtimeID: secondDisplay)],
+            activeDisplayID: displayID,
+            displayBounds: [displayID: displayBounds, secondDisplay: MenuBarRect(x: 1800, y: 0, width: 1800, height: 1200)],
+            activeSpaceIsValid: false, menuTrackingIsActive: true,
+            appSigningIdentifier: appID, generation: 8
+        )
+        #expect(snapshot.items[1].displayID == displayID)
+        #expect(snapshot.items[3].displayID == secondDisplay)
+        #expect(snapshot.items[1].section == .hidden)
+        #expect(snapshot.items[3].section == .hidden)
+        #expect(!snapshot.activeSpaceIsValid)
+        #expect(snapshot.menuTrackingIsActive)
+    }
+
+    @Test("A divider on one display cannot erase another display's remembered section")
+    func missingDividerOnSecondDisplay() throws {
+        let secondDisplay = MenuBarDisplayID("display-b")
+        let observations = [
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 1550),
+            observation(bundle: "com.example.a", title: "A", x: 1600),
+            observation(bundle: "com.example.b", title: "B", x: 1900),
+            observation(bundle: "com.example.unknown", title: "Unknown", x: 2000),
+            observation(bundle: "com.example.offscreen", title: "Offscreen", x: -10000),
+        ]
+        let identifiers = GoldenGateMenuBarSnapshotBuilder.identifiers(for: observations)
+        let snapshot = try GoldenGateMenuBarSnapshotBuilder.build(
+            observations: observations,
+            displayIdentities: [MenuBarDisplayIdentity(runtimeID: displayID), MenuBarDisplayIdentity(runtimeID: secondDisplay)],
+            activeDisplayID: displayID,
+            displayBounds: [displayID: displayBounds, secondDisplay: MenuBarRect(x: 1800, y: 0, width: 1800, height: 1200)],
+            activeSpaceIsValid: true, menuTrackingIsActive: false,
+            appSigningIdentifier: appID, rememberedSections: [identifiers[2]: .hidden], generation: 8
+        )
+        #expect(snapshot.items[1].section == .visible)
+        #expect(snapshot.items[2].section == .hidden)
+        #expect(snapshot.items[3].section == .visible)
+        #expect(!snapshot.items[3].canBeHidden)
+        #expect(snapshot.items[4].displayID == nil)
+        #expect(!snapshot.items[4].isOnScreen)
+    }
+
     @Test("Classifies items around Barline's section controls")
     func classifiesSections() throws {
         let snapshot = try build([
@@ -116,7 +168,7 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
             fallbackFingerprint: item.fallbackFingerprint
         )
         let snapshot = try build([
-            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 10),
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: -10000),
             item,
         ], rememberedSections: [itemID: .hidden])
         #expect(snapshot.items.first { !$0.isBarlineControlItem }?.section == .hidden)
@@ -208,7 +260,9 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
             observations: observations,
             displayIdentities: [MenuBarDisplayIdentity(runtimeID: displayID)],
             activeDisplayID: displayID,
-            activeDisplayBounds: displayBounds,
+            displayBounds: [displayID: displayBounds],
+            activeSpaceIsValid: true,
+            menuTrackingIsActive: false,
             appSigningIdentifier: appID,
             rememberedSections: rememberedSections,
             assignedSections: assignedSections,

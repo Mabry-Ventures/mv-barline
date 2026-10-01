@@ -5,7 +5,8 @@ void * _Nullable BLNGoldenGateAssessmentCreate(void);
 uint64_t BLNGoldenGateAssessmentBegin(
     void * _Nonnull opaqueController,
     CFArrayRef _Nonnull concealedBundleIdentifiers,
-    CFArrayRef _Nonnull allowedSystemItemIdentifiers
+    CFArrayRef _Nonnull allowedSystemItemIdentifiers,
+    CFArrayRef _Nonnull allowedBundleIdentifiers
 );
 int32_t BLNGoldenGateAssessmentActivationState(
     void * _Nonnull opaqueController,

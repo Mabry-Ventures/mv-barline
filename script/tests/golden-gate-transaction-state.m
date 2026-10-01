@@ -2,27 +2,36 @@
 #define BARLINE_BRIDGE_TESTING 1
 
 @interface MBAssessmentModeConfiguration : NSObject
+@property(nonatomic, copy) NSArray<NSNumber *> *items;
+@property(nonatomic, copy) NSArray<NSString *> *identifiers;
 - (instancetype)initWithAllowedSystemItems:(NSArray<NSNumber *> *)items
                   allowedBundleIdentifiers:(NSArray<NSString *> *)identifiers;
 @end
 
 @implementation MBAssessmentModeConfiguration
-- (instancetype)initWithAllowedSystemItems:(__unused NSArray<NSNumber *> *)items
-                  allowedBundleIdentifiers:(__unused NSArray<NSString *> *)identifiers {
-    return [super init];
+- (instancetype)initWithAllowedSystemItems:(NSArray<NSNumber *> *)items
+                  allowedBundleIdentifiers:(NSArray<NSString *> *)identifiers {
+    self = [super init];
+    if (self) {
+        _items = [items copy];
+        _identifiers = [identifiers copy];
+    }
+    return self;
 }
 @end
 
 
 @interface MBAssessmentModeAssertion : NSObject
+@property(nonatomic, strong) MBAssessmentModeConfiguration *configuration;
 - (void)activateWithConfiguration:(id)configuration
                 completionHandler:(void (^)(NSError * _Nullable error))completion;
 - (void)invalidate;
 @end
 
 @implementation MBAssessmentModeAssertion
-- (void)activateWithConfiguration:(__unused id)configuration
+- (void)activateWithConfiguration:(id)configuration
                 completionHandler:(void (^)(NSError * _Nullable error))completion {
+    self.configuration = configuration;
     completion(nil);
 }
 - (void)invalidate {}
@@ -54,6 +63,23 @@ int main(void) {
         BLNRequire(recoveredController != NULL,
                    @"runtime acquisition recovers after a transient miss");
         BLNGoldenGateAssessmentDestroy(recoveredController);
+
+        void *inputController = BLNGoldenGateAssessmentCreate();
+        NSArray *hiddenBundles = @[@"com.example.hidden"];
+        NSArray *allowedBundles = @[@"com.example.visible", @"com.example.new"];
+        NSArray *systemItems = @[@0, @1, @2, @3, @4, @5, @6, @7, @8];
+        uint64_t inputToken = BLNGoldenGateAssessmentBegin(inputController,
+            (__bridge CFArrayRef)hiddenBundles, (__bridge CFArrayRef)systemItems,
+            (__bridge CFArrayRef)allowedBundles);
+        BLNGoldenGateAssessmentController *inputState = (__bridge id)inputController;
+        MBAssessmentModeAssertion *inputAssertion = inputState.pendingAssertion;
+        BLNRequire([inputAssertion.configuration.identifiers isEqualToArray:allowedBundles],
+                   @"Begin uses exactly the caller-captured allowlist without resampling running apps");
+        BLNRequire([inputAssertion.configuration.items isEqualToArray:systemItems],
+                   @"Begin preserves the captured system-item allowlist");
+        BLNRequire(BLNGoldenGateAssessmentCommit(inputController, inputToken),
+                   @"captured input transaction commits");
+        BLNGoldenGateAssessmentDestroy(inputController);
 
         BLNGoldenGateAssessmentController *controller = [BLNGoldenGateAssessmentController new];
         BLNTestAssertion *accepted = [BLNTestAssertion new];

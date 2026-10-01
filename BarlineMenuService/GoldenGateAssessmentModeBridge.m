@@ -11,7 +11,8 @@
 @property(nonatomic) BOOL pendingClearsCurrentAssertion;
 @property(nonatomic) int32_t activationState;
 - (uint64_t)beginConcealedBundleIdentifiers:(NSArray<NSString *> *)concealedBundleIdentifiers
-           allowedSystemItemIdentifiers:(NSArray<NSNumber *> *)allowedSystemItemIdentifiers;
+           allowedSystemItemIdentifiers:(NSArray<NSNumber *> *)allowedSystemItemIdentifiers
+           allowedBundleIdentifiers:(NSArray<NSString *> *)allowedBundleIdentifiers;
 - (int32_t)activationStateForToken:(uint64_t)token;
 - (void)acknowledgeCandidate:(id)candidate token:(uint64_t)token error:(NSError * _Nullable)error;
 - (BOOL)commitToken:(uint64_t)token;
@@ -86,7 +87,8 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
 }
 
 - (uint64_t)beginConcealedBundleIdentifiers:(NSArray<NSString *> *)concealedBundleIdentifiers
-           allowedSystemItemIdentifiers:(NSArray<NSNumber *> *)allowedSystemItemIdentifiers {
+           allowedSystemItemIdentifiers:(NSArray<NSNumber *> *)allowedSystemItemIdentifiers
+           allowedBundleIdentifiers:(NSArray<NSString *> *)allowedBundleIdentifiers {
     if (!BLNGoldenGateAssessmentRuntimeAvailable()) return 0;
 
     uint64_t token = 0;
@@ -125,19 +127,6 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
         return 0;
     }
 
-    NSSet<NSString *> *concealed = [NSSet setWithArray:concealedBundleIdentifiers];
-    NSMutableOrderedSet<NSString *> *allowedBundles = [NSMutableOrderedSet orderedSet];
-    for (NSRunningApplication *application in NSWorkspace.sharedWorkspace.runningApplications) {
-        NSString *bundleIdentifier = application.bundleIdentifier;
-        if (bundleIdentifier.length && ![concealed containsObject:bundleIdentifier.lowercaseString]) {
-            [allowedBundles addObject:bundleIdentifier];
-        }
-    }
-    [allowedBundles addObject:@"com.mabryventures.Barline"];
-    [allowedBundles addObject:@"com.apple.systemuiserver"];
-    [allowedBundles addObject:@"com.apple.finder"];
-    [allowedBundles addObject:@"com.apple.dock"];
-
     id configurationAllocation = ((id (*)(id, SEL))objc_msgSend)(
         configurationClass, @selector(alloc)
     );
@@ -145,7 +134,7 @@ static BOOL BLNGoldenGateAssessmentRuntimeAvailable(void) {
         configurationAllocation,
         configurationInitializer,
         allowedSystemItemIdentifiers,
-        allowedBundles.array
+        allowedBundleIdentifiers
     );
     if (!configuration) {
         [self abortToken:token];
@@ -288,11 +277,13 @@ void *BLNGoldenGateAssessmentCreate(void) {
 uint64_t BLNGoldenGateAssessmentBegin(
     void *opaqueController,
     CFArrayRef concealedBundleIdentifiers,
-    CFArrayRef allowedSystemItemIdentifiers
+    CFArrayRef allowedSystemItemIdentifiers,
+    CFArrayRef allowedBundleIdentifiers
 ) {
     BLNGoldenGateAssessmentController *controller = (__bridge BLNGoldenGateAssessmentController *)opaqueController;
     return [controller beginConcealedBundleIdentifiers:(__bridge NSArray *)concealedBundleIdentifiers
-                          allowedSystemItemIdentifiers:(__bridge NSArray *)allowedSystemItemIdentifiers];
+                          allowedSystemItemIdentifiers:(__bridge NSArray *)allowedSystemItemIdentifiers
+                          allowedBundleIdentifiers:(__bridge NSArray *)allowedBundleIdentifiers];
 }
 
 int32_t BLNGoldenGateAssessmentActivationState(void *opaqueController, uint64_t transactionToken) {

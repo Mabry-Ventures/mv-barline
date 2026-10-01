@@ -181,9 +181,12 @@ final class Listener: @unchecked Sendable {
             case let .configureCursorInBackground(enabled):
                 Bridging.setConnectionProperty(enabled, forKey: "SetsCursorInBackground")
                 return .start
-            case let .configureConcealment(configuration):
+            case let .configureConcealment(configuration, deadlineUptimeNanoseconds: deadline):
                 let result: BarlineMenuService.ServiceResult<BarlineMenuService.EmptyResult>? =
-                    AsyncRequestBridge.run {
+                    runOperation(
+                        deadlineUptimeNanoseconds: deadline,
+                        sessionCancellation: sessionCancellation
+                    ) {
                         do {
                             try await self.backend.configureConcealment(configuration)
                             return .success(BarlineMenuService.EmptyResult())

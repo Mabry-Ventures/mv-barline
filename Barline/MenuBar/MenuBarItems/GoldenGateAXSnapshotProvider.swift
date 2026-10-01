@@ -281,6 +281,8 @@ actor GoldenGateAXSnapshotProvider {
     private var generation: UInt64 = 0
     private var cachedAt: UInt64?
     private var cachedSnapshot: MenuBarSnapshot?
+    private var cachedEnvironment: MenuBarEnvironmentSnapshot?
+    private var cachedDisplayBounds: [MenuBarDisplayID: MenuBarRect] = [:]
     private var rememberedSections = GoldenGateAXSnapshotProvider.loadRememberedSections()
     private var explicitAssignments = GoldenGateAXSnapshotProvider.loadExplicitAssignments()
     private var retainedDescriptors = GoldenGateAXSnapshotProvider.loadRetainedInventory()
@@ -327,10 +329,40 @@ actor GoldenGateAXSnapshotProvider {
     }
 
     private func snapshot(forceRefresh: Bool) async throws -> MenuBarSnapshot {
+        let initialEnvironment = try await serviceConnection.environment()
+        let activeDisplays = activeDisplayIDs()
+        let displayIdentities = activeDisplays.map { displayID in
+            MenuBarDisplayIdentity(
+                runtimeID: stableDisplayID(displayID),
+                hardwareFingerprint: hardwareFingerprint(for: displayID)
+            )
+        }
+        let displayBounds = Dictionary(uniqueKeysWithValues: activeDisplays.map { displayID in
+            let bounds = CGDisplayBounds(displayID)
+            return (stableDisplayID(displayID), MenuBarRect(
+                x: bounds.minX, y: bounds.minY, width: bounds.width, height: bounds.height
+            ))
+        })
+        guard let activeDisplay = initialEnvironment.activeDisplayID,
+              activeDisplays.contains(activeDisplay),
+              initialEnvironment.activeStableDisplayID == stableDisplayID(activeDisplay),
+              initialEnvironment.hasSameValidScene(as: initialEnvironment)
+        else {
+            Self.updateSnapshotDiagnostic(
+                activeDisplayCount: activeDisplays.count,
+                activeScreenAvailable: initialEnvironment.activeDisplayID != nil,
+                activeScreenInDisplayList: initialEnvironment.activeDisplayID.map(activeDisplays.contains) ?? false,
+                snapshotTerminalCode: "active_menu_bar_scene_unavailable"
+            )
+            throw MenuBarBackendError.unavailableCapability("active menu bar scene")
+        }
         let now = DispatchTime.now().uptimeNanoseconds
         if !forceRefresh,
            let cachedAt,
            let cachedSnapshot,
+           let cachedEnvironment,
+           initialEnvironment.hasSameValidScene(as: cachedEnvironment),
+           displayBounds == cachedDisplayBounds,
            MenuBarInventoryCachePolicy.isReusable(
                completedAt: cachedAt,
                now: now,
@@ -348,8 +380,8 @@ actor GoldenGateAXSnapshotProvider {
                 items: cachedSnapshot.items,
                 displayIDs: cachedSnapshot.displayIDs,
                 displayIdentities: cachedSnapshot.displayIdentities,
-                activeSpaceIsValid: cachedSnapshot.activeSpaceIsValid,
-                menuTrackingIsActive: cachedSnapshot.menuTrackingIsActive
+                activeSpaceIsValid: initialEnvironment.activeSpaceIsValid,
+                menuTrackingIsActive: initialEnvironment.menuTrackingIsActive
             )
             self.cachedSnapshot = observed
             return observed
@@ -363,40 +395,27 @@ actor GoldenGateAXSnapshotProvider {
         guard !observations.isEmpty else {
             throw MenuBarBackendError.unavailableCapability("Accessibility menu bar inventory")
         }
-        let activeDisplays = activeDisplayIDs()
-        let displayIdentities = activeDisplays.map { displayID in
-            MenuBarDisplayIdentity(
-                runtimeID: stableDisplayID(displayID),
-                hardwareFingerprint: hardwareFingerprint(for: displayID)
-            )
-        }
-        let activeScreen = NSScreen.screenWithActiveMenuBar
-        let activeScreenInDisplayList = activeScreen.map {
-            activeDisplays.contains($0.displayID)
-        } ?? false
-        guard let activeScreen, activeScreenInDisplayList else {
+        let finalEnvironment = try await serviceConnection.environment()
+        guard initialEnvironment.hasSameValidScene(as: finalEnvironment),
+              activeDisplays == activeDisplayIDs(),
+              MenuBarDisplayOwnershipPolicy.hasStableGeometry(before: displayBounds, after: Dictionary(uniqueKeysWithValues: activeDisplays.map { displayID in
+                  let bounds = CGDisplayBounds(displayID)
+                  return (stableDisplayID(displayID), MenuBarRect(
+                      x: bounds.minX, y: bounds.minY, width: bounds.width, height: bounds.height
+                  ))
+              }))
+        else {
             Self.updateSnapshotDiagnostic(
                 activeDisplayCount: activeDisplays.count,
-                activeScreenAvailable: activeScreen != nil,
-                activeScreenInDisplayList: activeScreenInDisplayList,
-                snapshotTerminalCode: "active_menu_bar_display_unavailable"
+                activeScreenAvailable: finalEnvironment.activeDisplayID != nil,
+                activeScreenInDisplayList: finalEnvironment.activeDisplayID.map(activeDisplays.contains) ?? false,
+                snapshotTerminalCode: "menu_bar_scene_changed_during_inventory"
             )
-            throw MenuBarBackendError.unavailableCapability("active menu bar display")
+            throw MenuBarBackendError.unavailableCapability("stable menu bar scene")
         }
         generation &+= 1
-        let activeBounds = CGDisplayBounds(activeScreen.displayID)
         let signingIdentifier = Bundle.main.bundleIdentifier
             ?? "com.mabryventures.Barline"
-        let hiddenControlUsesLiveGeometry = observations.contains { observation in
-            observation.bundleIdentifier.caseInsensitiveCompare(signingIdentifier) == .orderedSame &&
-                observation.stableTitle == "Barline.ControlItem.Hidden" &&
-                activeBounds.intersects(CGRect(
-                    x: observation.bounds.x,
-                    y: observation.bounds.y,
-                    width: observation.bounds.width,
-                    height: observation.bounds.height
-                ))
-        }
         let effectiveAssignments = explicitAssignments.merging(
             verificationAssignments ?? [:],
             uniquingKeysWith: { _, proposed in proposed }
@@ -406,15 +425,12 @@ actor GoldenGateAXSnapshotProvider {
             built = try GoldenGateMenuBarSnapshotBuilder.build(
                 observations: observations,
                 displayIdentities: displayIdentities,
-                activeDisplayID: stableDisplayID(activeScreen.displayID),
-                activeDisplayBounds: MenuBarRect(
-                    x: activeBounds.minX,
-                    y: activeBounds.minY,
-                    width: activeBounds.width,
-                    height: activeBounds.height
-                ),
+                activeDisplayID: stableDisplayID(activeDisplay),
+                displayBounds: displayBounds,
+                activeSpaceIsValid: finalEnvironment.activeSpaceIsValid,
+                menuTrackingIsActive: initialEnvironment.menuTrackingIsActive || finalEnvironment.menuTrackingIsActive,
                 appSigningIdentifier: signingIdentifier,
-                rememberedSections: hiddenControlUsesLiveGeometry ? [:] : rememberedSections,
+                rememberedSections: rememberedSections,
                 assignedSections: effectiveAssignments.mapValues(\.section),
                 generation: generation
             )
@@ -446,7 +462,7 @@ actor GoldenGateAXSnapshotProvider {
         let canonicalization = canonicalizingUnsupportedConcealment(in: result)
         result = canonicalization.snapshot
         result = applyingNativeArrangementCapabilities(to: result)
-        if hiddenControlUsesLiveGeometry, explicitAssignments.isEmpty {
+        if explicitAssignments.isEmpty {
             rememberSections(from: result)
         }
         if verificationAssignments == nil {
@@ -471,6 +487,8 @@ actor GoldenGateAXSnapshotProvider {
         // the snapshot's capturedAt still describes the observation itself.
         cachedAt = DispatchTime.now().uptimeNanoseconds
         cachedSnapshot = result
+        cachedEnvironment = finalEnvironment
+        cachedDisplayBounds = displayBounds
         Self.updateSnapshotDiagnostic(
             activeDisplayCount: activeDisplays.count,
             activeScreenAvailable: true,
@@ -485,12 +503,18 @@ actor GoldenGateAXSnapshotProvider {
 
     func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {
         let before = try await snapshot(forceRefresh: true)
+        guard before.activeSpaceIsValid, !before.menuTrackingIsActive else {
+            throw MenuBarBackendError.mutationNotStarted
+        }
         guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
             throw MenuBarBackendError.staleItem(operation.itemID)
         }
         guard !source.isBarlineControlItem else {
             throw MenuBarBackendError.mutationNotStarted
         }
+        guard MenuBarDisplayOwnershipPolicy.permitsLogicalMove(
+            sourceDisplayID: source.displayID, destinationDisplayID: operation.destinationDisplayID
+        ) else { throw MenuBarBackendError.mutationNotStarted }
 
         if source.section != operation.section {
             return try await applyVisibilityAssignment(operation, to: before)
@@ -737,7 +761,7 @@ actor GoldenGateAXSnapshotProvider {
         try await serviceConnection.configureConcealment(configuration)
         guard commitPersistence(persistence) else {
             do {
-                try await serviceConnection.configureConcealment(previousConfiguration)
+                try await serviceConnection.restoreConcealmentAfterRejectedPersistence(previousConfiguration)
             } catch {
                 throw MenuBarBackendError.mutationRecoveryFailed
             }

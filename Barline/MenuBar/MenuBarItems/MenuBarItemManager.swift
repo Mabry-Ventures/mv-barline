@@ -35,6 +35,7 @@ final class MenuBarItemManager: ObservableObject {
         isActivatingItem || isRestoringItems || !visibleInterfaceTasks.isEmpty ||
             temporarilyShownItemContexts.contains { $0.revealObservation != nil }
     }
+
     private let goldenGateConcealmentSyncDebouncer = GoldenGateConcealmentSyncDebouncer()
 
     deinit {
@@ -1092,6 +1093,7 @@ extension MenuBarItemManager {
         interactionID: UUID? = nil
     ) async throws {
         if recordsHistory {
+            appState?.profileManager.manualArrangementWillChange()
             appState?.contextualRules.pauseForManualChange()
         }
         guard appState?.permissions.accessibility.hasPermission == true else {
@@ -1154,6 +1156,7 @@ extension MenuBarItemManager {
         to section: MenuBarSection.Name,
         index: Int
     ) async throws {
+        appState?.profileManager.manualArrangementWillChange()
         appState?.contextualRules.pauseForManualChange()
         await goldenGateConcealmentSyncDebouncer.cancelAndWait()
         guard let appState,

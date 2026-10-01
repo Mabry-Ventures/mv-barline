@@ -98,7 +98,9 @@ public enum GoldenGateMenuBarSnapshotBuilder {
         observations: [GoldenGateMenuBarObservation],
         displayIdentities: [MenuBarDisplayIdentity],
         activeDisplayID: MenuBarDisplayID,
-        activeDisplayBounds: MenuBarRect,
+        displayBounds: [MenuBarDisplayID: MenuBarRect],
+        activeSpaceIsValid: Bool,
+        menuTrackingIsActive: Bool,
         appSigningIdentifier: String,
         rememberedSections: [MenuBarItemID: MenuBarSection] = [:],
         assignedSections: [MenuBarItemID: MenuBarSection] = [:],
@@ -106,7 +108,7 @@ public enum GoldenGateMenuBarSnapshotBuilder {
         capturedAt: Date = Date()
     ) throws -> MenuBarSnapshot {
         let displayIDs = Set(displayIdentities.map(\.runtimeID))
-        guard displayIDs.contains(activeDisplayID) else {
+        guard displayIDs.contains(activeDisplayID), Set(displayBounds.keys) == displayIDs else {
             throw MenuBarBackendError.unavailableCapability("active menu bar display")
         }
 
@@ -124,11 +126,14 @@ public enum GoldenGateMenuBarSnapshotBuilder {
                 namespace: observation.bundleIdentifier,
                 title: observation.stableTitle
             )
+            let ownerDisplay = MenuBarDisplayOwnershipPolicy.resolve(
+                itemBounds: observation.bounds, displays: displayBounds, membershipDisplayIDs: nil
+            )
             return MenuBarItemDescriptor(
                 id: itemID,
                 section: .visible,
                 order: order,
-                displayID: activeDisplayID,
+                displayID: ownerDisplay,
                 isSystemItem: ownership == .system,
                 sourceOwnership: ownership,
                 isBarlineControlItem: isControlItem,
@@ -140,7 +145,10 @@ public enum GoldenGateMenuBarSnapshotBuilder {
                 ownerProcessIdentifier: observation.ownerProcessIdentifier,
                 sourceProcessIdentifier: observation.ownerProcessIdentifier,
                 bounds: observation.bounds,
-                isOnScreen: intersects(activeDisplayBounds, observation.bounds),
+                isOnScreen: ownerDisplay != nil && MenuBarVisibilityPolicy.isClickable(
+                    reportedVisible: true, itemBounds: observation.bounds,
+                    displayBounds: Array(displayBounds.values)
+                ),
                 isMovable: false,
                 canBeHidden: semantics.canBeHidden,
                 isBentoBox: semantics.isBentoBox,
@@ -149,13 +157,10 @@ public enum GoldenGateMenuBarSnapshotBuilder {
             )
         }
 
-        guard let hiddenControl = preliminary.first(where: {
+        guard preliminary.contains(where: {
             $0.isBarlineControlItem && $0.title == "Barline.ControlItem.Hidden"
         }) else {
             throw MenuBarBackendError.unavailableCapability("Barline section controls")
-        }
-        let alwaysHiddenControl = preliminary.first {
-            $0.isBarlineControlItem && $0.title == "Barline.ControlItem.AlwaysHidden"
         }
         let descriptors = preliminary.map { descriptor in
             let section: MenuBarSection
@@ -169,13 +174,24 @@ public enum GoldenGateMenuBarSnapshotBuilder {
                 if let assigned = assignedSections[descriptor.id] {
                     return descriptor.replacingSection(assigned)
                 }
-                if let remembered = rememberedSections[descriptor.id] {
-                    return descriptor.replacingSection(remembered)
+                let sameDisplayControls = preliminary.filter {
+                    descriptor.displayID != nil && $0.displayID == descriptor.displayID &&
+                        $0.isOnScreen && $0.isBarlineControlItem
+                }
+                let hiddenControls = sameDisplayControls.filter { $0.title == "Barline.ControlItem.Hidden" }
+                let alwaysHiddenControls = sameDisplayControls.filter { $0.title == "Barline.ControlItem.AlwaysHidden" }
+                guard hiddenControls.count == 1, alwaysHiddenControls.count <= 1,
+                      let hiddenControl = hiddenControls.first
+                else {
+                    if let remembered = rememberedSections[descriptor.id] {
+                        return descriptor.replacingSection(remembered)
+                    }
+                    return descriptor.replacing(section: .visible, isMovable: false, canBeHidden: false)
                 }
                 guard let classified = MenuBarDividerSectionClassifier.classify(
                     itemBounds: descriptor.bounds,
                     hiddenControlBounds: hiddenControl.bounds,
-                    alwaysHiddenControlBounds: alwaysHiddenControl?.bounds
+                    alwaysHiddenControlBounds: alwaysHiddenControls.first?.bounds
                 ) else {
                     // A third-party status item can publish a frame that spans
                     // Barline's divider attachment seam. Fail closed for that
@@ -202,8 +218,8 @@ public enum GoldenGateMenuBarSnapshotBuilder {
             items: descriptors.map { $0.replacing(isMovable: false) },
             displayIDs: displayIDs,
             displayIdentities: displayIdentities,
-            activeSpaceIsValid: !displayIDs.isEmpty,
-            menuTrackingIsActive: false
+            activeSpaceIsValid: activeSpaceIsValid,
+            menuTrackingIsActive: menuTrackingIsActive
         )
     }
 
@@ -243,11 +259,6 @@ public enum GoldenGateMenuBarSnapshotBuilder {
             return observation.localizedApplicationName ?? observation.displayTitle
         }
         return observation.displayTitle
-    }
-
-    private static func intersects(_ lhs: MenuBarRect, _ rhs: MenuBarRect) -> Bool {
-        lhs.x < rhs.x + rhs.width && rhs.x < lhs.x + lhs.width &&
-            lhs.y < rhs.y + rhs.height && rhs.y < lhs.y + lhs.height
     }
 }
 

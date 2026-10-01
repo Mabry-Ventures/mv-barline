@@ -169,17 +169,47 @@ public struct MenuBarEnvironmentSnapshot: Codable, Equatable, Sendable {
     public let activeStableDisplayID: MenuBarDisplayID?
     public let activeSpaceToken: Int
     public let activeSpaceIsFullscreen: Bool
+    public let activeSpaceIsValid: Bool
+    public let menuTrackingIsActive: Bool
 
     public init(
         activeDisplayID: UInt32?,
         activeStableDisplayID: MenuBarDisplayID? = nil,
         activeSpaceToken: Int,
-        activeSpaceIsFullscreen: Bool
+        activeSpaceIsFullscreen: Bool,
+        activeSpaceIsValid: Bool? = nil,
+        menuTrackingIsActive: Bool = true
     ) {
         self.activeDisplayID = activeDisplayID
         self.activeStableDisplayID = activeStableDisplayID
         self.activeSpaceToken = activeSpaceToken
         self.activeSpaceIsFullscreen = activeSpaceIsFullscreen
+        self.activeSpaceIsValid = activeSpaceIsValid ?? (activeSpaceToken > 0)
+        self.menuTrackingIsActive = menuTrackingIsActive
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case activeDisplayID, activeStableDisplayID, activeSpaceToken, activeSpaceIsFullscreen
+        case activeSpaceIsValid, menuTrackingIsActive
+    }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        activeDisplayID = try values.decodeIfPresent(UInt32.self, forKey: .activeDisplayID)
+        activeStableDisplayID = try values.decodeIfPresent(MenuBarDisplayID.self, forKey: .activeStableDisplayID)
+        activeSpaceToken = try values.decode(Int.self, forKey: .activeSpaceToken)
+        activeSpaceIsFullscreen = try values.decode(Bool.self, forKey: .activeSpaceIsFullscreen)
+        // Legacy peers did not observe these safety conditions. Missing data
+        // must never be interpreted as permission to mutate the native scene.
+        activeSpaceIsValid = try values.decodeIfPresent(Bool.self, forKey: .activeSpaceIsValid) ?? false
+        menuTrackingIsActive = try values.decodeIfPresent(Bool.self, forKey: .menuTrackingIsActive) ?? true
+    }
+
+    public func hasSameValidScene(as other: Self) -> Bool {
+        activeSpaceIsValid && other.activeSpaceIsValid && activeSpaceToken > 0 &&
+            activeDisplayID != nil && activeStableDisplayID != nil &&
+            activeDisplayID == other.activeDisplayID && activeStableDisplayID == other.activeStableDisplayID &&
+            activeSpaceToken == other.activeSpaceToken
     }
 }
 

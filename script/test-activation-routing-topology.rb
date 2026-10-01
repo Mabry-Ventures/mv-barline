@@ -100,8 +100,10 @@ unless concealment.include?('BLNGoldenGateAssessmentCreate()') &&
   abort('Golden Gate concealment bridge is not compile-time linked')
 end
 
-unless concealment.match?(/if appliedResolution == resolved \{\s*return\s*\}/m)
-  abort('Golden Gate concealment must preserve an unchanged committed assertion')
+unless concealment.match?(/if appliedNativeState == nativeState \{\s*return\s*\}/m) &&
+       concealment.match?(/GoldenGateNativeConcealmentState\(.*?runningBundleIdentifiers:/m) &&
+       concealment.match?(/BLNGoldenGateAssessmentCommit\(.*?appliedNativeState = nativeState/m)
+  abort('Golden Gate concealment must preserve exactly unchanged committed native inputs, including the running-app allowlist')
 end
 
 unless shelf.match?(/if #available\(macOS 27\.0, \*\) \{\s*orderFrontRegardless\(\)\s*\} else \{\s*orderFront\(nil\)\s*\}/m)

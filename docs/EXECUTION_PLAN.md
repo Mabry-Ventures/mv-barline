@@ -1,5 +1,19 @@
 # Barline execution plan
 
+## Build 145 recovery hardening — September 30, 2026
+
+The isolated takeover worktree now contains the next 1.0.66 qualification
+candidate, build 145. It closes verified request-epoch, startup/replay, stale
+cleanup, native-state deduplication, display/Space validation, modifier and
+profile reconnect lifecycle defects with deterministic regressions. The old
+build 144 signed and installed results are historical evidence only.
+
+The production decision remains **HOLD** until the exact frozen build passes
+signing/notarization, new installed macOS 27 journeys, independent clock
+observation, lifecycle/upgrade checks and an actual macOS 26 runtime lane.
+Both currently available Macs run macOS 27.0.1. See
+[the build 145 qualification record](MACOS_27_BUILD_145_READINESS.md).
+
 ## Codex macOS 27 takeover — September 30, 2026
 
 The Claude clock/concealment work is being hardened in an isolated worktree;

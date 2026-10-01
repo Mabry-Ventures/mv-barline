@@ -334,7 +334,13 @@ extension HIDEventManager {
         let appKitLocation = click.unflippedLocation
         let hitWindowAtMouseDown = NSWindow.windowNumber(at: appKitLocation, belowWindowWithWindowNumber: 0)
         guard hitWindowAtMouseDown > 0 else { return }
-        let clickModifiers = event.modifierFlags
+        let modifiers = event.modifierFlags
+        guard let clickAction = MenuBarClickArbitrationPolicy.emptySpaceAction(
+            control: modifiers.contains(.control),
+            option: modifiers.contains(.option),
+            command: modifiers.contains(.command),
+            shift: modifiers.contains(.shift)
+        ) else { return }
         let requestSequence = mouseDownSequence
         let timestamp = event.timestamp
         let presentationLease = shelf.dismissalLease
@@ -354,7 +360,7 @@ extension HIDEventManager {
                       hitWindowAtCommit: NSWindow.windowNumber(at: appKitLocation, belowWindowWithWindowNumber: 0)
                   )
             else { return }
-            if clickModifiers == .control {
+            if clickAction == .secondaryContextMenu {
                 handleSecondaryContextMenu(appState: appState, screen: screen)
                 return
             }
@@ -362,7 +368,7 @@ extension HIDEventManager {
             let targetSection: MenuBarSection
 
             if
-                clickModifiers == .option,
+                clickAction == .alwaysHidden,
                 let alwaysHiddenSection = appState.menuBarManager.section(withName: .alwaysHidden),
                 alwaysHiddenSection.isEnabled
             {
@@ -508,6 +514,7 @@ extension HIDEventManager {
         }
 
         isDraggingMenuBarItem = true
+        appState.profileManager.manualArrangementWillChange()
 
         if appState.settings.advanced.showAllSectionsOnUserDrag {
             for section in appState.menuBarManager.sections {

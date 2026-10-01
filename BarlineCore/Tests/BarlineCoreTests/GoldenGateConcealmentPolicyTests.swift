@@ -2,6 +2,42 @@
 import Testing
 
 struct GoldenGateConcealmentPolicyTests {
+    @Test("Native deduplication includes newly running allowed apps")
+    func runningAppAllowlistChanges() {
+        let resolution = GoldenGateResolvedConcealment(
+            concealedBundleIdentifiers: ["com.example.hidden"],
+            allowedSystemItemIdentifiers: GoldenGateConcealmentPolicy.allSystemItemIdentifiers
+        )
+        let first = GoldenGateNativeConcealmentState(
+            resolution: resolution, runningBundleIdentifiers: ["com.example.visible", "com.example.hidden"]
+        )
+        let reordered = GoldenGateNativeConcealmentState(
+            resolution: resolution,
+            runningBundleIdentifiers: ["com.example.hidden", "com.example.visible", "com.example.visible"]
+        )
+        let launched = GoldenGateNativeConcealmentState(
+            resolution: resolution,
+            runningBundleIdentifiers: ["com.example.visible", "com.example.new", "com.example.hidden"]
+        )
+        #expect(first == reordered)
+        #expect(first != launched)
+        #expect(launched.allowedBundleIdentifiers.contains("com.example.new"))
+        #expect(!launched.allowedBundleIdentifiers.contains("com.example.hidden"))
+    }
+
+    @Test("App churn does not change the all-visible native state")
+    func allVisibleIgnoresRunningAppChanges() {
+        let resolution = GoldenGateResolvedConcealment(
+            concealedBundleIdentifiers: [],
+            allowedSystemItemIdentifiers: GoldenGateConcealmentPolicy.allSystemItemIdentifiers
+        )
+        #expect(GoldenGateNativeConcealmentState(
+            resolution: resolution, runningBundleIdentifiers: ["com.example.first"]
+        ) == GoldenGateNativeConcealmentState(
+            resolution: resolution, runningBundleIdentifiers: ["com.example.second"]
+        ))
+    }
+
     @Test("Canonicalization repairs unsupported legacy Apple concealment")
     func canonicalizesUnknownAppleItemsVisible() {
         let focus = item(

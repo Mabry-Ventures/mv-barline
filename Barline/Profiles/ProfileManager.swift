@@ -95,6 +95,18 @@ final class ProfileManager: ObservableObject {
     private var needsBridgeCommandRescan = false
     private var workspaceRevision: UInt64 = 0
     private var isApplyingWorkspaceSettings = false
+    private struct DisplayReconnectIntent {
+        let profile: BarlineProfile
+        let presentation: ResolvedProfilePresentation
+        let workspaceRevision: UInt64
+        let authorityToken: UUID
+        let activationRequests: [ProfileActivationSource: ProfileActivationRequest]
+        var mutationGeneration: UInt64?
+    }
+
+    private let displayReconnectRetry = ProfileDisplayReconnectRetry()
+    private var displayReconnectIntent: DisplayReconnectIntent?
+    private var reconnectAuthority = ProfileReconnectAuthority()
 
     init(
         fileManager: FileManager = .default,
@@ -1251,6 +1263,7 @@ final class ProfileManager: ObservableObject {
             .sink { [weak self] in
                 self?.workspaceRevision &+= 1
                 if self?.isApplyingWorkspaceSettings == false {
+                    self?.cancelDisplayReconciliation()
                     self?.appState?.contextualRules.pauseForManualChange()
                 }
             }
@@ -1267,42 +1280,114 @@ final class ProfileManager: ObservableObject {
 
         NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification)
             .sink { [weak self] _ in
-                Task { @MainActor [weak self] in
-                    await self?.reconcileDisplayConnections()
-                }
+                self?.scheduleDisplayReconciliation()
             }
             .store(in: &cancellables)
     }
 
     private func reconcileDisplayConnections() async {
+        scheduleDisplayReconciliation()
+        await displayReconnectRetry.waitUntilFinished()
+    }
+
+    private func cancelDisplayReconciliation() {
+        reconnectAuthority.revoke(activeProfileAuthorityToken(), isPublished: activeProfileID != nil)
+        reconnectAuthority.revoke(displayReconnectIntent?.authorityToken)
+        displayReconnectRetry.cancel()
+        displayReconnectIntent = nil
+    }
+
+    func manualArrangementWillChange() {
+        cancelDisplayReconciliation()
+    }
+
+    private func scheduleDisplayReconciliation() {
+        guard !displayReconnectRetry.isScheduled else { return }
+        if let activeProfileID, let activePresentation,
+           case .displayOverride = activePresentation.source,
+           let profile = profiles.first(where: { $0.id == activeProfileID }),
+           let authorityToken = activeProfileAuthorityToken(),
+           reconnectAuthority.permits(authorityToken)
+        {
+            displayReconnectIntent = DisplayReconnectIntent(
+                profile: profile,
+                presentation: activePresentation,
+                workspaceRevision: workspaceRevision,
+                authorityToken: authorityToken,
+                activationRequests: activationRequests
+            )
+        }
+        displayReconnectRetry.schedule(
+            attempt: { [weak self] ticket in
+                await self?.reconcileDisplayConnections(ticket: ticket) ?? .finished
+            },
+            finished: { [weak self] _ in self?.displayReconnectIntent = nil }
+        )
+    }
+
+    private func reconcileDisplayConnections(ticket: UInt64) async -> ProfileDisplayReconnectRetry.Outcome {
         await profileOperationSemaphore.wait()
         defer { profileOperationSemaphore.signal() }
-        guard let appState else { return }
+        guard let appState, displayReconnectRetry.isCurrent(ticket), !Task.isCancelled else { return .finished }
+        var activationClaimed = false
         do {
-            let snapshot = try await appState.compatibilityCoordinator.refresh()
+            let initialMutationGeneration = await appState.compatibilityCoordinator.mutationGeneration
+            guard displayReconnectRetry.isCurrent(ticket), !Task.isCancelled else { return .finished }
+            if displayReconnectIntent?.mutationGeneration == nil {
+                displayReconnectIntent?.mutationGeneration = initialMutationGeneration
+            }
+            let snapshot = try await appState.compatibilityCoordinator.refreshOnce()
+            let mutationGeneration = await appState.compatibilityCoordinator.mutationGeneration
+            guard displayReconnectRetry.isCurrent(ticket), !Task.isCancelled else { return .finished }
             var reconciled = profilesReconcilingDisplayAliases(
                 after: snapshot,
                 activeProfileID: activeProfileID
             )
             let coordinatorProfileID = await appState.compatibilityCoordinator.activeProfileID
-            if let activeProfileID,
-               coordinatorProfileID == nil,
-               let profile = reconciled.first(where: { $0.id == activeProfileID }),
-               let reconnectDisplayID = reconnectDisplayID(
-                   for: profile,
-                   snapshot: snapshot
-               )
-            {
+            guard displayReconnectRetry.isCurrent(ticket), !Task.isCancelled else { return .finished }
+            if coordinatorProfileID == nil, let intent = displayReconnectIntent {
+                // Passive loss of proven authority must not erase the original
+                // reconnect intent, but it must not remain published as active.
+                activeProfileID = nil
+                activeProfileActivatedAt = nil
+                activePresentation = nil
+                activationRequests.removeAll()
+                setActiveProfileAuthorityToken(nil)
+                guard workspaceRevision == intent.workspaceRevision,
+                      profiles.contains(intent.profile),
+                      mutationGeneration == intent.mutationGeneration,
+                      !appState.itemManager.hasPendingRestorations
+                else { return .finished }
+                guard snapshot.activeSpaceIsValid, !snapshot.menuTrackingIsActive,
+                      let reconnectDisplayID = reconnectDisplayID(
+                          for: intent.profile, presentation: intent.presentation, snapshot: snapshot
+                      )
+                else { return .retryObservation }
+                // Claim exactly one activation. A rollback, preflight failure,
+                // or alias-save failure never authorizes automatic replay.
+                activationClaimed = true
                 let reactivated = try await appState.compatibilityCoordinator.activate(
-                    profile: profile,
+                    profile: intent.profile,
                     on: reconnectDisplayID,
-                    workspaceTransaction: workspaceTransaction()
+                    expectedGeneration: snapshot.generation,
+                    workspaceTransaction: workspaceTransaction(),
+                    admission: { @MainActor [weak self] in
+                        try Task.checkCancellation()
+                        guard let self, displayReconnectRetry.isCurrent(ticket),
+                              profiles.contains(intent.profile)
+                        else { throw MenuBarWorkspaceTransactionError.superseded }
+                    }
                 )
+                guard displayReconnectRetry.isCurrent(ticket) else { return .finished }
+                activeProfileID = intent.profile.id
+                activeProfileActivatedAt = Date()
+                activationRequests = intent.activationRequests
+                setActiveProfileAuthorityToken(intent.authorityToken)
+                persistActiveProfileAuthority(profileID: intent.profile.id, token: intent.authorityToken)
                 reconciled = profilesReconcilingDisplayAliases(
                     after: reactivated,
-                    activeProfileID: activeProfileID
+                    activeProfileID: intent.profile.id
                 )
-                activeProfileActivatedAt = Date()
             } else if activeProfileID != nil, coordinatorProfileID == nil {
                 activeProfileID = nil
                 activeProfileActivatedAt = nil
@@ -1311,6 +1396,7 @@ final class ProfileManager: ObservableObject {
             }
             if reconciled != profiles {
                 try await store.save(reconciled)
+                guard displayReconnectRetry.isCurrent(ticket), !Task.isCancelled else { return .finished }
                 profiles = reconciled
                 alignActivePresentationSource(
                     in: reconciled,
@@ -1319,19 +1405,27 @@ final class ProfileManager: ObservableObject {
                 publishCatalog()
             }
             if activeProfileID != nil {
-                _ = try await synchronizeProfileAuthority(clearsActivationRequests: false)
+                let retained = try await synchronizeProfileAuthority(clearsActivationRequests: false)
+                if retained == nil, !activationClaimed, displayReconnectIntent != nil,
+                   displayReconnectRetry.isCurrent(ticket)
+                {
+                    return .retryObservation
+                }
             }
+            return .finished
         } catch {
             Logger(category: "Profiles").error("Display reconciliation failed")
+            return !activationClaimed && displayReconnectIntent != nil &&
+                displayReconnectRetry.isCurrent(ticket) && !Task.isCancelled ? .retryObservation : .finished
         }
     }
 
     private func reconnectDisplayID(
         for profile: BarlineProfile,
+        presentation: ResolvedProfilePresentation,
         snapshot: MenuBarSnapshot
     ) -> MenuBarDisplayID? {
-        guard let activePresentation,
-              case let .displayOverride(storedID) = activePresentation.source
+        guard case let .displayOverride(storedID) = presentation.source
         else {
             return nil
         }
@@ -1474,6 +1568,9 @@ final class ProfileManager: ObservableObject {
                 if hasProcessed(command.id) {
                     try? await commandInbox.acknowledge(command.id)
                     continue
+                }
+                if command.kind != .openDestination {
+                    cancelDisplayReconciliation()
                 }
                 if command.kind != .openDestination,
                    !appState.permissions.accessibility.hasPermission
@@ -2173,6 +2270,7 @@ final class ProfileManager: ObservableObject {
     }
 
     func clearActiveProfileAuthority(ifMatches expectedProfileID: UUID?) async {
+        cancelDisplayReconciliation()
         await profileOperationSemaphore.wait()
         defer { profileOperationSemaphore.signal() }
         guard let appState else { return }
@@ -2272,6 +2370,8 @@ final class ProfileManager: ObservableObject {
         operation: () async throws -> Value,
         completion: (Value) -> Void
     ) async {
+        // Supersede recovery at request entry, before waiting behind its turn.
+        cancelDisplayReconciliation()
         await profileOperationSemaphore.wait()
         defer { profileOperationSemaphore.signal() }
         isBusy = true

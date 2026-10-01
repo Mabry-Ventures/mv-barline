@@ -8,6 +8,22 @@ import Testing
 
 @Suite("Menu-bar click arbitration")
 struct MenuBarClickArbitrationPolicyTests {
+    @Test("Empty-space routing admits only unambiguous shortcuts", arguments: 0 ..< 16)
+    func emptySpaceModifierRouting(mask: Int) {
+        let action = MenuBarClickArbitrationPolicy.emptySpaceAction(
+            control: mask & 1 != 0,
+            option: mask & 2 != 0,
+            command: mask & 4 != 0,
+            shift: mask & 8 != 0
+        )
+        switch mask {
+        case 0: #expect(action == .hidden)
+        case 1: #expect(action == .secondaryContextMenu)
+        case 2: #expect(action == .alwaysHidden)
+        default: #expect(action == nil)
+        }
+    }
+
     @Test("Only layout separators leave empty-space clicks available")
     func separatorHitTesting() {
         #expect(MenuBarClickArbitrationPolicy.isLayoutSeparator(title: "Barline.ControlItem.Hidden"))

@@ -36,6 +36,33 @@ public struct GoldenGateResolvedConcealment: Equatable, Sendable {
     }
 }
 
+/// The exact inputs committed to the native assertion. Logical assignments
+/// alone are not sufficient: a newly running visible app needs an allowlist
+/// entry even when no saved visibility assignment changed.
+public struct GoldenGateNativeConcealmentState: Equatable, Sendable {
+    public let resolution: GoldenGateResolvedConcealment
+    public let allowedBundleIdentifiers: Set<String>
+
+    public init(resolution: GoldenGateResolvedConcealment, runningBundleIdentifiers: [String]) {
+        self.resolution = resolution
+        guard !resolution.concealedBundleIdentifiers.isEmpty ||
+            resolution.allowedSystemItemIdentifiers != GoldenGateConcealmentPolicy.allSystemItemIdentifiers
+        else {
+            // No assertion is needed in the all-visible state. App churn must
+            // not create needless private-runtime transactions.
+            allowedBundleIdentifiers = []
+            return
+        }
+        let concealed = Set(resolution.concealedBundleIdentifiers.map { $0.lowercased() })
+        allowedBundleIdentifiers = Set(runningBundleIdentifiers.filter {
+            !$0.isEmpty && !concealed.contains($0.lowercased())
+        }).union([
+            "com.mabryventures.Barline", "com.apple.systemuiserver",
+            "com.apple.finder", "com.apple.dock",
+        ])
+    }
+}
+
 /// Maps Barline's stable item identities to macOS 27's native assessment-mode
 /// model. Unknown Apple items and mixed per-app assignments deliberately remain
 /// visible; hiding the wrong item is worse than declining an unsupported hide.

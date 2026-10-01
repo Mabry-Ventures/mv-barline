@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.0.66 (build 145) — qualification candidate, September 30, 2026
 
 ### macOS 27
 
@@ -14,8 +14,27 @@
   from immediately triggering another scan.
 - Short clock and focused-element Accessibility queries no longer leave the
   helper's process-wide messaging timeout changed.
+- Native hiding refreshes when the set of running apps changes, without
+  needlessly rebuilding the same accepted hiding state.
+- Helper recovery restores the last accepted configuration before admitting
+  work. Expired work cannot overwrite a replacement, and failed layout saves
+  no longer leave an unpersisted layout as recovery authority.
+- Inventory reuse now requires the same valid Space and display geometry.
+  Ambiguous display ownership stays unassigned instead of moving the wrong item.
+
+### Both
+
+- Click shortcuts ignore incidental Caps Lock state while still rejecting
+  conflicting modifiers.
+- Display reconnect observation retries are bounded and coalesced. A newer
+  manual arrangement cancels automatic replay, including across later display
+  notifications, without revoking saved authority during startup loading.
+- Timed-out helper reads receive bounded cleanup, and transport worker
+  occupancy is capped even when cancellation does not immediately release a read.
 
 These changes are an internal qualification candidate, not a published release.
+Installed tests from build 144 do not qualify this candidate. Both OS runtime
+lanes and the remaining release gates must pass before publication.
 
 ## 1.0.65 (build 142) — September 27, 2026
 

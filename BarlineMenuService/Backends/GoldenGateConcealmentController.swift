@@ -1,3 +1,4 @@
+import AppKit
 import BarlineCore
 import Foundation
 import OSLog
@@ -13,6 +14,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     )
     private var temporaryRevealLedger = TemporaryRevealLedger()
     private var appliedResolution: GoldenGateResolvedConcealment?
+    private var appliedNativeState: GoldenGateNativeConcealmentState?
     // Access is serialized by transactionGate, including worker admission.
     private var recoveryLease = GoldenGateRecoveryLease()
     private var recoveryTask: Task<Void, Never>?
@@ -106,6 +108,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
                         BLNGoldenGateAssessmentInvalidate(controller)
                     }
                     appliedResolution = nil
+                    appliedNativeState = nil
                 },
                 press: press,
                 restore: { [self] in try await reapplyAfterLift() }
@@ -177,6 +180,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
                 }
                 temporaryRevealLedger = TemporaryRevealLedger()
                 appliedResolution = nil
+                appliedNativeState = nil
                 desiredConfiguration = MenuBarConcealmentConfiguration(visibleItemIDs: [], concealedItemIDs: [])
             }
         }.value
@@ -200,6 +204,13 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             configuration,
             barlineBundleIdentifier: "com.mabryventures.Barline"
         )
+        let runningBundles = await MainActor.run {
+            NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
+        }
+        try Task.checkCancellation()
+        let nativeState = GoldenGateNativeConcealmentState(
+            resolution: resolved, runningBundleIdentifiers: runningBundles
+        )
         let desiredVisibleCount = desiredConfiguration.visibleItemIDs.count
         let desiredHiddenCount = desiredConfiguration.concealedItemIDs.count
         logger.notice(
@@ -211,14 +222,15 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         // Keep the committed assertion when the effective allowlists have not
         // changed; real visibility changes still flow through the transactional
         // activate-then-commit path below.
-        if appliedResolution == resolved {
+        if appliedNativeState == nativeState {
             return
         }
         let bundles = resolved.concealedBundleIdentifiers.sorted() as CFArray
         let systemItems = resolved.allowedSystemItemIdentifiers.sorted().map(NSNumber.init) as CFArray
+        let allowedBundles = nativeState.allowedBundleIdentifiers.sorted() as CFArray
         // Synchronous bridge setup must consume the activation budget too.
         let deadline = ContinuousClock.now.advanced(by: timeout)
-        let transaction = BLNGoldenGateAssessmentBegin(opaqueController, bundles, systemItems)
+        let transaction = BLNGoldenGateAssessmentBegin(opaqueController, bundles, systemItems, allowedBundles)
         guard transaction != 0 else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
         }
@@ -239,6 +251,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
                     }
                     committed = true
                     appliedResolution = resolved
+                    appliedNativeState = nativeState
                     return
                 case -1:
                     throw MenuBarBackendError.operationFailed(
