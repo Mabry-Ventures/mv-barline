@@ -2,29 +2,24 @@
 
 ## Unreleased
 
-- Runtime publisher checks require the exact Apple signing anchor and sealed
-  identity, a live kernel process lifetime and bounded signing metadata. Typed
-  AX extras reads reject late root setup as well as late attribute results.
-  These prerequisites do not yet authorize a platform-presence exception.
+No unreleased changes.
 
-- Authority-reader prerequisites preserve typed Accessibility errors, bounded
-  exact-node identities and children, and cancellation across dispatch hops.
-  Failed, late, duplicate or malformed reads cannot prove a control is absent.
-  This source slice does not yet authorize a macOS 27 Focus exception.
-
-- Native concealment exposes helper-owned, revisioned control acknowledgements.
-  Activation, reveal, Clock restoration and uncertain failures invalidate older
-  scan evidence without pretending to prove native Focus visibility.
-
-- Mutation, saved-layout, rollback, history and restart verification bypass
-  inventory caches. A new generation stamped on cached UI inventory no longer
-  counts as an independent stability observation. Ordinary UI caching remains.
-  This is source hardening, not macOS 27 Focus compatibility or release approval.
-
-## 1.0.66 (build 157) — qualification candidate, October 2, 2026
+## 1.0.66 (build 157) — October 2, 2026
 
 ### macOS 27
 
+- Runtime publisher checks require the exact Apple signing anchor and sealed
+  identity, a live kernel process lifetime and bounded signing metadata. Typed
+  AX extras reads reject late root setup as well as late attribute results.
+- Authority reads preserve typed Accessibility errors, bounded exact-node
+  identities and children, and cancellation across dispatch hops. Failed,
+  late, duplicate or malformed reads cannot prove a control is absent.
+- Native concealment exposes helper-owned, revisioned control acknowledgements.
+  Activation, reveal, Clock restoration and uncertain failures invalidate older
+  scan evidence without pretending to prove native Focus visibility.
+- Mutation, saved-layout, rollback, history and restart verification bypass
+  inventory caches. A new generation stamped on cached UI inventory no longer
+  counts as an independent stability observation. Ordinary UI caching remains.
 - Cancelling a physical item activation never leaves mouse-down held. Once a
   click begins, its matching mouse-up is posted exactly once before returning.
 - Logical visibility assignment remains supported by the app, independently
@@ -115,11 +110,14 @@
 - Timed-out helper reads receive bounded cleanup, and transport worker
   occupancy is capped even when cancellation does not immediately release a read.
 
-These changes are an internal qualification candidate, not a published release.
-Earlier builds' installed tests do not qualify this candidate. Current runtime
-qualification is scoped to CPLCODEX01 on macOS 27 by the owner's direction.
-No fresh macOS 26 runtime qualification is claimed. The remaining release gates
-must pass before publication.
+Published from qualified source `29e82b395d184da46e860d2d26d796f835e7153b`.
+Build 157 passed its local gates and signed installed journeys on one Apple
+Silicon Mac running macOS 27.0.1. No fresh macOS 26 qualification, broad app or
+display matrix, fresh-user onboarding or prolonged sleep/wake soak is claimed.
+See the [public release notes](https://github.com/Mabry-Ventures/mv-barline/releases/tag/v1.0.66)
+for the exact validation scope. The immutable tagged source and packaged feed
+retain qualification-time wording; this publication record does not replace
+the tested binary or its corresponding source archive.
 
 ## 1.0.65 (build 142) — September 27, 2026
 
