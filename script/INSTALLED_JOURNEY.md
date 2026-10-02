@@ -5,15 +5,17 @@
 ## Prepare the stable permission identity
 
 The journey runner must be a signed, stable app identity because macOS grants
-Screen Recording and Accessibility to the responsible app, not to a randomly
-named temporary executable. On the Mac that holds Barline's Developer ID
+Accessibility to the responsible app, not to a randomly named temporary
+executable. Screen Recording is only needed for the optional screenshot
+diagnostic. On the Mac that holds Barline's Developer ID
 signing identity, run `bash script/build-journey-harness.sh`. Copy the resulting
 `.artifacts/runtime/Barline Journey Harness.app` to
 `~/Applications/Barline Journey Harness.app` on the test Mac, preserving any
-existing copy before replacement. Grant that exact app Accessibility and
-Screen Recording in System Settings; the runner deliberately does not prompt.
-The journey script verifies the helper bundle ID and SHA-256 of its embedded
-source before it sends any events.
+existing copy before replacement. Grant that exact app Accessibility in System
+Settings; the runner deliberately does not prompt. If the optional screenshot is
+requested, grant Screen Recording to the harness as well. The journey script
+verifies the helper bundle ID and SHA-256 of its embedded source before it sends
+any events.
 
 ## Prepare the fixture
 
@@ -21,8 +23,9 @@ source before it sends any events.
 2. Use Barline's normal layout editor to place **only the synthetic fixture items** `BF Native`, `BF Popover`, and `BF Delayed` in its hidden section. Preserve all unrelated items. Leave the shelf and fixture menus closed. `BF Unresponsive` is an optional, bounded two-second fixture-only fault injection, not part of the success test.
 3. Confirm exactly one installed signed/notarized candidate is running. The
    harness requires that process's Accessibility access and the stable journey
-   app's Accessibility/Screen Recording access; missing access fails without
-   prompting. Do not grant new access to production automatically.
+   app's Accessibility access; missing access fails without prompting. Screen
+   Recording is checked only when the optional screenshot diagnostic is enabled.
+   Do not grant new access to production automatically.
 
 ## Run
 

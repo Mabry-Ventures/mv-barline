@@ -156,7 +156,11 @@ func sameFrame(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
 var journeyExitCode: Int32 = 0
 do {
     guard AXIsProcessTrusted() else { throw JourneyError.failed("harness_accessibility_required_no_prompt") }
-    guard CGPreflightScreenCaptureAccess() else { throw JourneyError.failed("harness_screen_recording_required_no_prompt") }
+    if environment["BARLINE_JOURNEY_SCREENSHOT"] != nil {
+        guard CGPreflightScreenCaptureAccess() else {
+            throw JourneyError.failed("harness_screen_recording_required_for_screenshot_no_prompt")
+        }
+    }
     let appPID = try Int32(required("BARLINE_EXPECTED_PID")) ?? 0
     let fixturePID = try Int32(required("BARLINE_FIXTURE_PID")) ?? 0
     let bundleID = try required("BARLINE_APP_BUNDLE_IDENTIFIER")
