@@ -9,6 +9,7 @@ shelf = File.read('Barline/MenuBar/BarlineShelf/BarlineShelf.swift')
 helper_backend = File.read('BarlineMenuService/Backends/CompatibilityBackends.swift')
 helper_inventory = File.read('BarlineMenuService/WindowServer/GoldenGateAXInventory.swift')
 helper_client = File.read('BarlineMenuService/WindowServer/WindowServerClient.swift')
+event_delivery = File.read('BarlineMenuService/WindowServer/HelperEventTap.swift')
 concealment = File.read('BarlineMenuService/Backends/GoldenGateConcealmentController.swift')
 assessment_bridge = File.read('BarlineMenuService/GoldenGateAssessmentModeBridge.m')
 golden_gate_provider = File.read('Barline/MenuBar/MenuBarItems/GoldenGateAXSnapshotProvider.swift')
@@ -39,6 +40,14 @@ end
 
 unless backend.match?(/#available\(macOS 27\.0, \*\).*goldenGateProvider\.activate/m)
   abort('Golden Gate activation is not routed through the trusted app provider')
+end
+
+golden_gate_helper = helper_backend.split('actor GoldenGateMenuBarBackend', 2).last
+  .split('actor FallbackMenuBarBackend', 2).first
+unless golden_gate_helper.match?(/canMove: false/) &&
+       golden_gate_provider.match?(/let canMove = canSnapshot && helperCapabilities\?\.canActivate == true &&\s*helperArrangement\?\.visibilityAssignmentGranularity == \.applicationGroupAndKnownSystemItem/) &&
+       !golden_gate_provider.include?('helperCapabilities?.canMove')
+  abort('native helper physical move and app-owned logical assignment capabilities are conflated')
 end
 
 unless manager.match?(/if usesNativeReveal.*?compatibilityCoordinator\.activateItemWithRevealObservation\(/m) &&
@@ -89,6 +98,11 @@ end
 unless helper_backend.match?(/func activate\(_ item: MenuBarItemID.*?client\.activateGoldenGate\(item/m) &&
        helper_client.match?(/func activateGoldenGate\(.*?moved\.post\(tap: \.cghidEventTap\).*?down\.post\(tap: \.cghidEventTap\).*?up\.post\(tap: \.cghidEventTap\)/m)
   abort('Golden Gate activation falls back to the retired per-window item lookup')
+end
+
+unless helper_client.match?(/HelperPhysicalClickPair\.deliver.*?down\.post.*?release:.*?up\.post.*?hold:.*?Task\.sleep/m) &&
+       event_delivery.match?(/enum HelperPhysicalClickPair.*?Task\.checkCancellation\(\).*?press\(\).*?defer \{ release\(\) \}.*?try\? await hold\(\)/m)
+  abort('native physical click cancellation can strand mouse-down or retry a delivered pair')
 end
 
 unless concealment.include?('BLNGoldenGateAssessmentCreate()') &&

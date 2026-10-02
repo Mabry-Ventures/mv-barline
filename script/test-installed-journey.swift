@@ -113,6 +113,108 @@ func bounds(_ row: [String: Any]) -> CGRect? {
     return CGRect(dictionaryRepresentation: value as CFDictionary)
 }
 
+/// Window titles may be privacy-redacted without Screen Recording. Match the
+/// independently observed AX window to its on-screen surface, never a title-only
+/// absence. An unidentified candidate-owned surface still prevents a closed pass.
+func possibleShelfSurfaces(_ records: [[String: Any]], ownerPID: Int32) -> [[String: Any]] {
+    records.filter {
+        let owner = ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value
+        let layer = ($0[kCGWindowLayer as String] as? NSNumber)?.intValue
+        return (owner == nil || owner == ownerPID) && (layer == nil || layer == NSWindow.Level.mainMenu.rawValue + 1)
+    }
+}
+
+func shelfMayBeVisible(_ records: [[String: Any]]?, ownerPID: Int32) -> Bool {
+    guard let records else { return true } // An unreadable census never proves closure.
+    return !possibleShelfSurfaces(records, ownerPID: ownerPID).isEmpty
+}
+
+func shelfSurfaces(_ records: [[String: Any]], ownerPID: Int32) -> [[String: Any]] {
+    records.filter {
+        guard ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == ownerPID,
+              ($0[kCGWindowLayer as String] as? NSNumber)?.intValue == NSWindow.Level.mainMenu.rawValue + 1,
+              ($0[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue == true,
+              let alpha = ($0[kCGWindowAlpha as String] as? NSNumber)?.doubleValue, alpha > 0,
+              let rect = bounds($0), rect.width > 0, rect.height > 0,
+              [rect.minX, rect.minY, rect.width, rect.height].allSatisfy(\.isFinite)
+        else { return false }
+        return true
+    }
+}
+
+func identifiedShelfSurface(_ records: [[String: Any]], ownerPID: Int32, axFrames: [CGRect]) -> [String: Any]? {
+    let surfaces = shelfSurfaces(records, ownerPID: ownerPID)
+    guard possibleShelfSurfaces(records, ownerPID: ownerPID).count == 1,
+          surfaces.count == 1, axFrames.count <= 1, let surface = surfaces.first,
+          let rect = bounds(surface),
+          let number = (surface[kCGWindowNumber as String] as? NSNumber)?.uint32Value, number > 0
+    else { return nil }
+    let title = surface[kCGWindowName as String] as? String
+    if let title, !title.isEmpty, title != "Barline Bar" {
+        return nil
+    }
+    if let axFrame = axFrames.first {
+        guard abs(rect.minX - axFrame.minX) <= 2, abs(rect.minY - axFrame.minY) <= 2,
+              abs(rect.width - axFrame.width) <= 2, abs(rect.height - axFrame.height) <= 2
+        else { return nil }
+        return surface
+    }
+    // Retain named-surface diagnostics if AX publication itself is broken. That
+    // path cannot pass the separately mandatory shelf AX traversal assertion.
+    return title == "Barline Bar" ? surface : nil
+}
+
+if environment["BARLINE_JOURNEY_OBSERVER_SELF_TEST"] == "1" {
+    let rect = CGRect(x: 1358, y: 23, width: 72, height: 32)
+    let row: [String: Any] = [
+        kCGWindowOwnerPID as String: NSNumber(value: 42),
+        kCGWindowLayer as String: NSNumber(value: NSWindow.Level.mainMenu.rawValue + 1),
+        kCGWindowIsOnscreen as String: NSNumber(value: true),
+        kCGWindowAlpha as String: NSNumber(value: 1),
+        kCGWindowNumber as String: NSNumber(value: 7),
+        kCGWindowBounds as String: rect.dictionaryRepresentation,
+    ]
+    func identified(_ rows: [[String: Any]], _ frames: [CGRect] = [rect]) -> Bool {
+        identifiedShelfSurface(rows, ownerPID: 42, axFrames: frames) != nil
+    }
+    precondition(identified([row]))
+    precondition(!identified([row], []))
+    precondition(!identified([row], [rect, rect]))
+    precondition(!identified([row, row]))
+    precondition(!identified([row], [rect.offsetBy(dx: 10, dy: 0)]))
+    precondition(!identified([row], [CGRect(x: 1358, y: 23, width: 72, height: 64)]))
+    precondition(!identified([]))
+    for (key, value) in [
+        (kCGWindowOwnerPID as String, NSNumber(value: 43)),
+        (kCGWindowLayer as String, NSNumber(value: 0)),
+        (kCGWindowIsOnscreen as String, NSNumber(value: false)),
+        (kCGWindowAlpha as String, NSNumber(value: 0)),
+        (kCGWindowNumber as String, NSNumber(value: 0)),
+    ] {
+        var changed = row
+        changed[key] = value
+        precondition(!identified([changed]))
+    }
+    var named = row
+    named[kCGWindowName as String] = "Barline Bar"
+    precondition(identified([named], []))
+    named[kCGWindowName as String] = "Other panel"
+    precondition(!identified([named]))
+    // Unknown, privacy-redacted surfaces must not be called closed.
+    precondition(shelfMayBeVisible([row], ownerPID: 42))
+    precondition(!shelfMayBeVisible([], ownerPID: 42))
+    precondition(shelfMayBeVisible(nil, ownerPID: 42))
+    for key in [kCGWindowAlpha, kCGWindowBounds, kCGWindowIsOnscreen, kCGWindowOwnerPID, kCGWindowLayer] {
+        var incomplete = row
+        incomplete.removeValue(forKey: key as String)
+        precondition(shelfMayBeVisible([incomplete], ownerPID: 42))
+        precondition(!identified([incomplete]))
+        precondition(!identified([row, incomplete]))
+    }
+    print("PASS: installed journey shelf observer rejects missing, ambiguous, stale and foreign surfaces")
+    exit(0)
+}
+
 func click(_ rect: CGRect, right: Bool = false) throws {
     let point = CGPoint(x: rect.midX, y: rect.midY)
     guard let down = CGEvent(mouseEventSource: nil, mouseType: right ? .rightMouseDown : .leftMouseDown,
@@ -312,14 +414,20 @@ do {
         return expected
     }
     func shelfVisible() -> Bool {
-        windows().contains { ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == appPID &&
-            $0[kCGWindowName as String] as? String == "Barline Bar"
+        let records = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        return shelfMayBeVisible(records, ownerPID: appPID)
+    }
+    func shelfRoots() -> [AXUIElement] {
+        (attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? []).filter {
+            var owner: pid_t = 0
+            return AXUIElementGetPid($0, &owner) == .success && owner == appPID &&
+                (attribute($0, kAXRoleAttribute) as? String) == kAXWindowRole &&
+                matches($0, "Barline Bar") && matches($0, "Barline.Bar")
         }
     }
     func shelfRoot() -> AXUIElement? {
-        (attribute(app, kAXWindowsAttribute) as? [AXUIElement] ?? []).first {
-            matches($0, "Barline Bar") || matches($0, "Barline.Bar")
-        }
+        let roots = shelfRoots()
+        return roots.count == 1 ? roots.first : nil
     }
     func shelfRootDiagnostic() -> [String: Any] {
         var value: CFTypeRef?
@@ -337,13 +445,16 @@ do {
         guard let shelf = shelfRoot() else { return nil }
         return find(shelf, named: target, aliases: Array(shelfLabels.dropFirst()))
     }
+    func shelfWindowRecord() -> [String: Any]? {
+        let roots = shelfRoots()
+        let frames = roots.compactMap(frame)
+        guard roots.count <= 1, frames.count == roots.count,
+              let records = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]
+        else { return nil }
+        return identifiedShelfSurface(records, ownerPID: appPID, axFrames: frames)
+    }
     func shelfWindowFrame() -> CGRect? {
-        let shelves = windows().filter {
-            ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == appPID &&
-                ($0[kCGWindowName as String] as? String) == "Barline Bar"
-        }
-        guard shelves.count == 1 else { return nil }
-        return shelves.first.flatMap(bounds)
+        shelfWindowRecord().flatMap(bounds)
     }
     func validatedShelfButton(_ element: AXUIElement) -> AXUIElement? {
         var current = element
@@ -448,12 +559,8 @@ do {
         let output = URL(fileURLWithPath: requestedPath).resolvingSymlinksInPath()
         guard output.path.hasPrefix(permittedRoot.path + "/"), output.pathExtension == "png",
               !FileManager.default.fileExists(atPath: output.path) else { return false }
-        let shelves = windows().filter {
-            ($0[kCGWindowOwnerPID as String] as? NSNumber)?.int32Value == appPID &&
-                ($0[kCGWindowName as String] as? String) == "Barline Bar"
-        }
-        guard shelves.count == 1,
-              let windowNumber = (shelves[0][kCGWindowNumber as String] as? NSNumber)?.uint32Value else { return false }
+        guard let shelf = shelfWindowRecord(),
+              let windowNumber = (shelf[kCGWindowNumber as String] as? NSNumber)?.uint32Value else { return false }
         do {
             try FileManager.default.createDirectory(at: output.deletingLastPathComponent(), withIntermediateDirectories: true)
             let capture = Process()
@@ -556,7 +663,7 @@ do {
         }
     }
     try click(control)
-    try wait("shelf_did_not_open") { shelfVisible() }
+    try wait("shelf_did_not_open") { shelfWindowFrame() != nil }
     guard let observedShelf = shelfWindowFrame(),
           CGWarpMouseCursorPosition(CGPoint(x: observedShelf.midX, y: observedShelf.midY)) == .success
     else {

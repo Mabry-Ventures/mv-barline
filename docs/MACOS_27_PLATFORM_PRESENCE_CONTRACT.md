@@ -1,7 +1,14 @@
 # macOS 27 platform-presence contract
 
-Status: **installed qualification failed at build 154; build 155 repairs the
-verified initial-receipt dependency cycle and requires new qualification**.
+Status: **build 155 resolves initial inventory and passes exploratory installed
+interaction/recovery checks; build 156 requires final candidate qualification**.
+Build 156 adds guaranteed mouse-up on cancellation and corrects the helper/app
+capability boundary. The installed harness uses independent AX/window geometry
+when macOS redacts its CG title; failed observation never proves absence. See
+the current execution-plan checkpoint for exact receipts and remaining gates.
+
+### Initial-receipt failure (repaired in build 155)
+
 The clean build 154 source passed local and Xcode 27 gates and was signed,
 notarized and installed on CPLCODEX01. Its first inventory could not associate
 because the helper had no acknowledged native receipt, while initial
@@ -10,7 +17,9 @@ helper session's empty native state through the real clear transaction before
 returning its first environment. It does not relax presence/receipt association
 or turn failed transitions into new bootstrap opportunities. See the latest
 execution-plan checkpoint for the reproduced failure, regression coverage and
-remaining installed proof. macOS 26 runtime and release approval remain open.
+remaining installed proof. The owner restricted runtime qualification to
+CPLCODEX01; macOS 26 runtime is untested, not a blocker for that scoped candidate.
+Release approval remains separate.
 
 ### Earlier source-integration checkpoint (superseded by the installed result)
 

@@ -337,7 +337,11 @@ actor GoldenGateAXSnapshotProvider {
             let canSnapshot = await (try? snapshot()) != nil
             let helperCapabilities = try? await serviceConnection.capabilities()
             let helperArrangement = helperCapabilities?.arrangement
-            let canMove = canSnapshot && helperCapabilities?.canMove == true
+            // Logical assignment is implemented here, not by the helper's
+            // retired physical move endpoint. Preserve the same native/input
+            // prerequisites without advertising a helper operation that throws.
+            let canMove = canSnapshot && helperCapabilities?.canActivate == true &&
+                helperArrangement?.visibilityAssignmentGranularity == .applicationGroupAndKnownSystemItem
             return MenuBarCapabilities(
                 canSnapshot: canSnapshot,
                 canMove: canMove,

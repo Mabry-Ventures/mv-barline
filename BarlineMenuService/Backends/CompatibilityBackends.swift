@@ -115,7 +115,9 @@ actor GoldenGateMenuBarBackend: MenuBarBackend {
             let canActivate = canSnapshot && canConceal && canSynthesizeInput
             return MenuBarCapabilities(
                 canSnapshot: canSnapshot,
-                canMove: canSnapshot && canConceal && canSynthesizeInput,
+                // The helper owns concealment, not logical layout moves. The
+                // app provider advertises its own implemented move capability.
+                canMove: false,
                 // Golden Gate supports the app's guarded click flow by widening
                 // the native allowlist around activation. It still cannot honor
                 // the public mutation-style `reveal` contract.

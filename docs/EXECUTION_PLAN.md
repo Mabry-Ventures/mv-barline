@@ -1,5 +1,48 @@
 # Barline execution plan
 
+## Installed interaction qualification and final delivery hardening - October 2, 2026
+
+Frozen `2077c14d` (1.0.66 build 155) passed clean fast and full CPLCODEX01
+Xcode 27 gates (828 Core tests), then Developer ID signing, notarization,
+stapling and Gatekeeper. The exact artifact was installed on 27.0.1/26A434.
+Its initial inventory loaded, synthetic group visibility changed in both
+directions, and a saved layout restored the synthetic items to Hidden.
+Only the temporary test layout was removed; preexisting layouts were preserved.
+
+The first installed journey falsely reported an unopened shelf: independent
+AX and WindowServer inspection found the visible panel, while its CG title
+was privacy-redacted. The harness now correlates exact owned AX identity and
+geometry with one on-screen CG surface, rejects ambiguous/incomplete reads,
+never treats an unreadable census as closure, and awaits AX publication.
+Observer self-tests run in the fast gate. Screen Recording remains optional
+unless the screenshot diagnostic is requested. No app permission was reset.
+
+With that signed harness, exploratory build 155 journeys passed native left
+and right click, popover first-use/reuse, exactly-one target action and rehide.
+The exact-candidate performance gate passed 20 cycles at p95 99.9ms, and
+helper interruption preserved the app process. Post-interruption performance
+passed another 20 cycles at p95 103.1ms; a further native right-click journey
+passed. These observations do not transfer to changed source or a new binary.
+
+Final source inspection found a throwing sleep between native mouse-down and
+mouse-up. Build 156 guarantees one release after down, even during cancellation,
+and does not report a completed pair as a retryable helper-local failure.
+Four regressions exercise normal delivery, pre-down cancellation, cancellation
+during hold and hold failure; the 14-test production delivery suite passes.
+Astra approved the repair. The outer request deadline can still be indeterminate,
+so no automatic retry or removal of independent target observation is permitted.
+
+Gemini confirmed the click path and identified a helper capability mismatch.
+The helper now truthfully advertises no physical move endpoint; the app's
+implemented logical assignment derives readiness from the native concealment
+granularity and input capability instead. Both sides change together so hiding
+items is not disabled. The existing 100ms helper settle delay is not removed
+without separate runtime evidence. Build 156 requires fresh clean gates,
+packaging and installed qualification. Public release/feed remain unchanged.
+Runtime scope is CPLCODEX01 only per owner instruction; no macOS 26 runtime
+claim is made. Clock rendering, native Focus transitions, upgrade and final
+resource evidence remain separate installed gates.
+
 ## Installed cold-start qualification and bootstrap repair - October 2, 2026
 
 The frozen `89d82a9b` candidate (1.0.66 build 154) passed clean `fast` and

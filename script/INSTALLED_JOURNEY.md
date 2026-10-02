@@ -17,6 +17,15 @@ requested, grant Screen Recording to the harness as well. The journey script
 verifies the helper bundle ID and SHA-256 of its embedded source before it sends
 any events.
 
+Without Screen Recording, macOS may redact the shelf's WindowServer title.
+The runner correlates its exact app-owned Accessibility window identifier and
+geometry with one independently observed, on-screen WindowServer surface. A
+missing census, ambiguous or incomplete surface never proves that the shelf
+closed. AX publication may lag ordering, so this correlation is awaited within
+the bounded opening deadline. `BARLINE_JOURNEY_OBSERVER_SELF_TEST=1 swift
+script/test-installed-journey.swift` exercises the observer without running an
+app or requesting a permission; the fast gate includes it.
+
 ## Prepare the fixture
 
 1. Build `BarlineFixture` locally. Run `bash script/start-journey-fixture.sh /absolute/BarlineFixture.app /absolute/ignored-artifacts-directory`. It refuses an existing fixture, starts one hidden/background instance with two synthetic items (Native and Popover), and prints the three exact environment assignments for the gate. No credentials or real item metadata enter the receipt. Optional `BARLINE_FIXTURE_JOURNEY_ITEMS=Native,Delayed` selects the delayed-discovery lane; `Native,Unresponsive` selects the bounded fault-injection lane.

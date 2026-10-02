@@ -1,6 +1,24 @@
 import CoreGraphics
 import Foundation
 
+/// Cancellation can prevent a click before its first event, but cannot split
+/// an already-posted down/up pair or report that pair as safe to retry. Delivery
+/// still requires the caller's independent target-interface observation.
+enum HelperPhysicalClickPair {
+    static func deliver(
+        press: () -> Void,
+        release: () -> Void,
+        hold: () async throws -> Void
+    ) async throws {
+        try Task.checkCancellation()
+        press()
+        defer { release() }
+        // The only production hold is a bounded Task.sleep. Its cancellation
+        // shortens the hold; mouse-up must still be posted exactly once.
+        try? await hold()
+    }
+}
+
 /// Restore the source application's routing field only for this delivery's
 /// exact event. Session routing may have replaced the field since posting.
 /// This preserves the compatibility baseline; transport is not an activation

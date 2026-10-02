@@ -21,10 +21,14 @@
   counts as an independent stability observation. Ordinary UI caching remains.
   This is source hardening, not macOS 27 Focus compatibility or release approval.
 
-## 1.0.66 (build 155) — qualification candidate, October 2, 2026
+## 1.0.66 (build 156) — qualification candidate, October 2, 2026
 
 ### macOS 27
 
+- Cancelling a physical item activation never leaves mouse-down held. Once a
+  click begins, its matching mouse-up is posted exactly once before returning.
+- Logical visibility assignment remains supported by the app, independently
+  of the helper's unsupported physical-reordering endpoint.
 - Cold startup establishes a verified, all-visible native helper state before
   the first inventory scan, removing a dependency loop that prevented menu bar
   items from loading. Failed initialization stays unverified until recovery;

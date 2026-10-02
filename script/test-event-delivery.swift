@@ -16,7 +16,74 @@ private enum EventDeliveryTests {
         try await releaseWithoutIntermediateTransition()
         try await releaseTransportFailurePropagates()
         moveRequiresRequestedPhysicalDestination()
-        print("PASS: production event delivery synchronization and routing (10 tests; no taps or posted events)")
+        try await physicalClickCompletesPair()
+        await physicalClickCancellationBeforeDown()
+        try await physicalClickCancellationAfterDown()
+        try await physicalClickHoldFailureStillReleases()
+        print("PASS: production event delivery synchronization and routing (14 tests; no taps or posted events)")
+    }
+
+    private static func physicalClickCompletesPair() async throws {
+        let events = LockedLog()
+        try await HelperPhysicalClickPair.deliver {
+            events.append("down")
+        } release: {
+            events.append("up")
+        } hold: {
+            events.append("hold")
+        }
+        require(events.values == ["down", "hold", "up"], "ordinary pair posts down then one up")
+    }
+
+    private static func physicalClickCancellationBeforeDown() async {
+        let events = LockedLog()
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            try await HelperPhysicalClickPair.deliver {
+                events.append("down")
+            } release: {
+                events.append("up")
+            } hold: {
+                events.append("hold")
+            }
+        }
+        do {
+            try await task.value
+            require(false, "pre-delivery cancellation must propagate")
+        } catch is CancellationError {
+            require(events.values.isEmpty, "cancelled before down posts no input")
+        } catch {
+            require(false, "unexpected pre-delivery error")
+        }
+    }
+
+    private static func physicalClickCancellationAfterDown() async throws {
+        let events = LockedLog()
+        let task = Task {
+            try await HelperPhysicalClickPair.deliver {
+                events.append("down")
+            } release: {
+                events.append("up")
+            } hold: {
+                withUnsafeCurrentTask { $0?.cancel() }
+                try Task.checkCancellation()
+            }
+        }
+        try await task.value
+        require(events.values == ["down", "up"], "post-down cancellation releases once without retryable failure")
+    }
+
+    private static func physicalClickHoldFailureStillReleases() async throws {
+        enum HoldFailure: Error { case injected }
+        let events = LockedLog()
+        try await HelperPhysicalClickPair.deliver {
+            events.append("down")
+        } release: {
+            events.append("up")
+        } hold: {
+            throw HoldFailure.injected
+        }
+        require(events.values == ["down", "up"], "no hold failure strands the posted mouse-down")
     }
 
     private static func matchedClickRestoresTargetWithoutChangingPayload() {

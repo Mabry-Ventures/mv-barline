@@ -615,10 +615,13 @@ final class WindowServerClient: @unchecked Sendable {
                 "Menu bar item changed before activation"
             )
         }
-        down.post(tap: .cghidEventTap)
-        try await Task.sleep(for: .milliseconds(80))
-        up.post(tap: .cghidEventTap)
-        try Task.checkCancellation()
+        try await HelperPhysicalClickPair.deliver {
+            down.post(tap: .cghidEventTap)
+        } release: {
+            up.post(tap: .cghidEventTap)
+        } hold: {
+            try await Task.sleep(for: .milliseconds(80))
+        }
     }
 
     func capture(_ itemIDs: [MenuBarItemID]) throws -> [MenuBarCapturedImage] {
