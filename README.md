@@ -8,16 +8,18 @@ No account, subscription, advertising, or paid feature tier.
 
 ## Download
 
-[Download Barline 1.0.66](https://github.com/Mabry-Ventures/mv-barline/releases/download/v1.0.66/Barline-1.0.66.dmg)
+[Download Barline 1.0.65](https://github.com/Mabry-Ventures/mv-barline/releases/download/v1.0.65/Barline-1.0.65.dmg)
 for Apple Silicon Macs running macOS 26 or later. Open the disk image and drag
 Barline onto the Applications shortcut. The app is signed with Developer ID,
 notarized by Apple, and updates itself through Sparkle. The
-[release page](https://github.com/Mabry-Ventures/mv-barline/releases/tag/v1.0.66)
+[release page](https://github.com/Mabry-Ventures/mv-barline/releases/tag/v1.0.65)
 has the release notes, `SHA256SUMS` checksums, and the complete corresponding
 source.
 
-Version 1.0.66 was tested on macOS 27.0.1. See its release notes for the exact
-validation scope and remaining coverage limits; macOS 26 was not retested.
+The 1.0.66 general rollout was withdrawn: its macOS 27 discovery path requires
+exactly macOS 27.0.1 build 26A434 and rejects other macOS 27 builds. It remains
+a limited prerelease, not the recommended download or automatic update.
+See [the rollout status](docs/KNOWN_LIMITATIONS.md).
 
 Do not download an Ice binary expecting it to be Barline. Do not install an
 unofficial "Barline" build, and do not disable macOS security protections to

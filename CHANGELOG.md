@@ -2,15 +2,25 @@
 
 ## Unreleased
 
+No unreleased changes.
+
+## 1.0.66 (build 157) — limited prerelease, October 2, 2026
+
+General rollout withdrawn. The macOS 27 inventory path requires exactly
+27.0.1 build 26A434 and rejects other macOS 27 builds. The website and automatic
+update feed again serve 1.0.65. Existing 1.0.66 installs are not automatically
+downgraded. Published app and source archives remain unchanged for traceability.
+See [known limitations](docs/KNOWN_LIMITATIONS.md).
+
+### macOS 27
+
 - Runtime publisher checks require the exact Apple signing anchor and sealed
   identity, a live kernel process lifetime and bounded signing metadata. Typed
   AX extras reads reject late root setup as well as late attribute results.
-  These prerequisites do not yet authorize a platform-presence exception.
 
 - Authority-reader prerequisites preserve typed Accessibility errors, bounded
   exact-node identities and children, and cancellation across dispatch hops.
   Failed, late, duplicate or malformed reads cannot prove a control is absent.
-  This source slice does not yet authorize a macOS 27 Focus exception.
 
 - Native concealment exposes helper-owned, revisioned control acknowledgements.
   Activation, reveal, Clock restoration and uncertain failures invalidate older
@@ -19,11 +29,6 @@
 - Mutation, saved-layout, rollback, history and restart verification bypass
   inventory caches. A new generation stamped on cached UI inventory no longer
   counts as an independent stability observation. Ordinary UI caching remains.
-  This is source hardening, not macOS 27 Focus compatibility or release approval.
-
-## 1.0.66 (build 157) — qualification candidate, October 2, 2026
-
-### macOS 27
 
 - Cancelling a physical item activation never leaves mouse-down held. Once a
   click begins, its matching mouse-up is posted exactly once before returning.
@@ -115,11 +120,12 @@
 - Timed-out helper reads receive bounded cleanup, and transport worker
   occupancy is capped even when cancellation does not immediately release a read.
 
-These changes are an internal qualification candidate, not a published release.
-Earlier builds' installed tests do not qualify this candidate. Current runtime
-qualification is scoped to CPLCODEX01 on macOS 27 by the owner's direction.
-No fresh macOS 26 runtime qualification is claimed. The remaining release gates
-must pass before publication.
+The exact candidate passed qualification on CPLCODEX01 with macOS 27.0.1,
+but that evidence does not justify general macOS 27 distribution while the
+hard OS-build gate remains. No fresh macOS 26 runtime qualification is claimed.
+A new candidate must correct the gate safely and repeat affected validation
+before a general release. The tagged source/feed retain qualification-time
+wording; this record documents the subsequent rollout withdrawal.
 
 ## 1.0.65 (build 142) — September 27, 2026
 
