@@ -1,5 +1,55 @@
 # Barline execution plan
 
+## Installed cold-start qualification and bootstrap repair - October 2, 2026
+
+The frozen `89d82a9b` candidate (1.0.66 build 154) passed clean `fast` and
+CPLCODEX01 Xcode 27 gates, with 823 Core tests. Its ZIP and DMG passed Developer
+ID signing, notarization, stapling and Gatekeeper. The exact notarized app was
+installed on CPLCODEX01 (27.0.1/26A434), preserving the prior build as a backup.
+The stable journey harness has Accessibility; Screen Recording is now optional
+unless its screenshot diagnostic is explicitly requested.
+
+Installed qualification then **failed** at the first Menu Bar Layout inventory.
+The helper begins with an unknown receipt; the provider requires a stable
+receipt to associate its first scan; both the coordinator and XPC backend need
+that scan before sending the first configuration. Thus no first configuration
+can establish the receipt. Gemini Flash 3.8 High and Astra High independently
+confirmed this source-level cycle. The real-controller environment-first
+regression reproduced the failure before repair; standalone closed native
+scope captures succeeded, excluding that observer as the immediate blocker.
+
+Build 155 repairs this with a one-shot helper-owned all-visible native clear
+transaction before first environment observation. Begin, Commit and explicit
+committed-state verification are required. Unknown receipts after failed
+transitions cannot trigger bootstrap, and ordinary receipt reads never mutate
+native state. Explicit lifecycle invalidation rotates the session and rearms
+the one-shot only after clearing owned state. Stage-specific diagnostics now
+distinguish native scope, presence, association, scene and runtime failures
+without emitting payloads. Regression coverage includes environment-first scan
+association, concurrent cold reads, no-op reads, invalidation, failed Begin,
+Commit, acknowledgement mismatch, cancellation and pre-Begin failure.
+
+Astra's follow-on review found a second deterministic interaction failure:
+the manager revealed a concealed item, making its receipt transient, then
+requested a qualified layout refresh before clicking it. The strict receipt
+contract correctly rejected that refresh. Build 155 now admits a native click
+from a fresh qualified snapshot before reveal, holds the same interaction and
+mutation turn, and validates the post-reveal scene, helper session and desired
+configuration before delivering input. The backend freshly resolves the target.
+Every pre-delivery failure ends the reveal token. No transient snapshot becomes
+layout, profile, history or last-known-good authority. Both click buttons and
+scene/session/configuration changes, unknown receipts, cancellation and failed
+delivery have focused regressions; installed qualification remains mandatory.
+
+Build 154 is not release-ready. Build 155 must be frozen, signed, installed and
+requalified before inheriting any candidate-bound claims. Source tests and
+external reviews are not installed proof. Actual shelf journeys, saved-layout
+and Focus transitions, interruption/recovery, clock rendering, update and
+performance gates remain required. The owner explicitly scoped runtime testing
+to CPLCODEX01. No fresh macOS 26 runtime qualification is claimed, and that
+unavailable lane is not a blocker for this scoped candidate; deployment-target
+compilation does not qualify it. Public release and update feed remain unchanged.
+
 ## Integrated platform-presence candidate — October 1, 2026
 
 The isolated candidate now connects the closed, bounded MenuBarAgent AX scope

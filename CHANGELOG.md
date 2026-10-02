@@ -21,10 +21,20 @@
   counts as an independent stability observation. Ordinary UI caching remains.
   This is source hardening, not macOS 27 Focus compatibility or release approval.
 
-## 1.0.66 (build 154) — qualification candidate, October 2, 2026
+## 1.0.66 (build 155) — qualification candidate, October 2, 2026
 
 ### macOS 27
 
+- Cold startup establishes a verified, all-visible native helper state before
+  the first inventory scan, removing a dependency loop that prevented menu bar
+  items from loading. Failed initialization stays unverified until recovery;
+  ordinary reads never erase an accepted layout to manufacture a healthy state.
+- Privacy-safe diagnostics distinguish native discovery and receipt-association
+  failures without including item names or system payloads.
+- Hidden-item activation validates the layout before temporary reveal, then
+  delivers one click under the same helper session and screen context. A
+  transient reveal no longer asks for fresh layout-mutation authority before
+  delivering the click. Failed admission restores the reveal without clicking.
 - Native Focus presence now requires a bounded, publisher-verified observation
   associated with the exact inventory scan. Unknown or inconsistent system
   state fails closed rather than accepting a stale layout or profile.
@@ -102,8 +112,10 @@
   occupancy is capped even when cancellation does not immediately release a read.
 
 These changes are an internal qualification candidate, not a published release.
-Installed tests from builds 144 through 148 do not qualify this candidate. Both OS runtime
-lanes and the remaining release gates must pass before publication.
+Earlier builds' installed tests do not qualify this candidate. Current runtime
+qualification is scoped to CPLCODEX01 on macOS 27 by the owner's direction.
+No fresh macOS 26 runtime qualification is claimed. The remaining release gates
+must pass before publication.
 
 ## 1.0.65 (build 142) — September 27, 2026
 

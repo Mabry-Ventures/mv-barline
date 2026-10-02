@@ -76,6 +76,12 @@ public enum PrivacySafeDiagnostics {
             case MenuBarBackendCapabilityReason.dragSynthesis: return "drag_synthesis_unavailable"
             case MenuBarBackendCapabilityReason.eventDelivery: return "event_delivery_unavailable"
             case "macOS 27 native menu bar reorder": return "native_reorder_unavailable"
+            case "active menu bar scene": return "native_scene_unavailable"
+            case "stable menu bar scene": return "native_scene_changed"
+            case "verified macOS 27 MenuBarAgent observation": return "native_scope_unqualified"
+            case "verified macOS 27 Focus presence": return "native_presence_unqualified"
+            case "associated macOS 27 Focus presence": return "native_presence_unassociated"
+            case "Golden Gate native concealment": return "native_concealment_unavailable"
             default: return "capability_unavailable"
             }
         case .staleItem: return "stale_item"

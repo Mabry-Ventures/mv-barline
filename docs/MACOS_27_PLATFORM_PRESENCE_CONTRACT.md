@@ -1,6 +1,20 @@
 # macOS 27 platform-presence contract
 
-Status: **integrated source candidate; not release approval**. The native
+Status: **installed qualification failed at build 154; build 155 repairs the
+verified initial-receipt dependency cycle and requires new qualification**.
+The clean build 154 source passed local and Xcode 27 gates and was signed,
+notarized and installed on CPLCODEX01. Its first inventory could not associate
+because the helper had no acknowledged native receipt, while initial
+configuration itself required that inventory. Build 155 establishes the new
+helper session's empty native state through the real clear transaction before
+returning its first environment. It does not relax presence/receipt association
+or turn failed transitions into new bootstrap opportunities. See the latest
+execution-plan checkpoint for the reproduced failure, regression coverage and
+remaining installed proof. macOS 26 runtime and release approval remain open.
+
+### Earlier source-integration checkpoint (superseded by the installed result)
+
+The native
 suppression cause is verified on 27.0.1/26A434. The isolated candidate now
 connects bounded MenuBarAgent observation, publisher attestation, exact Focus
 projection, and authority continuity through snapshot validation and mutation,

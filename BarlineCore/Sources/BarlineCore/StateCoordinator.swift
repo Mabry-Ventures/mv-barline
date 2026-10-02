@@ -586,6 +586,55 @@ public actor MenuBarStateCoordinator {
         try await backend.activate(itemID, button: button)
     }
 
+    /// Admits a native activation before temporarily revealing its target.
+    /// Reveal receipts are intentionally transient and never authorize a new
+    /// layout scan. Keep admission, reveal and delivery in one mutation turn
+    /// instead of asking for mutation authority after changing presentation.
+    /// The caller owns the returned observation until the interface closes.
+    public func activateItemWithRevealObservation(
+        _ itemID: MenuBarItemID,
+        button: MenuBarMouseButton,
+        expectedGeneration: UInt64,
+        interactionID: UUID
+    ) async throws -> MenuBarRevealObservationToken {
+        await acquireMutationTurn()
+        defer { releaseMutationTurn() }
+        try requireItemInteraction(interactionID)
+        try Task.checkCancellation()
+        try requireCurrentGeneration(expectedGeneration)
+        let before = try await refreshedQualifiedStartingSnapshot(now: nil)
+        guard !before.menuTrackingIsActive,
+              before.items.contains(where: { $0.id == itemID }),
+              let scene = currentAuthorityObservation?.scan?.finalEnvironment,
+              let receipt = scene.nativeConcealmentReceipt, receipt.isStable,
+              !scene.activeSpaceIsFullscreen, !scene.menuTrackingIsActive,
+              try await backend.environment() == scene
+        else { throw MenuBarBackendError.interrupted }
+        try Task.checkCancellation()
+        let token = try await backend.beginRevealObservation(itemID)
+        do {
+            let revealed = try await backend.environment()
+            guard scene.hasSameValidScene(as: revealed),
+                  !revealed.activeSpaceIsFullscreen, !revealed.menuTrackingIsActive,
+                  let acknowledged = revealed.nativeConcealmentReceipt,
+                  acknowledged.hasKnownEffectiveState,
+                  acknowledged.helperSessionID == receipt.helperSessionID,
+                  acknowledged.configurationRevision == receipt.configurationRevision,
+                  acknowledged.configurationDigest == receipt.configurationDigest,
+                  acknowledged.assertionRevision >= receipt.assertionRevision
+            else { throw MenuBarBackendError.interrupted }
+            // Both native activation adapters resolve the target's live owner
+            // and geometry again. No transient inventory is published as
+            // current, last-known-good, profile, undo or mutation authority.
+            try Task.checkCancellation()
+            try await backend.activate(itemID, button: button)
+            return token
+        } catch {
+            await backend.endRevealObservation(token)
+            throw error
+        }
+    }
+
     private func perform(
         _ mutation: MenuBarMutation,
         expectedGeneration: UInt64?,

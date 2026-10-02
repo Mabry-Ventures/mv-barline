@@ -1360,9 +1360,27 @@ extension MenuBarItemManager {
         }
         let interfaceObserved: Bool
         if item.isOnScreen || usesNativeReveal {
-            let token = try await BarlineMenuService.Connection.shared.beginRevealObservation(for: item.stableID)
+            let token: MenuBarRevealObservationToken
+            if usesNativeReveal {
+                try await waitForUserToPauseInput()
+                let mouseButton: MenuBarMouseButton = switch button {
+                case .left: .left
+                case .right: .right
+                default: .other
+                }
+                token = try await appState.compatibilityCoordinator.activateItemWithRevealObservation(
+                    item.stableID,
+                    button: mouseButton,
+                    expectedGeneration: snapshot.generation,
+                    interactionID: interactionID
+                )
+            } else {
+                token = try await BarlineMenuService.Connection.shared.beginRevealObservation(for: item.stableID)
+            }
             do {
-                try await click(item: item, with: button, interactionID: interactionID)
+                if !usesNativeReveal {
+                    try await click(item: item, with: button, interactionID: interactionID)
+                }
                 interfaceObserved = try await waitForInterface(token)
                 if interfaceObserved {
                     observeVisibleInterfaceUntilClosed(token)

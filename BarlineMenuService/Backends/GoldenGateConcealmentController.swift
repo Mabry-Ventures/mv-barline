@@ -17,6 +17,11 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     private var appliedResolution: GoldenGateResolvedConcealment?
     private var appliedNativeState: GoldenGateNativeConcealmentState?
     private var receiptLedger = NativeConcealmentReceiptLedger()
+    /// A new helper session has no acknowledged native state. Discovery needs
+    /// a real deasserted acknowledgement before it can derive the first saved
+    /// configuration. This one-shot is never inferred from an unknown receipt:
+    /// failed transitions must not silently reset accepted user intent.
+    private var initialEnvironmentStatePending = true
     // Access is serialized by transactionGate, including worker admission.
     private var recoveryLease = GoldenGateRecoveryLease()
     private var recoveryTask: Task<Void, Never>?
@@ -44,6 +49,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     @discardableResult
     func configure(_ configuration: MenuBarConcealmentConfiguration) async throws -> NativeConcealmentReceipt {
         try await transactionGate.withLock { [self] in
+            initialEnvironmentStatePending = false
             let previousConfiguration = desiredConfiguration
             desiredConfiguration = configuration
             do {
@@ -65,7 +71,14 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
 
     func environment(_ observeScene: @escaping @Sendable () -> MenuBarEnvironmentSnapshot) async throws -> MenuBarEnvironmentSnapshot {
         try await transactionGate.withLock { [self] in
-            observeScene().replacingConcealmentReceipt(checkedReceipt())
+            if initialEnvironmentStatePending {
+                initialEnvironmentStatePending = false
+                // The empty configuration takes the bridge's native clear
+                // transaction. Begin, Commit and committed-state verification
+                // must succeed; allocation alone is not proof of deassertion.
+                try await applyCurrentState()
+            }
+            return observeScene().replacingConcealmentReceipt(checkedReceipt())
         }
     }
 
@@ -218,6 +231,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
                 appliedNativeState = nil
                 desiredConfiguration = MenuBarConcealmentConfiguration(visibleItemIDs: [], concealedItemIDs: [])
                 receiptLedger.invalidateSession()
+                initialEnvironmentStatePending = true
             }
         }.value
     }
@@ -226,6 +240,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         temporaryRevealLedger: TemporaryRevealLedger? = nil,
         timeout: Duration = .seconds(3)
     ) async throws {
+        initialEnvironmentStatePending = false
         guard let opaqueController = controller() else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
         }

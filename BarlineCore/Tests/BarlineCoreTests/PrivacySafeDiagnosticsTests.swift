@@ -3,6 +3,23 @@ import Foundation
 import Testing
 
 struct PrivacySafeDiagnosticsTests {
+    @Test func nativeDiscoveryFailuresUseClosedStageCodes() {
+        let cases = [
+            ("active menu bar scene", "native_scene_unavailable"),
+            ("stable menu bar scene", "native_scene_changed"),
+            ("verified macOS 27 MenuBarAgent observation", "native_scope_unqualified"),
+            ("verified macOS 27 Focus presence", "native_presence_unqualified"),
+            ("associated macOS 27 Focus presence", "native_presence_unassociated"),
+            ("Golden Gate native concealment", "native_concealment_unavailable"),
+        ]
+        for (reason, expected) in cases {
+            #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.unavailableCapability(reason)) == expected)
+            #expect(PrivacySafeDiagnostics.errorCode(MenuBarBackendError.unavailableCapability(
+                reason + " /Users/private/item"
+            )) == "capability_unavailable")
+        }
+    }
+
     @Test func profileTransactionStagesUseExactClosedCodes() {
         let cases = [
             ("saved menu bar identities are ambiguous", "saved_identity_ambiguous"),

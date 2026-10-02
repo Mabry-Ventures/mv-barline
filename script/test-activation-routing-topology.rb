@@ -41,6 +41,11 @@ unless backend.match?(/#available\(macOS 27\.0, \*\).*goldenGateProvider\.activa
   abort('Golden Gate activation is not routed through the trusted app provider')
 end
 
+unless manager.match?(/if usesNativeReveal.*?compatibilityCoordinator\.activateItemWithRevealObservation\(/m) &&
+       coordinator.match?(/public func activateItemWithRevealObservation\(.*?refreshedQualifiedStartingSnapshot.*?backend\.beginRevealObservation.*?acknowledged\.helperSessionID == receipt\.helperSessionID.*?backend\.activate.*?backend\.endRevealObservation/m)
+  abort('native activation must qualify before reveal and deliver under the same scene and helper session')
+end
+
 unless backend.match?(/func snapshot\(\).*?#available\(macOS 27\.0, \*\).*?goldenGateProvider\.snapshot\(\).*?connection\.snapshot\(\)/m) &&
        backend.match?(/func move\(.*?#available\(macOS 27\.0, \*\).*?goldenGateProvider\.move\(operation\).*?connection\.move\(operation\)/m) &&
        backend.match?(/func restore\(.*?#available\(macOS 27\.0, \*\).*?goldenGateProvider\.restore\(snapshot\).*?connection\.restore\(snapshot\)/m) &&

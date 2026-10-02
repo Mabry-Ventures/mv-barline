@@ -40,6 +40,8 @@ private final class BridgeSpy: @unchecked Sendable {
         var acknowledgedState = false
         var mismatchAfterNextCommit = false
         var committedStateOverride: Int32?
+        var failCreate = false
+        var cancelNextBegin = false
     }
 
     private let lock = NSLock()
@@ -55,7 +57,7 @@ private final class BridgeSpy: @unchecked Sendable {
 private let bridgeSpy = BridgeSpy()
 
 func BLNGoldenGateAssessmentCreate() -> UnsafeMutableRawPointer? {
-    UnsafeMutableRawPointer(bitPattern: 1)
+    bridgeSpy.withState { $0.failCreate ? nil : UnsafeMutableRawPointer(bitPattern: 1) }
 }
 
 func BLNGoldenGateAssessmentBegin(
@@ -73,6 +75,14 @@ func BLNGoldenGateAssessmentBegin(
         system: Set(systemArray.compactMap { ($0 as? NSNumber)?.intValue }),
         allowed: Set(allowedArray.compactMap { $0 as? String })
     )
+    let cancel = bridgeSpy.withState {
+        let requested = $0.cancelNextBegin
+        $0.cancelNextBegin = false
+        return requested
+    }
+    if cancel {
+        withUnsafeCurrentTask { $0?.cancel() }
+    }
     return bridgeSpy.withState {
         $0.begins.append(payload)
         if $0.failNextBegin {
@@ -151,10 +161,114 @@ private func require(_ condition: Bool, _ message: String) throws {
 @main
 struct ControllerSkipPathProbe {
     @MainActor
+    @available(macOS 27.0, *)
+    private static func verifyColdEnvironmentBootstrap() async throws {
+        let controller = GoldenGateConcealmentController()
+        let initial = try await controller.receipt()
+        try require(!initial.isStable, "receipt reads must not manufacture startup proof")
+        let display = MenuBarDisplayID("bootstrap-fixture")
+        let scene: @Sendable () -> MenuBarEnvironmentSnapshot = {
+            MenuBarEnvironmentSnapshot(
+                activeDisplayID: 1, activeStableDisplayID: display, activeSpaceToken: 1,
+                activeSpaceIsFullscreen: false, menuTrackingIsActive: false
+            )
+        }
+        async let firstEnvironment = controller.environment(scene)
+        async let secondEnvironment = controller.environment(scene)
+        let (before, after) = try await (firstEnvironment, secondEnvironment)
+        try require(before.nativeConcealmentReceipt?.isStable == true &&
+            before.nativeConcealmentReceipt?.phase == .deasserted,
+            "first environment must establish a verified deasserted receipt before inventory")
+        try require(before == after && bridgeSpy.withState { $0.begins.count == 1 && $0.commits == 1 },
+                    "repeat environment must reuse the exact acknowledged startup state")
+        try require(bridgeSpy.withState {
+            $0.committed == Payload(concealed: [], system: Set(0 ... 8), allowed: [])
+        }, "bootstrap must never restrict any application or system item")
+        let snapshot = MenuBarSnapshot(
+            generation: 1, capturedAt: Date(), items: [MenuBarItemDescriptor(
+                id: MenuBarItemID(bundleIdentifier: "test.barline.fixture"), section: .visible,
+                order: 0, displayID: display
+            )], displayIDs: [display], activeSpaceIsValid: true
+        )
+        let scan = MenuBarObservationScan(
+            scanID: UUID(), startedAtUptimeNanoseconds: 1, completedAtUptimeNanoseconds: 2,
+            observedSnapshot: snapshot, initialEnvironment: before, finalEnvironment: after
+        )
+        try require(MenuBarAuthorityObservation(snapshot: snapshot, scan: scan).scan != nil,
+                    "first inventory must associate with actual helper startup receipt")
+        async let concurrentFirst = controller.environment(scene)
+        async let concurrentSecond = controller.environment(scene)
+        let concurrent = try await (concurrentFirst, concurrentSecond)
+        try require(concurrent.0 == before && concurrent.1 == before &&
+            bridgeSpy.withState { $0.begins.count == 1 }, "concurrent reads must preserve one acknowledged bootstrap")
+        await controller.invalidate()
+        let invalidated = try await controller.receipt()
+        try require(!invalidated.isStable && invalidated.helperSessionID != initial.helperSessionID,
+                    "invalidation must revoke, not bootstrap, a new helper session")
+        let restarted = try await controller.environment(scene)
+        try require(restarted.nativeConcealmentReceipt?.isStable == true &&
+            restarted.nativeConcealmentReceipt?.helperSessionID == invalidated.helperSessionID &&
+            bridgeSpy.withState { $0.begins.count == 2 }, "new session needs its own native acknowledgement")
+        await controller.invalidate()
+    }
+
+    @MainActor
+    @available(macOS 27.0, *)
+    private static func verifyFailedBootstrapRemainsUnknown(_ failure: Int) async throws {
+        bridgeSpy.withState {
+            $0 = BridgeSpy.State()
+            $0.failNextBegin = failure == 0
+            $0.failNextCommit = failure == 1
+            $0.mismatchAfterNextCommit = failure == 2
+            $0.failCreate = failure == 3
+            $0.cancelNextBegin = failure == 4
+        }
+        let controller = GoldenGateConcealmentController()
+        let scene: @Sendable () -> MenuBarEnvironmentSnapshot = {
+            MenuBarEnvironmentSnapshot(
+                activeDisplayID: 1, activeSpaceToken: 1, activeSpaceIsFullscreen: false,
+                activeSpaceIsValid: true, menuTrackingIsActive: false
+            )
+        }
+        var failed = false
+        do {
+            if failure == 3 {
+                // An explicit attempt failing before Begin also consumes the
+                // bootstrap opportunity. It must never be reset by a read.
+                try await controller.configure(.init(visibleItemIDs: [], concealedItemIDs: [
+                    MenuBarItemID(bundleIdentifier: "test.barline.fixture"),
+                ]))
+            } else if failure == 4 {
+                let task = Task { try await controller.environment(scene) }
+                _ = try await task.value
+            } else {
+                _ = try await controller.environment(scene)
+            }
+        } catch { failed = true }
+        try require(failed, "injected initial transition must fail")
+        if failure == 1 || failure == 4 {
+            try require(bridgeSpy.withState { $0.aborts == 1 && $0.pending.isEmpty },
+                        "failed Commit or post-Begin cancellation must abort the pending native transaction")
+        }
+        bridgeSpy.withState { $0.failCreate = false }
+        let begins = bridgeSpy.withState { $0.begins.count }
+        let unknown = try await controller.receipt()
+        let observed = try await controller.environment(scene)
+        try require(!unknown.isStable && observed.nativeConcealmentReceipt == unknown &&
+            bridgeSpy.withState { $0.begins.count == begins }, "ordinary environment read must not repair failed transition by clearing intent")
+        await controller.invalidate()
+    }
+
+    @MainActor
     static func main() async throws {
         guard #available(macOS 27.0, *) else {
             throw CheckFailure(description: "Requires macOS 27; no controller test executed")
         }
+        try await verifyColdEnvironmentBootstrap()
+        for failure in 0 ... 4 {
+            try await verifyFailedBootstrapRemainsUnknown(failure)
+        }
+        bridgeSpy.withState { $0 = BridgeSpy.State() }
         let hiddenBundle = "test.barline.hidden"
         let existing = "test.barline.existing"
         let newlyRunning = "test.barline.new"
@@ -182,6 +296,11 @@ struct ControllerSkipPathProbe {
             firstReceipt.configurationRevision == 1,
             "first acknowledgement must describe committed assertion ownership")
         try require(beginCount() == 1, "first configuration must Begin")
+        let configuredEnvironment = try await controller.environment {
+            MenuBarEnvironmentSnapshot(activeDisplayID: 1, activeSpaceToken: 1, activeSpaceIsFullscreen: false)
+        }
+        try require(configuredEnvironment.nativeConcealmentReceipt == firstReceipt && beginCount() == 1,
+                    "configuration before first environment must not be cleared by bootstrap")
         try require(bridgeSpy.withState { $0.committed?.allowed == mandatory.union([existing]) },
                     "Begin must receive the captured effective allowlist")
         let noOpReceipt = try await controller.configure(configuration)
