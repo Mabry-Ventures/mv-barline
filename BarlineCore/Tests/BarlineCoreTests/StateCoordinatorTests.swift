@@ -3,7 +3,7 @@
 //  Barline
 //
 
-@testable import BarlineCore
+@_spi(BarlinePlatformPresence) @testable import BarlineCore
 import Foundation
 import Testing
 
@@ -5073,6 +5073,335 @@ struct StateCoordinatorTests {
         #expect(await backend.restoredSnapshots.isEmpty)
     }
 
+    @Test("macOS 27 logical-section history uses checked moves for undo and redo")
+    func undoesAndRedoesLogicalSectionMutationWithoutFullRestore() async throws {
+        let itemIDs = ["a", "b", "c"].map {
+            MenuBarItemID(bundleIdentifier: "com.example.logical-history.\($0)", accessibilityIdentifier: "status-item")
+        }
+        let itemID = itemIDs[0]
+        let capturedAt = Date()
+        let displayID = MenuBarDisplayID("test-display")
+        func snapshot(
+            _ generation: UInt64,
+            visible: [MenuBarItemID],
+            hidden: [MenuBarItemID] = []
+        ) -> MenuBarSnapshot {
+            let sections = Dictionary(uniqueKeysWithValues:
+                visible.map { ($0, MenuBarSection.visible) } + hidden.map { ($0, MenuBarSection.hidden) })
+            let orderedIDs = visible + hidden
+            return MenuBarSnapshot(
+                generation: generation,
+                capturedAt: capturedAt,
+                items: orderedIDs.enumerated().map { index, id in
+                    MenuBarItemDescriptor(
+                        id: id,
+                        section: sections[id]!,
+                        order: index,
+                        displayID: displayID,
+                        isOnScreen: sections[id] == .visible
+                    )
+                },
+                displayIDs: [displayID],
+                activeSpaceIsValid: true
+            )
+        }
+        let before = snapshot(1, visible: itemIDs)
+        let hiddenAfterMutation = snapshot(2, visible: [itemIDs[1], itemIDs[2]], hidden: [itemID])
+        let hiddenAfterMutationStable = snapshot(3, visible: [itemIDs[1], itemIDs[2]], hidden: [itemID])
+        let undoStartingSnapshot = snapshot(4, visible: [itemIDs[1], itemIDs[2]], hidden: [itemID])
+        // AX may enumerate the visible native items in a different order after
+        // the OS-owned status-item relocation. Logical undo must not demand the
+        // historical native ordinal sequence from the helper.
+        let visibleAfterUndoMove = snapshot(5, visible: [itemIDs[2], itemIDs[1], itemID])
+        let visibleAfterUndoFirstStableRead = snapshot(6, visible: [itemIDs[2], itemIDs[1], itemID])
+        let visibleAfterUndoSecondStableRead = snapshot(7, visible: [itemIDs[2], itemIDs[1], itemID])
+        let redoStartingSnapshot = snapshot(8, visible: [itemIDs[2], itemIDs[1], itemID])
+        let hiddenAfterRedoMove = snapshot(9, visible: [itemIDs[2], itemIDs[1]], hidden: [itemID])
+        let hiddenAfterRedoFirstStableRead = snapshot(10, visible: [itemIDs[2], itemIDs[1]], hidden: [itemID])
+        let hiddenAfterRedoSecondStableRead = snapshot(11, visible: [itemIDs[2], itemIDs[1]], hidden: [itemID])
+        let capabilities = MenuBarCapabilities(
+            canSnapshot: true,
+            canMove: true,
+            canReveal: false,
+            canActivate: true,
+            canRestore: false,
+            moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+            arrangement: MenuBarArrangementCapabilities(
+                canReorderNativeItems: false,
+                visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                canReorderShelfItems: true,
+                canApplySavedNativeOrder: false
+            )
+        )
+        let backend = FakeBackend(
+            snapshots: [
+                before,
+                hiddenAfterMutation,
+                hiddenAfterMutationStable,
+                undoStartingSnapshot,
+                visibleAfterUndoMove,
+                visibleAfterUndoFirstStableRead,
+                visibleAfterUndoSecondStableRead,
+                redoStartingSnapshot,
+                hiddenAfterRedoMove,
+                hiddenAfterRedoFirstStableRead,
+                hiddenAfterRedoSecondStableRead,
+            ],
+            capabilities: capabilities,
+            restoreFailures: 1,
+            restoreFailureError: .unavailableCapability("Golden Gate restore")
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+
+        _ = try await coordinator.perform(
+            .move(MenuBarMoveOperation(itemID: itemID, section: .hidden, index: 0)),
+            now: before.capturedAt
+        )
+        #expect(await coordinator.canUndo)
+        let undone = try await coordinator.undo(now: visibleAfterUndoSecondStableRead.capturedAt)
+        #expect(undone.items.first(where: { $0.id == itemID })?.section == .visible)
+        #expect(await coordinator.canRedo)
+
+        let redone = try await coordinator.redo(now: hiddenAfterRedoSecondStableRead.capturedAt)
+        #expect(redone.items.first(where: { $0.id == itemID })?.section == .hidden)
+        #expect(await coordinator.canUndo)
+        #expect(await coordinator.canRedo == false)
+        #expect(await backend.moveOperations.map(\.section) == [.hidden, .visible, .hidden])
+        #expect(await backend.restoreCallCount == 0)
+        #expect(await backend.restoredSnapshots.isEmpty)
+    }
+
+    @Test("Logical history compensates a partially applied undo without full restore")
+    func compensatesPartiallyAppliedLogicalHistoryUndo() async throws {
+        let itemIDs = ["a", "b", "c"].map {
+            MenuBarItemID(bundleIdentifier: "com.example.logical-history-compensation.\($0)", accessibilityIdentifier: "status-item")
+        }
+        let capturedAt = Date()
+        let displayID = MenuBarDisplayID("test-display")
+        func snapshot(
+            _ generation: UInt64,
+            visible: [MenuBarItemID],
+            hidden: [MenuBarItemID] = []
+        ) -> MenuBarSnapshot {
+            let sections = Dictionary(uniqueKeysWithValues:
+                visible.map { ($0, MenuBarSection.visible) } + hidden.map { ($0, MenuBarSection.hidden) })
+            let orderedIDs = visible + hidden
+            return MenuBarSnapshot(
+                generation: generation,
+                capturedAt: capturedAt,
+                items: orderedIDs.enumerated().map { index, id in
+                    MenuBarItemDescriptor(
+                        id: id,
+                        section: sections[id]!,
+                        order: index,
+                        displayID: displayID,
+                        isOnScreen: sections[id] == .visible
+                    )
+                },
+                displayIDs: [displayID],
+                activeSpaceIsValid: true
+            )
+        }
+        let before = snapshot(1, visible: itemIDs)
+        let afterFirstActivationMove = snapshot(2, visible: [itemIDs[1], itemIDs[2]], hidden: [itemIDs[0]])
+        let afterActivationMoves = snapshot(3, visible: [itemIDs[2]], hidden: [itemIDs[0], itemIDs[1]])
+        let activationStableRead = snapshot(4, visible: [itemIDs[2]], hidden: [itemIDs[0], itemIDs[1]])
+        let activationSecondStableRead = snapshot(5, visible: [itemIDs[2]], hidden: [itemIDs[0], itemIDs[1]])
+        let undoStartingSnapshot = snapshot(6, visible: [itemIDs[2]], hidden: [itemIDs[0], itemIDs[1]])
+        let undoAfterFirstMove = snapshot(7, visible: [itemIDs[0], itemIDs[2]], hidden: [itemIDs[1]])
+        let compensationStartingSnapshot = snapshot(8, visible: [itemIDs[0], itemIDs[2]], hidden: [itemIDs[1]])
+        let compensationAfterMove = snapshot(9, visible: [itemIDs[2]], hidden: [itemIDs[0], itemIDs[1]])
+        let compensationStableRead = snapshot(10, visible: [itemIDs[2]], hidden: [itemIDs[0], itemIDs[1]])
+        let capabilities = MenuBarCapabilities(
+            canSnapshot: true,
+            canMove: true,
+            canReveal: false,
+            canActivate: true,
+            canRestore: false,
+            moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+            arrangement: MenuBarArrangementCapabilities(
+                canReorderNativeItems: false,
+                visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                canReorderShelfItems: true,
+                canApplySavedNativeOrder: false
+            )
+        )
+        let backend = FakeBackend(
+            snapshots: [
+                before,
+                afterFirstActivationMove,
+                afterActivationMoves,
+                activationStableRead,
+                activationSecondStableRead,
+                undoStartingSnapshot,
+                undoAfterFirstMove,
+                compensationStartingSnapshot,
+                compensationAfterMove,
+                compensationStableRead,
+            ],
+            capabilities: capabilities,
+            failMoveAt: 4
+        )
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend,
+            retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+        let profile = BarlineProfile(
+            name: "Two-item logical layout",
+            layout: ProfileLayout(visible: [itemIDs[2]], hidden: [itemIDs[0], itemIDs[1]])
+        )
+        _ = try await coordinator.refresh(now: before.capturedAt)
+        _ = try await coordinator.activate(profile: profile, now: afterActivationMoves.capturedAt)
+        #expect(await backend.moveOperations.map(\.section) == [.hidden, .hidden])
+
+        await #expect(throws: MenuBarBackendError.operationFailed("injected move failure")) {
+            try await coordinator.undo(now: compensationStableRead.capturedAt)
+        }
+
+        #expect(await backend.moveOperations.map(\.section) == [.hidden, .hidden, .visible, .visible, .hidden])
+        #expect(await backend.moveOperations.map(\.itemID) == [
+            itemIDs[0], itemIDs[1], itemIDs[0], itemIDs[1], itemIDs[0],
+        ])
+        #expect(await backend.restoreCallCount == 0)
+        #expect(await backend.restoredSnapshots.isEmpty)
+        #expect(await coordinator.currentSnapshot == compensationStableRead)
+        #expect(await coordinator.activeProfileID == profile.id)
+        #expect(await coordinator.canUndo)
+        #expect(await coordinator.canRedo == false)
+    }
+
+    @Test("Qualified macOS 27 history rejects hidden Focus before workspace side effects")
+    func rejectsHiddenFocusCheckpointBeforeWorkspaceMutation() async throws {
+        let displayID = MenuBarDisplayID("test-display")
+        let ordinaryID = MenuBarItemID(
+            bundleIdentifier: "com.example.logical-history-focus",
+            accessibilityIdentifier: "status-item"
+        )
+        let focusID = MenuBarPlatformPresenceIdentity.focusItemID
+        let capturedAt = Date()
+        let live = MenuBarSnapshot(
+            generation: 1,
+            capturedAt: capturedAt,
+            items: [
+                MenuBarItemDescriptor(
+                    id: ordinaryID,
+                    section: .visible,
+                    order: 0,
+                    displayID: displayID,
+                    isOnScreen: true
+                ),
+            ],
+            displayIDs: [displayID],
+            activeSpaceIsValid: true
+        )
+        let scanID = UUID()
+        let receipt = MenuBarAuthorityObservationTests.receipt()
+        let scene = MenuBarAuthorityObservationTests.environment(receipt, display: displayID)
+        let scan = MenuBarObservationScan(
+            scanID: scanID,
+            startedAtUptimeNanoseconds: 1,
+            completedAtUptimeNanoseconds: 30,
+            observedSnapshot: live,
+            initialEnvironment: scene,
+            finalEnvironment: scene,
+            platformPresenceObservation: MenuBarAuthorityObservationTests.nativePresence(
+                scanID: scanID,
+                focus: .absent
+            )
+        )
+        let observation = MenuBarAuthorityObservation(snapshot: live, scan: scan)
+        #expect(MenuBarPlatformPresenceContract.admitting(observation) != nil)
+        let logicalCapabilities = MenuBarCapabilities(
+            canSnapshot: true,
+            canMove: true,
+            canReveal: false,
+            canActivate: true,
+            canRestore: false,
+            moveDestinationSupport: .logicalSectionsPreserveNativeOrder,
+            arrangement: MenuBarArrangementCapabilities(
+                canReorderNativeItems: false,
+                visibilityAssignmentGranularity: .applicationGroupAndKnownSystemItem,
+                canReorderShelfItems: true,
+                canApplySavedNativeOrder: false
+            )
+        )
+
+        let checkpointSnapshot = MenuBarSnapshot(
+            generation: 0,
+            capturedAt: capturedAt,
+            items: [
+                MenuBarItemDescriptor(
+                    id: ordinaryID,
+                    section: .visible,
+                    order: 0,
+                    displayID: displayID,
+                    isOnScreen: true
+                ),
+                MenuBarItemDescriptor(
+                    id: focusID,
+                    section: .hidden,
+                    order: 1,
+                    displayID: displayID
+                ),
+            ],
+            displayIDs: [displayID],
+            activeSpaceIsValid: true
+        )
+        let workspace = ProfileWorkspaceState(profile: BarlineProfile(name: "Prior"))
+        let recorder = WorkspaceRecorder(initial: workspace)
+        let backend = FakeBackend(
+            snapshots: [live],
+            capabilities: logicalCapabilities,
+            authorityObservations: [observation]
+        )
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let transaction = MenuBarWorkspaceTransaction(
+            capture: { await recorder.capture() },
+            apply: { try await recorder.apply($0) }
+        )
+        let checkpoint = MenuBarWorkspaceCheckpoint(
+            snapshot: checkpointSnapshot,
+            activeProfileID: UUID(),
+            workspace: workspace
+        )
+
+        await #expect(throws: MenuBarBackendError.operationFailed(
+            "macOS Focus cannot be restored to a hidden section"
+        )) {
+            try await coordinator.restoreWorkspaceCheckpoint(
+                checkpoint,
+                workspaceTransaction: transaction,
+                now: capturedAt
+            )
+        }
+        #expect(await backend.moveOperations.isEmpty)
+        #expect(await backend.restoredSnapshots.isEmpty)
+        #expect(await recorder.values.isEmpty)
+        #expect(await coordinator.activeProfileID == nil)
+
+        let recoveryBackend = FakeBackend(
+            snapshots: [live],
+            capabilities: logicalCapabilities,
+            authorityObservations: [observation]
+        )
+        let recoveryCoordinator = MenuBarStateCoordinator(backend: recoveryBackend)
+        await #expect(throws: MenuBarBackendError.operationFailed(
+            "macOS Focus cannot be restored to a hidden section"
+        )) {
+            try await recoveryCoordinator.prepareAvailableWorkspaceRecovery(
+                checkpoint,
+                workspaceTransaction: transaction,
+                now: capturedAt
+            )
+        }
+        #expect(await recoveryBackend.moveOperations.isEmpty)
+        #expect(await recoveryBackend.restoredSnapshots.isEmpty)
+        #expect(await recorder.values.isEmpty)
+    }
+
     @Test("Layout mutations create bounded undo and redo checkpoints")
     func undoesAndRedoesLayoutMutation() async throws {
         let before = makeSnapshot(generation: 1, count: 2)
@@ -5953,6 +6282,7 @@ private actor FakeBackend: MenuBarBackend {
     let capabilities: MenuBarCapabilities
 
     private var snapshots: [MenuBarSnapshot]
+    private var authorityObservations: [MenuBarAuthorityObservation]
     private(set) var restoredSnapshots = [MenuBarSnapshot]()
     private(set) var revealedItems = [MenuBarItemID]()
     private(set) var moveOperations = [MenuBarMoveOperation]()
@@ -6006,9 +6336,11 @@ private actor FakeBackend: MenuBarBackend {
         restoreFailureCallNumbers: Set<Int> = [],
         checksCancellationDuringCompensation: Bool = false,
         cancelOnMove: Bool = false,
-        restoreDelay: Duration = .zero
+        restoreDelay: Duration = .zero,
+        authorityObservations: [MenuBarAuthorityObservation] = []
     ) {
         self.snapshots = snapshots
+        self.authorityObservations = authorityObservations
         self.capabilities = capabilities
         self.mutationDelay = mutationDelay
         self.restartDelay = restartDelay
@@ -6042,6 +6374,19 @@ private actor FakeBackend: MenuBarBackend {
             throw MenuBarBackendError.operationFailed("no fake snapshot")
         }
         return snapshots.removeFirst()
+    }
+
+    func authorityObservation(
+        freshness: MenuBarObservationFreshness
+    ) async throws -> MenuBarAuthorityObservation {
+        if !authorityObservations.isEmpty {
+            return authorityObservations.removeFirst()
+        }
+        let observed: MenuBarSnapshot = switch freshness {
+        case .cachedAllowed, .freshRequired:
+            try snapshot()
+        }
+        return MenuBarAuthorityObservation(snapshot: observed)
     }
 
     func move(_ operation: MenuBarMoveOperation) throws -> MenuBarMutationResult {

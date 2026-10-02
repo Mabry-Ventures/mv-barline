@@ -576,15 +576,46 @@ public struct DisplayProfileOverrideResolver: Sendable {
         persisted: ResolvedProfilePresentation,
         snapshot: MenuBarSnapshot
     ) -> ResolvedProfilePresentation? {
+        resolvePersistedPresentation(
+            profile: profile,
+            persisted: persisted,
+            snapshot: snapshot,
+            platformContract: nil
+        )
+    }
+
+    func resolvePersistedPresentation(
+        profile: BarlineProfile,
+        persisted: ResolvedProfilePresentation,
+        snapshot: MenuBarSnapshot,
+        platformContract: MenuBarPlatformPresenceContract?
+    ) -> ResolvedProfilePresentation? {
+        let snapshot = platformContract?.projecting(snapshot) ?? snapshot
+        let projectedPersisted: ResolvedProfilePresentation
+        if let platformContract {
+            guard let projected = platformContract.projecting(persisted) else { return nil }
+            projectedPersisted = projected
+        } else {
+            projectedPersisted = persisted
+        }
+        func resolved(_ presentation: ResolvedProfilePresentation) -> ResolvedProfilePresentation? {
+            let projected: ResolvedProfilePresentation
+            if let platformContract {
+                guard let value = platformContract.projecting(presentation) else { return nil }
+                projected = value
+            } else {
+                projected = presentation
+            }
+            return try? projected.resolvingItemIdentities(
+                in: snapshot, requireCompleteInventory: false
+            )
+        }
         // Display reconnection can run before a full item census. Unresolved IDs
         // stay unchanged here; authority matching and activation require every ID.
-        guard let persisted = try? persisted.resolvingItemIdentities(
-            in: snapshot, requireCompleteInventory: false
-        ) else { return nil }
+        guard let persisted = resolved(projectedPersisted) else { return nil }
         switch persisted.source {
         case .base:
-            guard let current = try? profile.resolvedPresentation(for: nil)
-                .resolvingItemIdentities(in: snapshot, requireCompleteInventory: false)
+            guard let current = resolved(profile.resolvedPresentation(for: nil))
             else { return nil }
             return current == persisted ? current : nil
         case let .displayOverride(storedID):
@@ -596,8 +627,7 @@ public struct DisplayProfileOverrideResolver: Sendable {
                 acceptedOverrideID = storedID
             } else {
                 let payloadMatches = profile.displayOverrides.filter {
-                    guard let presentation = try? profile.resolvedPresentation(for: $0.displayID)
-                        .resolvingItemIdentities(in: snapshot, requireCompleteInventory: false)
+                    guard let presentation = resolved(profile.resolvedPresentation(for: $0.displayID))
                     else { return false }
                     return presentation.layout == persisted.layout
                         && presentation.groups == persisted.groups
@@ -614,8 +644,7 @@ public struct DisplayProfileOverrideResolver: Sendable {
                 )
             }.filter { $0.override.displayID == acceptedOverrideID }
             guard matches.count == 1 else { return nil }
-            guard let resolved = try? profile.resolvedPresentation(using: matches[0])
-                .resolvingItemIdentities(in: snapshot, requireCompleteInventory: false)
+            guard let resolved = resolved(profile.resolvedPresentation(using: matches[0]))
             else { return nil }
             var normalizedPersisted = persisted
             if !storedOverrideStillExists {
@@ -814,24 +843,52 @@ public enum ProfileAuthorityMatcher {
         checkpoint: MenuBarWorkspaceCheckpoint,
         destinationSupport: MenuBarMoveDestinationSupport = .existingItemRequired
     ) -> Bool {
+        matches(
+            profile: profile,
+            checkpoint: checkpoint,
+            destinationSupport: destinationSupport,
+            platformContract: nil
+        )
+    }
+
+    static func matches(
+        profile: BarlineProfile,
+        checkpoint: MenuBarWorkspaceCheckpoint,
+        destinationSupport: MenuBarMoveDestinationSupport,
+        platformContract: MenuBarPlatformPresenceContract?
+    ) -> Bool {
+        let snapshot = platformContract?.projecting(checkpoint.snapshot) ?? checkpoint.snapshot
         let match = checkpoint.activeDisplayID.flatMap { displayID in
             DisplayProfileOverrideResolver().resolve(
                 profile: profile,
                 requestedDisplayID: displayID,
-                snapshot: checkpoint.snapshot
+                snapshot: snapshot
             )
         }
-        guard let presentation = try? profile.resolvedPresentation(using: match)
-            .resolvingItemIdentities(in: checkpoint.snapshot)
-        else { return false }
+        let unresolvedPresentation = profile.resolvedPresentation(using: match)
+        let resolvedPresentation: ResolvedProfilePresentation
+        if let platformContract {
+            guard let projected = platformContract.projecting(unresolvedPresentation) else { return false }
+            resolvedPresentation = projected
+        } else {
+            resolvedPresentation = unresolvedPresentation
+        }
+        guard let presentation = try? resolvedPresentation.resolvingItemIdentities(in: snapshot) else {
+            return false
+        }
         var expectedWorkspace = ProfileWorkspaceState(profile: profile)
         expectedWorkspace.presentation = presentation
-        guard expectedWorkspace == checkpoint.workspace else {
+        var observedWorkspace = checkpoint.workspace
+        if let platformContract, let persistedPresentation = observedWorkspace.presentation {
+            guard let projected = platformContract.projecting(persistedPresentation) else { return false }
+            observedWorkspace.presentation = projected
+        }
+        guard expectedWorkspace == observedWorkspace else {
             return false
         }
         return ProfileLayoutReconciler.matches(
             layout: presentation.layout,
-            items: checkpoint.snapshot.items,
+            items: snapshot.items,
             displayID: presentation.destinationDisplayID,
             destinationSupport: destinationSupport
         )

@@ -406,6 +406,14 @@ public struct MenuBarSnapshot: Codable, Hashable, Sendable {
         if items.contains(where: { $0.id == storedID }) {
             return storedID
         }
+        // Older profiles include localized display metadata and occurrence
+        // aliases for Focus. When the exact platform AX identity is live, map
+        // that positive observation to its current canonical ID. This is only
+        // identity migration; it does not authorize an absent item.
+        if MenuBarPlatformPresenceIdentity.isFocusItem(storedID) {
+            let matches = items.filter { MenuBarPlatformPresenceIdentity.isFocusItem($0.id) }
+            return matches.count == 1 ? matches[0].id : nil
+        }
         guard let title = storedID.title,
               let fingerprint = storedID.fallbackFingerprint
         else { return nil }

@@ -20,6 +20,7 @@ public struct MenuBarObservationScan: Equatable, Sendable {
     public let observedSnapshot: MenuBarSnapshot
     public let initialEnvironment: MenuBarEnvironmentSnapshot
     public let finalEnvironment: MenuBarEnvironmentSnapshot
+    @_spi(BarlinePlatformPresence) public let platformPresenceObservation: MenuBarPlatformPresenceObservation?
 
     public init(
         scanID: UUID,
@@ -29,12 +30,34 @@ public struct MenuBarObservationScan: Equatable, Sendable {
         initialEnvironment: MenuBarEnvironmentSnapshot,
         finalEnvironment: MenuBarEnvironmentSnapshot
     ) {
+        self.init(
+            scanID: scanID,
+            startedAtUptimeNanoseconds: startedAtUptimeNanoseconds,
+            completedAtUptimeNanoseconds: completedAtUptimeNanoseconds,
+            observedSnapshot: observedSnapshot,
+            initialEnvironment: initialEnvironment,
+            finalEnvironment: finalEnvironment,
+            platformPresenceObservation: nil
+        )
+    }
+
+    @_spi(BarlinePlatformPresence)
+    public init(
+        scanID: UUID,
+        startedAtUptimeNanoseconds: UInt64,
+        completedAtUptimeNanoseconds: UInt64,
+        observedSnapshot: MenuBarSnapshot,
+        initialEnvironment: MenuBarEnvironmentSnapshot,
+        finalEnvironment: MenuBarEnvironmentSnapshot,
+        platformPresenceObservation: MenuBarPlatformPresenceObservation?
+    ) {
         self.scanID = scanID
         self.startedAtUptimeNanoseconds = startedAtUptimeNanoseconds
         self.completedAtUptimeNanoseconds = completedAtUptimeNanoseconds
         self.observedSnapshot = observedSnapshot
         self.initialEnvironment = initialEnvironment
         self.finalEnvironment = finalEnvironment
+        self.platformPresenceObservation = platformPresenceObservation
     }
 
     /// A generation rebase is the only difference accepted here. Items,
@@ -50,12 +73,33 @@ public struct MenuBarObservationScan: Equatable, Sendable {
               let activeDisplay = finalEnvironment.activeStableDisplayID,
               observedSnapshot.displayIDs.contains(activeDisplay),
               observedSnapshot.activeSpaceIsValid, !observedSnapshot.menuTrackingIsActive else { return false }
-        return observedSnapshot.capturedAt == snapshot.capturedAt &&
-            observedSnapshot.items == snapshot.items &&
-            observedSnapshot.displayIDs == snapshot.displayIDs &&
-            observedSnapshot.displayIdentities == snapshot.displayIdentities &&
-            observedSnapshot.activeSpaceIsValid == snapshot.activeSpaceIsValid &&
-            observedSnapshot.menuTrackingIsActive == snapshot.menuTrackingIsActive
+        guard observedSnapshot.capturedAt == snapshot.capturedAt,
+              observedSnapshot.items == snapshot.items,
+              observedSnapshot.displayIDs == snapshot.displayIDs,
+              observedSnapshot.displayIdentities == snapshot.displayIdentities,
+              observedSnapshot.activeSpaceIsValid == snapshot.activeSpaceIsValid,
+              observedSnapshot.menuTrackingIsActive == snapshot.menuTrackingIsActive
+        else { return false }
+
+        guard let platformPresenceObservation else { return true }
+        guard platformPresenceObservation.isStructurallyQualified,
+              platformPresenceObservation.scanID == scanID,
+              platformPresenceObservation.startedAtUptimeNanoseconds >= startedAtUptimeNanoseconds,
+              platformPresenceObservation.completedAtUptimeNanoseconds <= completedAtUptimeNanoseconds
+        else { return false }
+        switch platformPresenceObservation.focusPresence {
+        case let .present(platformItem):
+            let matches = snapshot.items.filter { $0.id == platformItem.itemID }
+            guard matches.count == 1, let item = matches.first else { return false }
+            return item.section == .visible && item.displayID == platformItem.displayID &&
+                item.isSystemItem && item.sourceOwnership == .system &&
+                item.ownerProcessIdentifier == platformItem.ownerProcessIdentifier &&
+                item.sourceProcessIdentifier == platformItem.ownerProcessIdentifier &&
+                item.bounds == platformItem.bounds && item.isOnScreen &&
+                !item.isMovable && !item.canBeHidden
+        case .absent:
+            return !snapshot.items.contains { MenuBarPlatformPresenceIdentity.isFocusItem($0.id) }
+        }
     }
 }
 

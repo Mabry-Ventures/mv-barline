@@ -525,6 +525,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         case .implausibleSystemItemCollapse: "invalid-snapshot-system-item-collapse"
         case .emptySnapshot: "invalid-snapshot-empty"
         case .nonMonotonicGeneration: "invalid-snapshot-generation"
+        case .platformPresenceContractChanged: "invalid-snapshot-platform-presence-contract"
         }
     }
 

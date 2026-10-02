@@ -17,6 +17,7 @@ public enum SnapshotRejectionReason: Error, Codable, Equatable, Sendable {
     case implausibleSystemItemCollapse(previous: Int, candidate: Int)
     case emptySnapshot
     case nonMonotonicGeneration(previous: UInt64, candidate: UInt64)
+    case platformPresenceContractChanged
 }
 
 public struct SnapshotValidationPolicy: Sendable {
@@ -55,6 +56,50 @@ public struct SnapshotValidator: Sendable {
         _ candidate: MenuBarSnapshot,
         previous: MenuBarSnapshot?,
         now: Date = Date()
+    ) -> Result<MenuBarSnapshot, SnapshotRejectionReason> {
+        validate(candidate, previous: previous, now: now, excludingPlatformItems: [])
+    }
+
+    /// Runtime-only platform presence can remove exactly the attested Focus
+    /// control from continuity denominators. All ordinary snapshot checks and
+    /// every other item/system threshold remain unchanged. Persisted snapshots
+    /// cannot reach this overload with reconstructed evidence.
+    public func validate(
+        _ observation: MenuBarAuthorityObservation,
+        previous: MenuBarSnapshot?,
+        now: Date = Date()
+    ) -> Result<MenuBarSnapshot, SnapshotRejectionReason> {
+        guard let contract = MenuBarPlatformPresenceContract.admitting(observation) else {
+            return validate(observation.snapshot, previous: previous, now: now)
+        }
+        return validate(observation, previous: previous, platformContract: contract, now: now)
+    }
+
+    func validate(
+        _ observation: MenuBarAuthorityObservation,
+        previous: MenuBarSnapshot?,
+        platformContract: MenuBarPlatformPresenceContract?,
+        now: Date = Date()
+    ) -> Result<MenuBarSnapshot, SnapshotRejectionReason> {
+        guard let platformContract else {
+            return validate(observation.snapshot, previous: previous, now: now)
+        }
+        guard platformContract.accepts(observation) else {
+            return .failure(.platformPresenceContractChanged)
+        }
+        return validate(
+            observation.snapshot,
+            previous: previous,
+            now: now,
+            excludingPlatformItems: [MenuBarPlatformPresenceIdentity.focusItemID]
+        )
+    }
+
+    private func validate(
+        _ candidate: MenuBarSnapshot,
+        previous: MenuBarSnapshot?,
+        now: Date,
+        excludingPlatformItems excludedPlatformItems: Set<MenuBarItemID>
     ) -> Result<MenuBarSnapshot, SnapshotRejectionReason> {
         guard !candidate.displayIDs.isEmpty else {
             return .failure(.missingDisplayGeometry)
@@ -115,6 +160,18 @@ public struct SnapshotValidator: Sendable {
             return .failure(.missingRequiredControlItem(missingControlID))
         }
 
+        if let previous,
+           previous.items.contains(where: { MenuBarPlatformPresenceIdentity.isFocusItem($0.id) }),
+           !candidate.items.contains(where: { MenuBarPlatformPresenceIdentity.isFocusItem($0.id) }),
+           !excludedPlatformItems.contains(MenuBarPlatformPresenceIdentity.focusItemID)
+        {
+            // The exact MenuBarAgent/AX Focus identity exists only on Golden
+            // Gate. The legacy WindowServer lane does not emit this identity.
+            // Golden Gate must provide a closed native presence contract
+            // before this platform-owned control may disappear.
+            return .failure(.platformPresenceContractChanged)
+        }
+
         if let previous {
             guard candidate.generation > previous.generation else {
                 return .failure(
@@ -125,25 +182,37 @@ public struct SnapshotValidator: Sendable {
                 )
             }
             if !previous.items.isEmpty {
-                let retainedRatio = Double(candidate.items.count) / Double(previous.items.count)
+                let previousAuthorityItemCount = previous.items.count {
+                    !isExcludedPlatformItem($0.id, by: excludedPlatformItems)
+                }
+                let candidateAuthorityItemCount = candidate.items.count {
+                    !isExcludedPlatformItem($0.id, by: excludedPlatformItems)
+                }
+                let retainedRatio = previousAuthorityItemCount == 0
+                    ? 1
+                    : Double(candidateAuthorityItemCount) / Double(previousAuthorityItemCount)
                 if retainedRatio < 1 - policy.maximumCollapseRatio {
                     return .failure(
                         .implausibleItemCountCollapse(
-                            previous: previous.items.count,
-                            candidate: candidate.items.count
+                            previous: previousAuthorityItemCount,
+                            candidate: candidateAuthorityItemCount
                         )
                     )
                 }
             }
 
-            let previousSystemIDs = Set(previous.items.filter(\.isConfirmedSystemItem).map(\.id))
+            let previousSystemIDs = Set(previous.items.filter {
+                $0.isConfirmedSystemItem &&
+                    !isExcludedPlatformItem($0.id, by: excludedPlatformItems)
+            }.map { continuityIdentity(for: $0.id) })
             let previousSystemItemCount = previousSystemIDs.count
             if previousSystemItemCount > 0 {
                 // Continuity protects inventory, not a provisional ownership
                 // classification. Retaining the same identity while its source
                 // resolves must not freeze all later mutations. Conversely,
                 // unrelated new system items cannot mask loss of known ones.
-                let candidateSystemItemCount = previousSystemIDs.intersection(seen).count
+                let candidateSystemIDs = Set(candidate.items.map { continuityIdentity(for: $0.id) })
+                let candidateSystemItemCount = previousSystemIDs.intersection(candidateSystemIDs).count
                 let retainedRatio = Double(candidateSystemItemCount) / Double(previousSystemItemCount)
                 if retainedRatio < 1 - policy.maximumSystemItemCollapseRatio {
                     return .failure(
@@ -157,5 +226,23 @@ public struct SnapshotValidator: Sendable {
         }
 
         return .success(candidate)
+    }
+
+    private func isExcludedPlatformItem(
+        _ itemID: MenuBarItemID,
+        by excludedPlatformItems: Set<MenuBarItemID>
+    ) -> Bool {
+        excludedPlatformItems.contains(itemID) ||
+            (excludedPlatformItems.contains(MenuBarPlatformPresenceIdentity.focusItemID) &&
+                MenuBarPlatformPresenceIdentity.isFocusItem(itemID))
+    }
+
+    /// Older Golden Gate snapshots carry title/alias/fingerprint metadata for
+    /// the same exact AX Focus identity. Continuity compares the semantic
+    /// platform identity, not that non-authoritative presentation metadata.
+    private func continuityIdentity(for itemID: MenuBarItemID) -> MenuBarItemID {
+        MenuBarPlatformPresenceIdentity.isFocusItem(itemID)
+            ? MenuBarPlatformPresenceIdentity.focusItemID
+            : itemID
     }
 }

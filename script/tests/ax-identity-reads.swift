@@ -79,6 +79,86 @@ enum AXIdentityReadTests {
         expect(attributes(AXIdentityReadSupport.decodeIdentity(status: .success, values: multibyte as CFArray))?.identifier
             == .failure(AXReadFailure(.overLimit)), "oversize_utf8_identity_rejected")
 
+        expect(AXIdentityReadSupport.decodeProcessIdentifier(status: .success, value: 123) == .value(123), "exact_pid_preserved")
+        for pid: Int32 in [0, -1, Int32.min] {
+            expect(AXIdentityReadSupport.decodeProcessIdentifier(status: .success, value: pid)
+                == .failure(AXReadFailure(.malformedResponse)), "nonpositive_pid_rejected_\(pid)")
+        }
+        for error in [AXError.invalidUIElement, .cannotComplete, .apiDisabled, .noValue, .attributeUnsupported] {
+            expect(AXIdentityReadSupport.decodeProcessIdentifier(status: error, value: 123)
+                == .failure(AXIdentityReadSupport.failure(error)), "pid_error_not_value_\(error.rawValue)")
+        }
+        func geometrySlots(point: CGPoint = CGPoint(x: -100, y: 20), size: CGSize = CGSize(width: 30, height: 22)) -> CFArray {
+            var point = point
+            var size = size
+            guard let position = AXValueCreate(.cgPoint, &point), let dimensions = AXValueCreate(.cgSize, &size) else {
+                fatalError("fixture_geometry_slots")
+            }
+            return [position, dimensions] as CFArray
+        }
+        let geometry = geometrySlots()
+        expect(AXIdentityReadSupport.decodeGeometry(status: .success, values: geometry)
+            == .bounds(CGRect(x: -100, y: 20, width: 30, height: 22)), "same_node_geometry_negative_display_origin")
+        expect(AXIdentityReadSupport.decodeGeometry(status: .noValue, values: geometry) == .noValue, "geometry_outer_no_value")
+        expect(AXIdentityReadSupport.decodeGeometry(status: .attributeUnsupported, values: geometry) == .unsupported,
+               "geometry_outer_unsupported")
+        expect(AXIdentityReadSupport.decodeGeometry(status: .cannotComplete, values: geometry)
+            == .failure(AXReadFailure(.cannotComplete, error: .cannotComplete)), "geometry_outer_error_not_bounds")
+        for raw: CFTypeRef? in [nil, kCFNull, "not-an-array" as CFString] {
+            expect(AXIdentityReadSupport.decodeGeometry(status: .success, values: raw)
+                == .failure(AXReadFailure(.wrongType)), "geometry_wrong_outer_type")
+        }
+        expect(AXIdentityReadSupport.decodeGeometry(status: .success, values: [] as CFArray)
+            == .failure(AXReadFailure(.malformedResponse)), "geometry_wrong_cardinality")
+        let geometryValues = geometry as [AnyObject]
+        expect(AXIdentityReadSupport.decodeGeometry(status: .success, values: [geometryValues[1], geometryValues[0]] as CFArray)
+            == .failure(AXReadFailure(.wrongType)), "geometry_wrong_axvalue_payload")
+        expect(AXIdentityReadSupport.decodeGeometry(status: .success, values: [NSNumber(value: 1), geometryValues[1]] as CFArray)
+            == .failure(AXReadFailure(.wrongType)), "geometry_number_not_axvalue")
+        let nullGeometry: [AnyObject] = [kCFNull, geometryValues[1]]
+        expect(AXIdentityReadSupport.decodeGeometry(status: .success, values: nullGeometry as CFArray) == .noValue,
+               "geometry_null_not_bounds")
+        for error in [AXError.noValue, .attributeUnsupported, .cannotComplete, .invalidUIElement, .success] {
+            let result = AXIdentityReadSupport.decodeGeometry(status: .success, values: [geometryValues[0], errorValue(error)] as CFArray)
+            let expected: AXGeometryRead = switch error {
+            case .noValue: .noValue
+            case .attributeUnsupported: .unsupported
+            case .success: .failure(AXReadFailure(.malformedResponse))
+            default: .failure(AXIdentityReadSupport.failure(error))
+            }
+            expect(result == expected, "geometry_typed_slot_error_\(error.rawValue)")
+        }
+        for size in [CGSize(width: 0, height: 22), CGSize(width: -1, height: 22), CGSize(width: 30, height: 0),
+                     CGSize(width: CGFloat.infinity, height: 22), CGSize(width: 30, height: CGFloat.nan)]
+        {
+            expect(AXIdentityReadSupport.decodeGeometry(status: .success, values: geometrySlots(size: size))
+                == .failure(AXReadFailure(.malformedResponse)), "geometry_unusable_size")
+        }
+        for point in [CGPoint(x: CGFloat.nan, y: 20), CGPoint(x: 0, y: CGFloat.infinity)] {
+            expect(AXIdentityReadSupport.decodeGeometry(status: .success, values: geometrySlots(point: point))
+                == .failure(AXReadFailure(.malformedResponse)), "geometry_nonfinite_position")
+        }
+        expect(AXIdentityReadSupport.decodeGeometry(status: .success, values: geometrySlots(
+            point: CGPoint(x: CGFloat.greatestFiniteMagnitude, y: 20), size: CGSize(width: CGFloat.greatestFiniteMagnitude, height: 22)
+        )) == .failure(AXReadFailure(.malformedResponse)), "geometry_extent_overflow")
+
+        let deniedNode = AXUIElementCreateApplication(getpid())
+        let revoked = AXReadCancellation()
+        revoked.cancel()
+        let deniedReader = AXBoundedNodeReader(deadline: .max, cancellation: revoked)
+        expect(deniedReader.processIdentifier(on: deniedNode) == .failure(AXReadFailure(.cancelled)), "actual_pid_adapter_cancelled")
+        expect(deniedReader.geometry(on: deniedNode) == .failure(AXReadFailure(.cancelled)), "actual_geometry_adapter_cancelled")
+        expect(deniedReader.identity(on: deniedNode) == .failure(AXReadFailure(.cancelled)), "actual_identity_adapter_cancelled")
+        expect(childrenFailure(deniedReader.children(on: deniedNode, maximumCount: 8), .cancelled), "actual_children_adapter_cancelled")
+        if case let .failure(error) = deniedReader.extras(on: deniedNode) {
+            expect(error == AXReadFailure(.cancelled), "actual_extras_adapter_cancelled")
+        } else {
+            expect(false, "actual_extras_adapter_cancelled")
+        }
+        let expiredReader = AXBoundedNodeReader(deadline: 1, cancellation: AXReadCancellation())
+        expect(expiredReader.processIdentifier(on: deniedNode) == .failure(AXReadFailure(.deadlineExceeded)), "actual_pid_adapter_expired")
+        expect(expiredReader.geometry(on: deniedNode) == .failure(AXReadFailure(.deadlineExceeded)), "actual_geometry_adapter_expired")
+
         var now: UInt64 = 1
         var operations = 0
         var timeouts: [Float] = []
@@ -276,6 +356,13 @@ enum AXIdentityReadTests {
             )
         }
         now = 1
+        if case let .elements(values) = children(counts: [(.success, 0)], raw: nil, maximum: 0) {
+            expect(values.isEmpty && copies == 0, "zero_capacity_empty_frontier_without_fetch")
+        } else {
+            expect(false, "zero_capacity_empty_frontier")
+        }
+        expect(childrenFailure(children(counts: [(.success, 1)], raw: nil, maximum: 0), .overLimit) && copies == 0,
+               "zero_capacity_nonempty_rejected_before_fetch")
         if case let .elements(values) = children(counts: [(.success, 0)], raw: nil) {
             expect(values.isEmpty && copies == 0, "genuine_zero_without_copy")
         } else {

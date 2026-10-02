@@ -22,6 +22,7 @@ public enum GoldenGateRetainedInventoryPolicy {
         let retained = assignments.values
             .filter { assignment in
                 assignment.section != .visible &&
+                    !MenuBarPlatformPresenceIdentity.isFocusItem(assignment.itemID) &&
                     !liveIDSet.contains(assignment.itemID) &&
                     assignment.itemID.isPlausiblyStable &&
                     normalizedRunningBundles.contains(
@@ -30,7 +31,8 @@ public enum GoldenGateRetainedInventoryPolicy {
             }
             .compactMap { assignment -> MenuBarItemDescriptor? in
                 guard let descriptor = retainedDescriptors[assignment.itemID],
-                      !descriptor.isBarlineControlItem
+                      !descriptor.isBarlineControlItem,
+                      !MenuBarPlatformPresenceIdentity.isFocusItem(descriptor.id)
                 else { return nil }
                 let displayID = descriptor.displayID.flatMap {
                     snapshot.displayIDs.contains($0) ? $0 : nil

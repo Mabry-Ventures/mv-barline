@@ -49,6 +49,18 @@ enum AXElementRead {
     case failure(AXReadFailure)
 }
 
+enum AXProcessIdentifierRead: Equatable, Sendable {
+    case value(Int32)
+    case failure(AXReadFailure)
+}
+
+enum AXGeometryRead: Equatable, Sendable {
+    case bounds(CGRect)
+    case noValue
+    case unsupported
+    case failure(AXReadFailure)
+}
+
 /// One scan's cancellation handler revokes this signal before queued AX work
 /// is admitted. Unlike Task.isCancelled, it survives dispatch thread hops.
 final class AXReadCancellation: @unchecked Sendable {
@@ -69,6 +81,63 @@ final class AXReadCancellation: @unchecked Sendable {
 }
 
 enum AXIdentityReadSupport {
+    static func decodeProcessIdentifier(status: AXError, value: Int32) -> AXProcessIdentifierRead {
+        guard status == .success else { return .failure(failure(status)) }
+        guard value > 0 else { return .failure(AXReadFailure(.malformedResponse)) }
+        return .value(value)
+    }
+
+    /// Both attributes belong to this node; there is no ancestor or wrapper
+    /// fallback. Missing geometry is unknown, never negative identity proof.
+    static func decodeGeometry(status: AXError, values: CFTypeRef?) -> AXGeometryRead {
+        switch status {
+        case .noValue: return .noValue
+        case .attributeUnsupported: return .unsupported
+        case .success: break
+        default: return .failure(failure(status))
+        }
+        guard let values, CFGetTypeID(values) == CFArrayGetTypeID() else {
+            return .failure(AXReadFailure(.wrongType))
+        }
+        let array = unsafeDowncast(values, to: CFArray.self)
+        guard CFArrayGetCount(array) == 2 else { return .failure(AXReadFailure(.malformedResponse)) }
+        let slots = array as [AnyObject]
+        var point = CGPoint.zero
+        var size = CGSize.zero
+        for (index, slot) in slots.enumerated() {
+            guard CFGetTypeID(slot) == AXValueGetTypeID() else {
+                return CFGetTypeID(slot) == CFNullGetTypeID() ? .noValue : .failure(AXReadFailure(.wrongType))
+            }
+            let value = unsafeDowncast(slot, to: AXValue.self)
+            if AXValueGetType(value) == .axError {
+                var error = AXError.success
+                guard AXValueGetValue(value, .axError, &error) else { return .failure(AXReadFailure(.wrongType)) }
+                switch error {
+                case .noValue: return .noValue
+                case .attributeUnsupported: return .unsupported
+                case .success: return .failure(AXReadFailure(.malformedResponse))
+                default: return .failure(failure(error))
+                }
+            }
+            if index == 0 {
+                guard AXValueGetType(value) == .cgPoint, AXValueGetValue(value, .cgPoint, &point) else {
+                    return .failure(AXReadFailure(.wrongType))
+                }
+            } else {
+                guard AXValueGetType(value) == .cgSize, AXValueGetValue(value, .cgSize, &size) else {
+                    return .failure(AXReadFailure(.wrongType))
+                }
+            }
+        }
+        guard point.x.isFinite, point.y.isFinite, size.width.isFinite, size.height.isFinite,
+              size.width > 0, size.height > 0,
+              (point.x + size.width).isFinite, (point.y + size.height).isFinite
+        else {
+            return .failure(AXReadFailure(.malformedResponse))
+        }
+        return .bounds(CGRect(origin: point, size: size))
+    }
+
     /// The production extras adapter uses this orchestration, including the
     /// returned root's timeout adoption. No IPC or adoption may start after
     /// cancellation/deadline, and late results remain unknown.
@@ -194,7 +263,9 @@ enum AXIdentityReadSupport {
         count: () -> (AXError, CFIndex),
         copy: (CFIndex) -> (AXError, CFTypeRef?)
     ) -> AXChildrenRead {
-        guard maximumCount > 0, maximumCount <= 64 else { return .failure(AXReadFailure(.overLimit)) }
+        // Zero remaining capacity may prove a genuinely empty leaf without
+        // copying anything; any positive count fails before a native fetch.
+        guard maximumCount >= 0, maximumCount <= 64 else { return .failure(AXReadFailure(.overLimit)) }
         let first = perform(deadline: deadline, now: now, cancelled: cancelled, setTimeout: setTimeout, operation: count)
         let observedCount: CFIndex
         switch first {

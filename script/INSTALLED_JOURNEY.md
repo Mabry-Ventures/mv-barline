@@ -2,11 +2,27 @@
 
 `test-installed-journey.sh` is a release gate, not a replacement for Core or fixture tests. It never builds, launches, quits, installs, or foregrounds Barline, and never resets a permission or changes a saved layout. It sends a bounded series of real mouse down/up events, so reserve the pointer for the duration of each run. Run only with explicit interactive-runtime approval.
 
-## Prepare once
+## Prepare the stable permission identity
+
+The journey runner must be a signed, stable app identity because macOS grants
+Screen Recording and Accessibility to the responsible app, not to a randomly
+named temporary executable. On the Mac that holds Barline's Developer ID
+signing identity, run `bash script/build-journey-harness.sh`. Copy the resulting
+`.artifacts/runtime/Barline Journey Harness.app` to
+`~/Applications/Barline Journey Harness.app` on the test Mac, preserving any
+existing copy before replacement. Grant that exact app Accessibility and
+Screen Recording in System Settings; the runner deliberately does not prompt.
+The journey script verifies the helper bundle ID and SHA-256 of its embedded
+source before it sends any events.
+
+## Prepare the fixture
 
 1. Build `BarlineFixture` locally. Run `bash script/start-journey-fixture.sh /absolute/BarlineFixture.app /absolute/ignored-artifacts-directory`. It refuses an existing fixture, starts one hidden/background instance with two synthetic items (Native and Popover), and prints the three exact environment assignments for the gate. No credentials or real item metadata enter the receipt. Optional `BARLINE_FIXTURE_JOURNEY_ITEMS=Native,Delayed` selects the delayed-discovery lane; `Native,Unresponsive` selects the bounded fault-injection lane.
 2. Use Barline's normal layout editor to place **only the synthetic fixture items** `BF Native`, `BF Popover`, and `BF Delayed` in its hidden section. Preserve all unrelated items. Leave the shelf and fixture menus closed. `BF Unresponsive` is an optional, bounded two-second fixture-only fault injection, not part of the success test.
-3. Confirm exactly one installed signed/notarized candidate is running. The harness requires that process's Accessibility access and the test process's Accessibility/Screen Recording access; missing access fails without prompting. Do not grant new access to production automatically.
+3. Confirm exactly one installed signed/notarized candidate is running. The
+   harness requires that process's Accessibility access and the stable journey
+   app's Accessibility/Screen Recording access; missing access fails without
+   prompting. Do not grant new access to production automatically.
 
 ## Run
 
@@ -23,7 +39,14 @@ BARLINE_JOURNEY_TARGET=BF Native
 BARLINE_JOURNEY_BUTTON=left
 ```
 
-Then execute `bash script/test-installed-journey.sh` and retain stdout in the candidate's ignored artifacts. The default release evidence directory is `.artifacts/release/<source SHA>`; `BARLINE_RELEASE_DIR` may override it. The harness verifies the signature, Gatekeeper, staple, release metadata SHA, and installed executable hash against that release's ZIP **before** any click.
+Set `BARLINE_JOURNEY_HARNESS_APP` to the exact stable helper bundle path (for
+example `/Users/jaredmabry/Applications/Barline Journey Harness.app`), then
+execute `bash script/test-installed-journey.sh` and retain stdout in the
+candidate's ignored artifacts. The default release evidence directory is
+`.artifacts/release/<source SHA>`; `BARLINE_RELEASE_DIR` may override it. The
+harness verifies its source hash, the candidate signature, Gatekeeper, staple,
+release metadata SHA, and installed executable hash against that release's ZIP
+**before** any click.
 
 The four source-bound acceptance receipts are `native-left`, `native-right`,
 `popover-left`, and a second `popover-reuse` left-click using the same running

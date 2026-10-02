@@ -1,5 +1,64 @@
 # Barline execution plan
 
+## Integrated platform-presence candidate — October 1, 2026
+
+The isolated candidate now connects the closed, bounded MenuBarAgent AX scope
+reader to the fresh macOS 27 inventory scan. It binds the exact Focus item to a
+verified publisher lifetime, retains the runtime-only observation in the same
+scan envelope, and projects only that exact platform-owned item through a fixed
+contract. Any disagreement, incomplete read, identity/session change,
+cancellation, or failed scan withholds the observation and invalidates cached
+scan provenance. All other inventory and mutation checks remain strict.
+
+The contract is propagated through profile compatibility/resolution, mutation
+convergence and compensation, recovery, history, and restart boundaries without
+persisting runtime evidence. Visible legacy Focus references are narrowly
+projected; hidden Focus references are unsupported. On macOS 27, an unknown or
+missing qualified capture fails inventory closed instead of falling back to a
+raw Focus record. The validator also rejects Focus disappearance without an
+admitted runtime contract before generic collapse tolerances are considered.
+On October 2, `./script/ci.sh fast` passed again on the current dirty candidate
+(823 Core tests across 80 suites plus lint, architecture, privacy, persistence,
+packaging and repository checks). CPLCODEX01 is reachable through its configured
+SSH alias and runs macOS 27.0.1/26A434 with Xcode 27. The exact staged source
+passed `swift test` (823 tests/80 suites), Xcode 27 Debug `build-for-testing`,
+Release build and static analysis, and the Xcode Core/integration test products
+(6/6). The fixture UI qualification passed its deterministic surface test; the
+two synthesized status-item click tests remain explicitly skipped on macOS 27.
+These are source/build/fixture results, not an installed Barline runtime pass.
+
+The installed `/Applications/Barline.app` on CPLCODEX01 is still the older
+1.0.66/build 152 binary. No signed candidate has been installed. The stable
+journey harness is present, but its combined permission preflight fails; the
+SSH Swift probe reports Accessibility trusted and Screen Recording untrusted.
+The installed source-bound physical journey therefore remains blocked pending
+the stable harness's own permission check and grant. macOS 26 runtime and
+installed-upgrade proof also remain open. The latest public release remains
+1.0.65/build 142; nothing has been published from this candidate.
+
+## Bounded live MenuBarAgent scope reader — October 1, 2026
+
+The app now has an isolated, synchronous AX scan for macOS 27. It retains
+handles only inside one actor call and returns plain typed facts. The validator
+requires the extras root, every hosting wrapper and every terminal menu item to
+be present exactly once, with stable ordered membership, verified process
+ownership, exact AX roles, usable item bounds, and no open child frontier.
+Clock and Control Center are required literal anchors; Focus is recognized only
+by its exact observed identifier. Case/whitespace collisions fail the capture.
+This scan grants no layout exclusion or mutation authority.
+
+Review caught and fixed a stale-root race: an old, still-readable extras object
+could otherwise survive after MenuBarAgent replaced the application's current
+extras root. The scan now reacquires the application attribute and requires the
+same CFEqual root and process before publication. A zero remaining node budget
+can prove only an empty child frontier; nonempty children fail before fetch.
+Regressions pass 115 typed-reader checks and 35 pure closed-scope checks. The
+macOS 27 Debug build and repository fast gate pass, including the new scope gate.
+At the time this earlier source slice was recorded, the observer was not yet
+connected to inventory projection or authority decisions. The integrated
+candidate status and remaining device/runtime gates are recorded above. Release
+remains HOLD; installed 152 and public 142 are unchanged.
+
 ## Atomic observation envelopes — October 1, 2026
 
 The backend now returns snapshot and scan context together through a protocol

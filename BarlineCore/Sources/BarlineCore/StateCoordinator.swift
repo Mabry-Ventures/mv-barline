@@ -10,6 +10,12 @@ public enum MenuBarAuthorityRefreshError: Error, Equatable, Sendable {
     case staleGeneration(expected: UInt64, actual: UInt64?)
 }
 
+public enum ProfileAuthorityAssessment: Sendable, Equatable {
+    case matches
+    case mismatch
+    case temporarilyUnavailable
+}
+
 public enum MenuBarMutation: Sendable {
     case move(MenuBarMoveOperation)
     case transientReveal(MenuBarMoveOperation)
@@ -273,6 +279,9 @@ public actor MenuBarStateCoordinator {
 
     private let backend: any MenuBarBackend
     private let validator: SnapshotValidator
+    private var activePlatformPresenceContract: MenuBarPlatformPresenceContract?
+    private var latestBackendAuthorityObservation: MenuBarAuthorityObservation?
+    private var qualifiedPlatformPresenceContractHasBeenEstablished = false
     private let retryPolicy: RetryPolicy
     private let compensationTimeout: Duration
     private let historyLimit = 50
@@ -465,7 +474,8 @@ public actor MenuBarStateCoordinator {
 
     private func refreshAssumingMutationTurn(
         now: Date?,
-        maximumAttempts: Int? = nil
+        maximumAttempts: Int? = nil,
+        freshness: MenuBarObservationFreshness = .cachedAllowed
     ) async throws -> MenuBarSnapshot {
         var mostRecentError: (any Error)?
 
@@ -474,12 +484,14 @@ public actor MenuBarStateCoordinator {
         for attempt in 0 ..< attemptCount {
             try Task.checkCancellation()
             do {
-                let observation = try await normalizedBackendObservation(freshness: .cachedAllowed)
-                let candidate = observation.snapshot
-                switch validator.validate(candidate, previous: currentSnapshot, now: now ?? Date()) {
+                let observation = try await normalizedBackendObservation(freshness: freshness)
+                switch validateBackendObservation(observation, previous: currentSnapshot, now: now ?? Date()) {
                 case let .success(snapshot):
+                    let presenceContract = activePlatformPresenceContract ??
+                        MenuBarPlatformPresenceContract.admitting(observation)
                     if let currentSnapshot,
-                       logicalLayout(of: currentSnapshot) != logicalLayout(of: snapshot)
+                       logicalLayout(of: currentSnapshot, using: presenceContract) !=
+                       logicalLayout(of: snapshot, using: presenceContract)
                     {
                         activeProfileID = nil
                     }
@@ -601,6 +613,11 @@ public actor MenuBarStateCoordinator {
             throw MenuBarBackendError.operationFailed("no last-known-good snapshot")
         }
         let before = try await validatedStartingSnapshot(now: now)
+        let priorPlatformPresenceContract = activePlatformPresenceContract
+        activePlatformPresenceContract = currentAuthorityObservation.flatMap {
+            MenuBarPlatformPresenceContract.admitting($0)
+        }
+        defer { activePlatformPresenceContract = priorPlatformPresenceContract }
         let backendCapabilities = await backend.capabilities
         let moveDestinationSupport = backendCapabilities.moveDestinationSupport
         let probedVisibilityAssignmentGranularity = backendCapabilities.arrangement?
@@ -644,6 +661,7 @@ public actor MenuBarStateCoordinator {
                 throw CancellationError()
             }
             currentSnapshot = snapshot
+            currentAuthorityObservation = platformAuthorityObservation(matching: snapshot)
             lastKnownGoodSnapshot = snapshot
             lastRejection = nil
             if mutation.recordsLayoutHistory {
@@ -656,9 +674,11 @@ public actor MenuBarStateCoordinator {
             let mutationError = error
             if Self.mutationDidNotStart(mutationError) {
                 // Preflight failed before the backend wrote native state.
-                // Keep the validated starting snapshot and do not manufacture
-                // a second mutation through compensation.
-                currentSnapshot = before
+                // `validatedStartingSnapshot` already published that snapshot
+                // together with its fresh authority envelope. Reassigning the
+                // same value would trigger `currentSnapshot.didSet`, revoke the
+                // envelope, and let a retry reuse cached state without another
+                // qualified platform-presence admission.
                 lastKnownGoodSnapshot = before
                 throw mutationError
             }
@@ -669,13 +689,14 @@ public actor MenuBarStateCoordinator {
                 // state that this caller does not own with its stale `before`
                 // snapshot, defeating the backend's compare/rebase guard.
                 if let observed = try? await normalizedBackendSnapshot(requiresFreshObservation: true),
-                   case let .success(snapshot) = validator.validate(
+                   case let .success(snapshot) = validateBackendSnapshot(
                        observed,
                        previous: nil,
                        now: now ?? Date()
                    )
                 {
                     currentSnapshot = snapshot
+                    currentAuthorityObservation = platformAuthorityObservation(matching: snapshot)
                     lastKnownGoodSnapshot = snapshot
                 } else {
                     currentSnapshot = nil
@@ -696,6 +717,7 @@ public actor MenuBarStateCoordinator {
                         )
                     }
                     currentSnapshot = rollbackSnapshot
+                    currentAuthorityObservation = platformAuthorityObservation(matching: rollbackSnapshot)
                     lastKnownGoodSnapshot = rollbackSnapshot
                     lastKnownGoodProfileID = activeProfileID
                 } catch {
@@ -717,7 +739,7 @@ public actor MenuBarStateCoordinator {
             do {
                 let rollbackCandidate = try await compensationSnapshot(restoring: before)
                 let rollbackSnapshot: MenuBarSnapshot
-                switch validator.validate(rollbackCandidate, previous: nil, now: now ?? Date()) {
+                switch validateBackendSnapshot(rollbackCandidate, previous: nil, now: now ?? Date()) {
                 case let .success(snapshot):
                     try validateHistoryResult(snapshot, matches: before)
                     rollbackSnapshot = snapshot
@@ -725,6 +747,7 @@ public actor MenuBarStateCoordinator {
                     throw MenuBarBackendError.invalidSnapshot(reason)
                 }
                 currentSnapshot = rollbackSnapshot
+                currentAuthorityObservation = platformAuthorityObservation(matching: rollbackSnapshot)
                 lastKnownGoodSnapshot = rollbackSnapshot
                 lastKnownGoodProfileID = activeProfileID
             } catch {
@@ -765,12 +788,12 @@ public actor MenuBarStateCoordinator {
                 let validationNow = now.addingTimeInterval(
                     Date().timeIntervalSince(validationClockStartedAt)
                 )
-                let restored = try validator.validate(
+                let restored = try validateBackendSnapshot(
                     candidate,
                     previous: nil,
                     now: validationNow
                 ).get()
-                guard Self.matchesLogicalArrangement(restored, target: before) else {
+                guard matchesLogicalArrangement(restored, target: before) else {
                     throw MenuBarBackendError.operationFailed(
                         "logical move compensation did not restore the prior layout"
                     )
@@ -786,10 +809,12 @@ public actor MenuBarStateCoordinator {
         throw mostRecentError ?? MenuBarBackendError.mutationRecoveryFailed
     }
 
-    private static func matchesLogicalArrangement(
+    private func matchesLogicalArrangement(
         _ snapshot: MenuBarSnapshot,
         target: MenuBarSnapshot
     ) -> Bool {
+        let snapshot = layoutAuthoritySnapshot(snapshot)
+        let target = layoutAuthoritySnapshot(target)
         guard Set(snapshot.items.map(\.id)) == Set(target.items.map(\.id)) else {
             return false
         }
@@ -859,7 +884,7 @@ public actor MenuBarStateCoordinator {
                     Date().timeIntervalSince(validationClockStartedAt)
                 )
                 let snapshot: MenuBarSnapshot
-                switch validator.validate(candidate, previous: before, now: validationNow) {
+                switch validateBackendSnapshot(candidate, previous: before, now: validationNow) {
                 case let .success(validated):
                     lastRejection = nil
                     snapshot = validated
@@ -868,22 +893,25 @@ public actor MenuBarStateCoordinator {
                     throw MenuBarBackendError.invalidSnapshot(reason)
                 }
 
+                let authoritySnapshot = layoutAuthoritySnapshot(snapshot)
+                let authorityBefore = layoutAuthoritySnapshot(before)
+
                 if let operation = mutation.moveOperation,
                    !(Self.isVisibleTransientReveal(
                        mutation,
                        operation: operation,
                        destinationSupport: moveDestinationSupport,
-                       in: snapshot
+                       in: authoritySnapshot
                    ) ?? Self.isHiddenTransientRestoration(
                        mutation,
                        operation: operation,
                        destinationSupport: moveDestinationSupport,
-                       in: snapshot,
-                       from: before
+                       in: authoritySnapshot,
+                       from: authorityBefore
                    ) ?? MenuBarMovePlanner().resultMatches(
                        operation,
-                       in: snapshot,
-                       from: before,
+                       in: authoritySnapshot,
+                       from: authorityBefore,
                        destinationSupport: moveDestinationSupport,
                        visibilityAssignmentGranularity: visibilityAssignmentGranularity
                    ))
@@ -891,7 +919,7 @@ public actor MenuBarStateCoordinator {
                     if retriesTransientMove,
                        let operation = mutation.moveOperation
                     {
-                        let observed = snapshot.items.first { $0.id == operation.itemID }
+                        let observed = authoritySnapshot.items.first { $0.id == operation.itemID }
                         Self.logger.notice(
                             "Transient move postcondition: section=\(observed?.section.rawValue ?? "missing", privacy: .public) onScreen=\(observed?.isOnScreen == true, privacy: .public) displayMatched=\(operation.destinationDisplayID.map { observed?.displayID == $0 } ?? true, privacy: .public)"
                         )
@@ -899,8 +927,8 @@ public actor MenuBarStateCoordinator {
                     if moveDestinationSupport == .logicalSectionsPreserveNativeOrder,
                        let failure = MenuBarMovePlanner().logicalSectionVerificationFailure(
                            operation,
-                           in: snapshot,
-                           from: before,
+                           in: authoritySnapshot,
+                           from: authorityBefore,
                            visibilityAssignmentGranularity: visibilityAssignmentGranularity
                        )
                     {
@@ -917,7 +945,7 @@ public actor MenuBarStateCoordinator {
                 {
                     let signature = VisibilityObservationSignature(
                         operation: operation,
-                        snapshot: snapshot
+                        snapshot: authoritySnapshot
                     )
                     guard previousSuccessfulVisibilitySignature == signature else {
                         previousSuccessfulVisibilitySignature = signature
@@ -927,8 +955,8 @@ public actor MenuBarStateCoordinator {
                     }
                 }
                 if case let .reveal(itemID) = mutation {
-                    guard let beforeItem = before.items.first(where: { $0.id == itemID }),
-                          let revealedItem = snapshot.items.first(where: { $0.id == itemID }),
+                    guard let beforeItem = authorityBefore.items.first(where: { $0.id == itemID }),
+                          let revealedItem = authoritySnapshot.items.first(where: { $0.id == itemID }),
                           revealedItem.section == .visible,
                           revealedItem.isOnScreen,
                           revealedItem.displayID == beforeItem.displayID
@@ -1062,6 +1090,7 @@ public actor MenuBarStateCoordinator {
         _ plan: ProfileLayoutReconciler.DisplayPlan,
         in snapshot: MenuBarSnapshot
     ) throws {
+        let snapshot = layoutAuthoritySnapshot(snapshot)
         guard plan.matches(items: snapshot.items) else {
             throw MenuBarBackendError.operationFailed(
                 "profile activation did not reach requested layout"
@@ -1076,6 +1105,7 @@ public actor MenuBarStateCoordinator {
         admittedLayoutPlan: ProfileLayoutReconciler.DisplayPlan,
         in snapshot: MenuBarSnapshot
     ) throws {
+        let snapshot = layoutAuthoritySnapshot(snapshot)
         if plan.nativeOrder == .applySavedOrder,
            plan.shelfOrder == .applySavedOrder
         {
@@ -1213,15 +1243,17 @@ public actor MenuBarStateCoordinator {
     /// A fresh replan is not permission to overwrite changes outside the move.
     /// Unexpected concurrent edits take the existing superseded/observation-only
     /// path, withdrawing authority without blindly restoring the old layout.
-    private static func validateLogicalProfileStep(
+    private func validateLogicalProfileStep(
         operation: MenuBarMoveOperation,
         before: MenuBarSnapshot,
         after: MenuBarSnapshot
     ) throws {
+        let before = layoutAuthoritySnapshot(before)
+        let after = layoutAuthoritySnapshot(after)
         guard let source = before.items.first(where: { $0.id == operation.itemID }) else {
             throw MenuBarBackendError.staleItem(operation.itemID)
         }
-        let affected = logicalMutationItemIDs(operation: operation, source: source, before: before)
+        let affected = Self.logicalMutationItemIDs(operation: operation, source: source, before: before)
         let currentByID = Dictionary(uniqueKeysWithValues: after.items.map { ($0.id, $0) })
         guard before.items.allSatisfy({ prior in
             currentByID[prior.id].map { $0.displayID == prior.displayID } ?? true
@@ -1312,7 +1344,7 @@ public actor MenuBarStateCoordinator {
                     Date().timeIntervalSince(validationClockStartedAt)
                 )
                 let snapshot: MenuBarSnapshot
-                switch validator.validate(candidate, previous: before, now: validationNow) {
+                switch validateBackendSnapshot(candidate, previous: before, now: validationNow) {
                 case let .success(validated):
                     lastRejection = nil
                     snapshot = validated
@@ -1332,7 +1364,7 @@ public actor MenuBarStateCoordinator {
                     try validateProfileResult(admittedLayoutPlan, in: snapshot)
                 }
                 if retriesLogicalConvergence {
-                    let signature = ProfileObservationSignature(snapshot: snapshot)
+                    let signature = ProfileObservationSignature(snapshot: layoutAuthoritySnapshot(snapshot))
                     guard previousSignature == signature else {
                         previousSignature = signature
                         throw MenuBarBackendError.operationFailed(
@@ -1374,22 +1406,25 @@ public actor MenuBarStateCoordinator {
         }
         let validationClockStartedAt = Date()
         let observed = try await normalizedBackendSnapshot(requiresFreshObservation: true)
-        var current = try validator.validate(
+        var current = try validateBackendSnapshot(
             observed,
             previous: nil,
             now: now.addingTimeInterval(Date().timeIntervalSince(validationClockStartedAt))
         ).get()
-        if Set(current.items.map(\.id)) != Set(before.items.map(\.id)) {
+        let authorityBefore = layoutAuthoritySnapshot(before)
+        current = layoutAuthoritySnapshot(current)
+        if Set(current.items.map(\.id)) != Set(authorityBefore.items.map(\.id)) {
             guard destinationSupport == .logicalSectionsPreserveNativeOrder,
                   GoldenGateConcealmentPolicy.permitsFocusDeassertionRecovery(
-                      original: before, current: current, transactionOwnedItemIDs: transactionOwnedItemIDs
+                      original: authorityBefore, current: current,
+                      transactionOwnedItemIDs: transactionOwnedItemIDs
                   )
             else {
                 throw MenuBarBackendError.operationFailed("profile recovery inventory changed")
             }
             try Task.checkCancellation()
             try await backend.configureConcealment(MenuBarConcealmentConfiguration(
-                visibleItemIDs: before.items.filter { !$0.isBarlineControlItem }.map(\.id),
+                visibleItemIDs: authorityBefore.items.filter { !$0.isBarlineControlItem }.map(\.id),
                 concealedItemIDs: []
             ))
             var stableSignature: ProfileObservationSignature?
@@ -1397,14 +1432,17 @@ public actor MenuBarStateCoordinator {
             let attempts = max(2, retryPolicy.maximumAttempts + 2)
             for attempt in 0 ..< attempts {
                 try Task.checkCancellation()
-                let candidate = try await validator.validate(
-                    normalizedBackendSnapshot(requiresFreshObservation: true), previous: current,
+                let rawCandidate = try await normalizedBackendSnapshot(requiresFreshObservation: true)
+                let validatedCandidate = try validateBackendSnapshot(
+                    rawCandidate, previous: current,
                     now: now.addingTimeInterval(Date().timeIntervalSince(validationClockStartedAt))
                 ).get()
+                let candidate = layoutAuthoritySnapshot(validatedCandidate)
                 guard GoldenGateConcealmentPolicy.preservesUnownedRecoveryInventory(
-                    original: before, current: candidate, transactionOwnedItemIDs: transactionOwnedItemIDs
+                    original: authorityBefore, current: candidate,
+                    transactionOwnedItemIDs: transactionOwnedItemIDs
                 ) else { throw MenuBarBackendError.mutationSuperseded }
-                if Set(candidate.items.map(\.id)) == Set(before.items.map(\.id)) {
+                if Set(candidate.items.map(\.id)) == Set(authorityBefore.items.map(\.id)) {
                     let signature = ProfileObservationSignature(snapshot: candidate)
                     if signature == stableSignature {
                         recovered = candidate
@@ -1424,19 +1462,19 @@ public actor MenuBarStateCoordinator {
             }
             current = recovered
         }
-        let originalLayout = Self.layout(from: before, displayID: displayID)
+        let originalLayout = Self.layout(from: authorityBefore, displayID: displayID)
         let admittedLayout = Self.preservingNativeVisibleOrder(
             in: originalLayout,
             snapshot: current
         )
         let plan = try ProfileLayoutReconciler.planAcrossDisplays(
             layout: admittedLayout,
-            items: current.items,
+            items: layoutAuthoritySnapshot(current).items,
             displayID: displayID,
             destinationSupport: destinationSupport
         )
         if destinationSupport == .logicalSectionsPreserveNativeOrder {
-            var executionSnapshot = current
+            var executionSnapshot = layoutAuthoritySnapshot(current)
             let maximumMoves = max(1, current.items.count * 4)
             var completedMoves = 0
             while let operation = try Self.nextLogicalProfileOperation(
@@ -1449,12 +1487,16 @@ public actor MenuBarStateCoordinator {
                 try Task.checkCancellation()
                 _ = try await backend.move(operation)
                 completedMoves += 1
-                let nextSnapshot = try await validator.validate(
-                    normalizedBackendSnapshot(requiresFreshObservation: true), previous: executionSnapshot,
+                let rawNextSnapshot = try await normalizedBackendSnapshot(requiresFreshObservation: true)
+                let nextSnapshot = try validateBackendSnapshot(
+                    rawNextSnapshot, previous: executionSnapshot,
                     now: now.addingTimeInterval(Date().timeIntervalSince(validationClockStartedAt))
                 ).get()
-                try Self.validateLogicalProfileStep(operation: operation, before: executionSnapshot, after: nextSnapshot)
-                executionSnapshot = nextSnapshot
+                let projectedNextSnapshot = layoutAuthoritySnapshot(nextSnapshot)
+                try validateLogicalProfileStep(
+                    operation: operation, before: executionSnapshot, after: projectedNextSnapshot
+                )
+                executionSnapshot = projectedNextSnapshot
             }
         } else {
             for operation in plan.operations where Self.shouldApply(
@@ -1464,7 +1506,7 @@ public actor MenuBarStateCoordinator {
             }
         }
         let candidate = try await normalizedBackendSnapshot(requiresFreshObservation: true)
-        let restored = try validator.validate(
+        let restored = try validateBackendSnapshot(
             candidate,
             previous: nil,
             now: now.addingTimeInterval(Date().timeIntervalSince(validationClockStartedAt))
@@ -1490,7 +1532,7 @@ public actor MenuBarStateCoordinator {
             throw DisplayVariantCapture.Failure.unavailable
         }
         let candidate = try await normalizedBackendSnapshot(requiresFreshObservation: true)
-        let snapshot = try validator.validate(candidate, previous: currentSnapshot, now: Date()).get()
+        let snapshot = try validateBackendSnapshot(candidate, previous: currentSnapshot, now: Date()).get()
         guard try await backend.environment().activeStableDisplayID == displayID else {
             throw DisplayVariantCapture.Failure.unavailable
         }
@@ -1546,6 +1588,12 @@ public actor MenuBarStateCoordinator {
             )
         }
         let before = startingCheckpoint.snapshot
+        let priorPlatformPresenceContract = activePlatformPresenceContract
+        activePlatformPresenceContract = currentAuthorityObservation.flatMap {
+            MenuBarPlatformPresenceContract.admitting($0)
+        }
+        defer { activePlatformPresenceContract = priorPlatformPresenceContract }
+        let authorityBefore = layoutAuthoritySnapshot(before)
         guard !before.menuTrackingIsActive else {
             throw MenuBarBackendError.unsafeMenuTracking
         }
@@ -1567,17 +1615,25 @@ public actor MenuBarStateCoordinator {
             DisplayProfileOverrideResolver().resolve(
                 profile: profile,
                 requestedDisplayID: activeDisplayID,
-                snapshot: before
+                snapshot: authorityBefore
             )
         }
         // A base profile can contain items from every display. Only a matching
         // display override is scoped and retargeted to the active display;
         // applying the base layout preserves each item's source display.
-        let presentation = try profile.resolvedPresentation(using: matchingDisplayOverride)
-            .resolvingItemIdentities(in: before)
+        let unresolvedPresentation = profile.resolvedPresentation(using: matchingDisplayOverride)
+        let presentation: ResolvedProfilePresentation
+        if let activePlatformPresenceContract {
+            guard let projectedPresentation = activePlatformPresenceContract.projecting(unresolvedPresentation) else {
+                throw MenuBarBackendError.operationFailed("macOS Focus cannot be assigned to a hidden section")
+            }
+            presentation = try projectedPresentation.resolvingItemIdentities(in: authorityBefore)
+        } else {
+            presentation = try unresolvedPresentation.resolvingItemIdentities(in: before)
+        }
         let profileDisplayID = presentation.destinationDisplayID
         let layout = presentation.layout
-        let knownItemIDs = Set(before.items.map(\.id))
+        let knownItemIDs = Set(authorityBefore.items.map(\.id))
         for itemID in layout.allItemIDs where !knownItemIDs.contains(itemID) {
             throw MenuBarBackendError.staleItem(itemID)
         }
@@ -1586,18 +1642,18 @@ public actor MenuBarStateCoordinator {
         let backendCapabilities = await backend.capabilities
         let destinationSupport = backendCapabilities.moveDestinationSupport ?? .existingItemRequired
         let admittedLayout = if backendCapabilities.arrangement?.canApplySavedNativeOrder == false {
-            Self.preservingNativeVisibleOrder(in: layout, snapshot: before)
+            Self.preservingNativeVisibleOrder(in: layout, snapshot: authorityBefore)
         } else {
             layout
         }
         let layoutPlan = try ProfileLayoutReconciler.planAcrossDisplays(
-            layout: admittedLayout, items: before.items, displayID: profileDisplayID,
+            layout: admittedLayout, items: authorityBefore.items, displayID: profileDisplayID,
             destinationSupport: destinationSupport
         )
         let arrangementPlan = try backendCapabilities.arrangement.map {
             try MenuBarArrangementPolicy().plan(
                 layout: layout,
-                snapshot: before,
+                snapshot: authorityBefore,
                 capabilities: $0,
                 barlineBundleIdentifier: "com.mabryventures.Barline"
             )
@@ -1660,7 +1716,7 @@ public actor MenuBarStateCoordinator {
             if let arrangementPlan,
                destinationSupport == .logicalSectionsPreserveNativeOrder
             {
-                var executionSnapshot = before
+                var executionSnapshot = authorityBefore
                 let executionStartedAt = Date()
                 let maximumMoves = max(1, before.items.count * 4)
                 while let operation = try Self.nextLogicalProfileOperation(
@@ -1680,12 +1736,16 @@ public actor MenuBarStateCoordinator {
                     }
                     _ = try await backend.move(operation)
                     completedLayoutMutationCount += 1
-                    let nextSnapshot = try await validator.validate(
-                        normalizedBackendSnapshot(requiresFreshObservation: true), previous: executionSnapshot,
+                    let rawNextSnapshot = try await normalizedBackendSnapshot(requiresFreshObservation: true)
+                    let nextSnapshot = try validateBackendSnapshot(
+                        rawNextSnapshot, previous: executionSnapshot,
                         now: (now ?? executionStartedAt).addingTimeInterval(Date().timeIntervalSince(executionStartedAt))
                     ).get()
-                    try Self.validateLogicalProfileStep(operation: operation, before: executionSnapshot, after: nextSnapshot)
-                    executionSnapshot = nextSnapshot
+                    let nextAuthoritySnapshot = layoutAuthoritySnapshot(nextSnapshot)
+                    try validateLogicalProfileStep(
+                        operation: operation, before: executionSnapshot, after: nextAuthoritySnapshot
+                    )
+                    executionSnapshot = nextAuthoritySnapshot
                 }
             } else {
                 for operation in layoutPlan.operations {
@@ -1751,6 +1811,7 @@ public actor MenuBarStateCoordinator {
             }
             try Task.checkCancellation()
             currentSnapshot = snapshot
+            currentAuthorityObservation = platformAuthorityObservation(matching: snapshot)
             lastKnownGoodSnapshot = snapshot
             lastRejection = nil
             activeProfileID = profile.id
@@ -1813,7 +1874,7 @@ public actor MenuBarStateCoordinator {
             } else if layoutWasSuperseded {
                 do {
                     let observed = try await normalizedBackendSnapshot(requiresFreshObservation: true)
-                    switch validator.validate(observed, previous: nil, now: now ?? Date()) {
+                    switch validateBackendSnapshot(observed, previous: nil, now: now ?? Date()) {
                     case let .success(snapshot):
                         verifiedRollbackSnapshot = snapshot
                     case let .failure(reason):
@@ -1826,7 +1887,7 @@ public actor MenuBarStateCoordinator {
                 if await backend.capabilities.canRestore {
                     do {
                         let candidate = try await compensationSnapshot(restoring: before)
-                        switch validator.validate(candidate, previous: nil, now: now ?? Date()) {
+                        switch validateBackendSnapshot(candidate, previous: nil, now: now ?? Date()) {
                         case let .success(snapshot):
                             try validateHistoryResult(snapshot, matches: before)
                             verifiedRollbackSnapshot = snapshot
@@ -1870,6 +1931,7 @@ public actor MenuBarStateCoordinator {
                     workspaceWasSuperseded = true
                 }
                 currentSnapshot = verifiedRollbackSnapshot
+                currentAuthorityObservation = platformAuthorityObservation(matching: verifiedRollbackSnapshot)
                 lastKnownGoodSnapshot = verifiedRollbackSnapshot
                 activeProfileID = workspaceWasSuperseded || layoutWasSuperseded ? nil : priorProfileID
                 lastKnownGoodProfileID = workspaceWasSuperseded || layoutWasSuperseded ? nil : priorProfileID
@@ -1925,6 +1987,8 @@ public actor MenuBarStateCoordinator {
         mutationGeneration &+= 1
         backendHealth = MenuBarBackendHealth(backendName: "XPC", state: .restarting)
         currentAuthorityObservation = nil
+        latestBackendAuthorityObservation = nil
+        activePlatformPresenceContract = nil
         await backend.restart()
 
         do {
@@ -1951,15 +2015,21 @@ public actor MenuBarStateCoordinator {
                 backendGenerationOffset = 0
             }
             let normalizedObservation = try normalizeGeneration(of: observation)
-            let candidate = normalizedObservation.snapshot
+            latestBackendAuthorityObservation = normalizedObservation
+            let priorPlatformPresenceContract = activePlatformPresenceContract
+            activePlatformPresenceContract = MenuBarPlatformPresenceContract.admitting(normalizedObservation)
+            defer { activePlatformPresenceContract = priorPlatformPresenceContract }
             let continuityBaseline = preservedCurrent ?? preservedLastKnownGood
             let validationNow = now ?? Date()
-            switch validator.validate(candidate, previous: continuityBaseline, now: validationNow) {
+            switch validateBackendObservation(
+                normalizedObservation, previous: continuityBaseline, now: validationNow
+            ) {
             case let .success(snapshot):
                 if restoredLastKnownGood, let preservedLastKnownGood {
                     try validateHistoryResult(snapshot, matches: preservedLastKnownGood)
                 } else if let continuityBaseline,
-                          logicalLayout(of: snapshot) != logicalLayout(of: continuityBaseline)
+                          logicalLayout(of: snapshot, using: activePlatformPresenceContract) !=
+                          logicalLayout(of: continuityBaseline, using: activePlatformPresenceContract)
                 {
                     activeProfileID = nil
                 }
@@ -1982,6 +2052,10 @@ public actor MenuBarStateCoordinator {
             lastKnownGoodProfileID = preservedLastKnownGoodProfileID
             activeProfileID = nil
             backendGenerationOffset = 0
+            backendHealth = MenuBarBackendHealth(
+                backendName: backendHealth.backendName, state: .degraded,
+                message: "helper recovery failed"
+            )
             throw error
         }
     }
@@ -2031,12 +2105,16 @@ public actor MenuBarStateCoordinator {
         defer { releaseMutationTurn() }
         try requireItemInteraction(nil)
         try ProfileValidator().validate(profile)
-        let snapshot = try await refreshAssumingMutationTurn(now: now)
+        let snapshot = try await refreshAssumingMutationTurn(now: now, freshness: .freshRequired)
+        let platformContract = currentAuthorityObservation.flatMap {
+            MenuBarPlatformPresenceContract.admitting($0)
+        }
         guard let resolvedPresentation = DisplayProfileOverrideResolver()
             .resolvePersistedPresentation(
                 profile: profile,
                 persisted: persistedPresentation,
-                snapshot: snapshot
+                snapshot: snapshot,
+                platformContract: platformContract
             )
         else {
             activeProfileID = nil
@@ -2058,7 +2136,8 @@ public actor MenuBarStateCoordinator {
         guard ProfileAuthorityMatcher.matches(
             profile: profile,
             checkpoint: checkpoint,
-            destinationSupport: destinationSupport
+            destinationSupport: destinationSupport,
+            platformContract: platformContract
         ) else {
             activeProfileID = nil
             return nil
@@ -2098,11 +2177,15 @@ public actor MenuBarStateCoordinator {
             workspaceTransaction: workspaceTransaction,
             now: now
         )
+        let platformContract = currentAuthorityObservation.flatMap {
+            MenuBarPlatformPresenceContract.admitting($0)
+        }
         guard var liveWorkspace = live.workspace else {
             throw MenuBarBackendError.operationFailed("workspace capture is unavailable")
         }
         if liveWorkspace == checkpoint.workspace,
-           logicalLayout(of: live.snapshot) == logicalLayout(of: checkpoint.snapshot),
+           logicalLayout(of: live.snapshot, using: platformContract) ==
+           logicalLayout(of: checkpoint.snapshot, using: platformContract),
            live.snapshot.displayIDs == checkpoint.snapshot.displayIDs
         {
             activeProfileID = checkpoint.activeProfileID
@@ -2114,7 +2197,8 @@ public actor MenuBarStateCoordinator {
               .resolvePersistedPresentation(
                   profile: profile,
                   persisted: persistedPresentation,
-                  snapshot: live.snapshot
+                  snapshot: live.snapshot,
+                  platformContract: platformContract
               )
         else {
             return .inconclusive
@@ -2130,7 +2214,8 @@ public actor MenuBarStateCoordinator {
         if ProfileAuthorityMatcher.matches(
             profile: profile,
             checkpoint: liveCheckpoint,
-            destinationSupport: destinationSupport
+            destinationSupport: destinationSupport,
+            platformContract: platformContract
         ) {
             activeProfileID = profile.id
             lastKnownGoodProfileID = profile.id
@@ -2189,6 +2274,49 @@ public actor MenuBarStateCoordinator {
         )
     }
 
+    /// Assesses saved-profile authority against the latest coordinator snapshot.
+    /// A benign refresh may advance generation/time when its logical layout and
+    /// display topology are unchanged. Transient menu tracking and unavailable
+    /// observations defer destructive revocation until a stable read is possible.
+    public func assessProfileAuthority(
+        profile: BarlineProfile,
+        checkpoint: MenuBarWorkspaceCheckpoint
+    ) async -> ProfileAuthorityAssessment {
+        let destinationSupport = await backend.capabilities.moveDestinationSupport ?? .existingItemRequired
+        // Capability lookup is async and may yield this actor. Revalidate all
+        // live state after that suspension, then perform the pure match without
+        // another await so a routine refresh cannot race the comparison.
+        guard let snapshot = currentSnapshot else { return .temporarilyUnavailable }
+        guard snapshot.activeSpaceIsValid, !snapshot.menuTrackingIsActive else {
+            return .temporarilyUnavailable
+        }
+        guard let observation = currentAuthorityObservation,
+              observation.snapshot == snapshot
+        else { return .temporarilyUnavailable }
+        let checkpointDisplayIdentities = checkpoint.snapshot.displayIdentities.map { Set($0) }
+        let currentDisplayIdentities = snapshot.displayIdentities.map { Set($0) }
+        guard checkpoint.snapshot.displayIDs == snapshot.displayIDs,
+              checkpointDisplayIdentities == currentDisplayIdentities,
+              checkpoint.snapshot.activeSpaceIsValid == snapshot.activeSpaceIsValid
+        else { return .mismatch }
+        let platformContract = MenuBarPlatformPresenceContract.admitting(observation)
+        guard logicalLayout(of: checkpoint.snapshot, using: platformContract) ==
+            logicalLayout(of: snapshot, using: platformContract)
+        else { return .mismatch }
+        let liveCheckpoint = MenuBarWorkspaceCheckpoint(
+            snapshot: snapshot,
+            activeProfileID: checkpoint.activeProfileID,
+            activeDisplayID: checkpoint.activeDisplayID,
+            workspace: checkpoint.workspace
+        )
+        return ProfileAuthorityMatcher.matches(
+            profile: profile,
+            checkpoint: liveCheckpoint,
+            destinationSupport: destinationSupport,
+            platformContract: platformContract
+        ) ? .matches : .mismatch
+    }
+
     @discardableResult
     public func restoreWorkspaceCheckpoint(
         _ checkpoint: MenuBarWorkspaceCheckpoint,
@@ -2213,11 +2341,14 @@ public actor MenuBarStateCoordinator {
             workspaceTransaction: workspaceTransaction,
             now: now
         )
+        let platformContract = currentAuthorityObservation.flatMap {
+            MenuBarPlatformPresenceContract.admitting($0)
+        }
         // Reject stale or impossible exact recovery before applying workspace
         // settings. The helper repeats admission against its own live inventory.
         _ = try await WorkspaceRecoveryPlanner.exactPlan(
-            saved: checkpoint.snapshot,
-            live: live.snapshot,
+            saved: platformContract?.projecting(checkpoint.snapshot) ?? checkpoint.snapshot,
+            live: platformContract?.projecting(live.snapshot) ?? live.snapshot,
             destinationSupport: backend.capabilities.moveDestinationSupport ?? .existingItemRequired
         )
         let target = HistoryCheckpoint(
@@ -2256,8 +2387,13 @@ public actor MenuBarStateCoordinator {
         }
         let live = try await refreshedHistoryStartingCheckpoint(workspaceTransaction: workspaceTransaction, now: now)
         guard let workspace = live.workspace else { throw MenuBarWorkspaceTransactionError.superseded }
+        let platformContract = currentAuthorityObservation.flatMap {
+            MenuBarPlatformPresenceContract.admitting($0)
+        }
+        try validatePlatformPresenceHistoryTarget(checkpoint.snapshot, contract: platformContract)
         let preview = try await WorkspaceRecoveryPlanner.preview(
-            saved: checkpoint.snapshot, live: live.snapshot,
+            saved: platformContract?.projecting(checkpoint.snapshot) ?? checkpoint.snapshot,
+            live: platformContract?.projecting(live.snapshot) ?? live.snapshot,
             destinationSupport: backend.capabilities.moveDestinationSupport ?? .existingItemRequired
         )
         return try MenuBarPreparedWorkspaceRecovery(
@@ -2343,6 +2479,9 @@ public actor MenuBarStateCoordinator {
             workspaceTransaction: workspaceTransaction,
             now: now
         )
+        let platformContract = currentAuthorityObservation.flatMap {
+            MenuBarPlatformPresenceContract.admitting($0)
+        }
         guard let liveWorkspace = live.workspace else {
             throw MenuBarBackendError.operationFailed("workspace capture is unavailable")
         }
@@ -2358,7 +2497,8 @@ public actor MenuBarStateCoordinator {
               ProfileAuthorityMatcher.matches(
                   profile: expectedProfile,
                   checkpoint: liveCheckpoint,
-                  destinationSupport: destinationSupport
+                  destinationSupport: destinationSupport,
+                  platformContract: platformContract
               )
         else {
             return .superseded
@@ -2446,8 +2586,88 @@ public actor MenuBarStateCoordinator {
         workspaceTransaction: MenuBarWorkspaceTransaction? = nil,
         admittedRecoveryPlan: ProfileLayoutReconciler.DisplayPlan? = nil
     ) async throws -> MenuBarSnapshot {
-        guard await backend.capabilities.canRestore else {
+        let backendCapabilities = await backend.capabilities
+        let destinationSupport = backendCapabilities.moveDestinationSupport ?? .existingItemRequired
+        let usesLogicalSectionRestore = !backendCapabilities.canRestore &&
+            destinationSupport == .logicalSectionsPreserveNativeOrder
+        guard backendCapabilities.canRestore || usesLogicalSectionRestore else {
             throw MenuBarBackendError.unavailableCapability("restore")
+        }
+        let priorPlatformPresenceContract = activePlatformPresenceContract
+        activePlatformPresenceContract = currentAuthorityObservation.flatMap {
+            MenuBarPlatformPresenceContract.admitting($0)
+        }
+        defer { activePlatformPresenceContract = priorPlatformPresenceContract }
+        try validatePlatformPresenceHistoryTarget(
+            target.snapshot,
+            contract: activePlatformPresenceContract
+        )
+        let logicalRestoreContext: (
+            layout: ProfileLayout,
+            plan: ProfileLayoutReconciler.DisplayPlan,
+            arrangement: MenuBarArrangementExecutionPlan
+        )?
+        if usesLogicalSectionRestore {
+            let startingSnapshot = layoutAuthoritySnapshot(previous.snapshot)
+            let targetSnapshot = layoutAuthoritySnapshot(target.snapshot)
+            try validateHistoryDisplayIdentity(previous.snapshot, matches: target.snapshot)
+            let startingIDs = Set(startingSnapshot.items.map(\.id))
+            let targetIDs = Set(targetSnapshot.items.map(\.id))
+            let startingDisplays = Dictionary(uniqueKeysWithValues: startingSnapshot.items.map { ($0.id, $0.displayID) })
+            guard startingIDs == targetIDs,
+                  targetSnapshot.items.allSatisfy({ startingDisplays[$0.id] == $0.displayID })
+            else {
+                throw WorkspaceRecoveryPlanner.Failure.exactTargetUnavailable
+            }
+            guard let arrangementCapabilities = backendCapabilities.arrangement,
+                  !arrangementCapabilities.canApplySavedNativeOrder,
+                  !arrangementCapabilities.canReorderNativeItems
+            else {
+                throw MenuBarBackendError.unavailableCapability("logical history arrangement")
+            }
+            var targetLayout = Self.layout(from: target.snapshot, displayID: nil)
+            if let activePlatformPresenceContract {
+                guard let projected = activePlatformPresenceContract.projecting(targetLayout) else {
+                    throw MenuBarBackendError.operationFailed(
+                        "macOS Focus cannot be restored to a hidden section"
+                    )
+                }
+                targetLayout = projected
+            }
+            targetLayout = Self.preservingNativeVisibleOrder(in: targetLayout, snapshot: startingSnapshot)
+            let plan = try admittedRecoveryPlan ?? ProfileLayoutReconciler.planAcrossDisplays(
+                layout: targetLayout,
+                items: startingSnapshot.items,
+                destinationSupport: destinationSupport
+            )
+            guard plan.matchesLogicalArrangement(items: targetSnapshot.items, validateShelfOrder: true) else {
+                throw WorkspaceRecoveryPlanner.Failure.exactTargetUnavailable
+            }
+            let plannedLayout = ProfileLayout(
+                visible: plan.targets.flatMap(\.layout.visible),
+                hidden: plan.targets.flatMap(\.layout.hidden),
+                alwaysHidden: plan.targets.flatMap(\.layout.alwaysHidden)
+            )
+            let arrangement = try MenuBarArrangementPolicy().plan(
+                layout: plannedLayout,
+                snapshot: startingSnapshot,
+                capabilities: arrangementCapabilities,
+                barlineBundleIdentifier: "com.mabryventures.Barline"
+            )
+            guard arrangement.nativeOrder == .preserveCurrentOrder else {
+                throw MenuBarBackendError.unavailableCapability("native menu bar history order")
+            }
+            if arrangement.shelfOrder == .preserveCurrentOrder {
+                let startingLayout = Self.layout(from: startingSnapshot, displayID: nil)
+                guard startingLayout.hidden == plannedLayout.hidden,
+                      startingLayout.alwaysHidden == plannedLayout.alwaysHidden
+                else {
+                    throw MenuBarBackendError.unavailableCapability("menu bar shelf history order")
+                }
+            }
+            logicalRestoreContext = (plannedLayout, plan, arrangement)
+        } else {
+            logicalRestoreContext = nil
         }
         if target.workspace != nil, workspaceTransaction == nil {
             throw MenuBarBackendError.operationFailed(
@@ -2460,6 +2680,8 @@ public actor MenuBarStateCoordinator {
         var didBeginWorkspaceMutation = false
         var appliedWorkspaceRevision: UInt64?
         var workspaceWasSuperseded = false
+        var completedLogicalMutationCount = 0
+        var attemptedLogicalMutationItemIDs = Set<MenuBarItemID>()
         do {
             if let workspace = target.workspace, let workspaceTransaction {
                 if let startingRevision = previous.workspaceRevision {
@@ -2486,18 +2708,84 @@ public actor MenuBarStateCoordinator {
                     try await workspaceTransaction.apply(workspace)
                 }
             }
-            didBeginLayoutMutation = true
-            _ = try await backend.restore(target.snapshot)
-            let candidate = try await normalizedBackendSnapshot(requiresFreshObservation: true)
+            let candidate: MenuBarSnapshot
+            if let logicalRestoreContext {
+                let executionStartedAt = Date()
+                var executionSnapshot = layoutAuthoritySnapshot(previous.snapshot)
+                let maximumMoves = max(1, executionSnapshot.items.count * 4)
+                while let operation = try Self.nextLogicalProfileOperation(
+                    target: logicalRestoreContext.plan,
+                    snapshot: executionSnapshot,
+                    displayID: nil,
+                    arrangementPlan: logicalRestoreContext.arrangement,
+                    destinationSupport: destinationSupport
+                ) {
+                    guard completedLogicalMutationCount < maximumMoves else {
+                        throw MenuBarBackendError.operationFailed("history layout execution did not converge")
+                    }
+                    try Task.checkCancellation()
+                    if let source = executionSnapshot.items.first(where: { $0.id == operation.itemID }) {
+                        attemptedLogicalMutationItemIDs.formUnion(Self.logicalMutationItemIDs(
+                            operation: operation,
+                            source: source,
+                            before: executionSnapshot
+                        ))
+                    }
+                    didBeginLayoutMutation = true
+                    _ = try await backend.move(operation)
+                    completedLogicalMutationCount += 1
+                    let observed = try await normalizedBackendSnapshot(requiresFreshObservation: true)
+                    let next = try validateBackendSnapshot(
+                        observed,
+                        previous: executionSnapshot,
+                        now: (now ?? executionStartedAt).addingTimeInterval(
+                            Date().timeIntervalSince(executionStartedAt)
+                        )
+                    ).get()
+                    let authoritySnapshot = layoutAuthoritySnapshot(next)
+                    try validateLogicalProfileStep(
+                        operation: operation,
+                        before: executionSnapshot,
+                        after: authoritySnapshot
+                    )
+                    executionSnapshot = authoritySnapshot
+                }
+                candidate = try await verifiedProfileSnapshot(
+                    before: previous.snapshot,
+                    layout: logicalRestoreContext.layout,
+                    displayID: nil,
+                    arrangementPlan: logicalRestoreContext.arrangement,
+                    admittedLayoutPlan: logicalRestoreContext.plan,
+                    now: now ?? Date()
+                )
+                try validateHistoryDisplayIdentity(candidate, matches: target.snapshot)
+            } else {
+                didBeginLayoutMutation = true
+                _ = try await backend.restore(target.snapshot)
+                candidate = try await normalizedBackendSnapshot(requiresFreshObservation: true)
+            }
             // History restoration intentionally targets an older logical layout;
             // structural validation remains strict, but monotonic comparison with
             // the newer pre-undo snapshot would reject a correct restore.
-            switch validator.validate(candidate, previous: nil, now: now ?? Date()) {
+            switch validateBackendSnapshot(candidate, previous: nil, now: now ?? Date()) {
             case let .success(snapshot):
-                if let admittedRecoveryPlan {
+                if usesLogicalSectionRestore {
+                    guard let historyPlan = admittedRecoveryPlan ?? logicalRestoreContext?.plan else {
+                        throw WorkspaceRecoveryPlanner.Failure.exactTargetUnavailable
+                    }
+                    try validateHistoryDisplayIdentity(snapshot, matches: target.snapshot)
+                    guard historyPlan.matchesLogicalArrangement(
+                        items: layoutAuthoritySnapshot(snapshot).items,
+                        validateShelfOrder: true
+                    ) else {
+                        throw MenuBarBackendError.operationFailed(
+                            "logical history restore did not reach requested sections and shelf order"
+                        )
+                    }
+                } else if let admittedRecoveryPlan {
                     guard snapshot.displayIDs == target.snapshot.displayIDs,
                           snapshot.displayIdentities == target.snapshot.displayIdentities,
-                          admittedRecoveryPlan.matches(items: snapshot.items)
+                          admittedRecoveryPlan.matches(items: layoutAuthoritySnapshot(snapshot).items)
                     else { throw WorkspaceRecoveryPlanner.Failure.exactTargetUnavailable }
                 } else {
                     try validateHistoryResult(snapshot, matches: target.snapshot)
@@ -2510,6 +2798,7 @@ public actor MenuBarStateCoordinator {
                     throw MenuBarWorkspaceTransactionError.superseded
                 }
                 currentSnapshot = snapshot
+                currentAuthorityObservation = platformAuthorityObservation(matching: snapshot)
                 lastKnownGoodSnapshot = snapshot
                 lastRejection = nil
                 activeProfileID = target.activeProfileID
@@ -2521,7 +2810,8 @@ public actor MenuBarStateCoordinator {
             }
         } catch {
             let historyRestoreError = error
-            let layoutDidNotStart = Self.mutationDidNotStart(historyRestoreError)
+            let layoutDidNotStart = completedLogicalMutationCount == 0 &&
+                Self.mutationDidNotStart(historyRestoreError)
             let layoutWasSuperseded = Self.mutationRequiresNativeObservation(historyRestoreError)
             if historyRestoreError is MenuBarWorkspaceTransactionError,
                !didBeginWorkspaceMutation,
@@ -2568,20 +2858,34 @@ public actor MenuBarStateCoordinator {
                     rollbackSnapshot = previous.snapshot
                 } else if layoutWasSuperseded {
                     let observed = try await normalizedBackendSnapshot(requiresFreshObservation: true)
-                    switch validator.validate(observed, previous: nil, now: now ?? Date()) {
+                    switch validateBackendSnapshot(observed, previous: nil, now: now ?? Date()) {
                     case let .success(snapshot):
                         rollbackSnapshot = snapshot
                     case let .failure(reason):
                         throw MenuBarBackendError.invalidSnapshot(reason)
                     }
                 } else if didBeginLayoutMutation {
-                    let rollbackCandidate = try await compensationSnapshot(restoring: previous.snapshot)
-                    switch validator.validate(rollbackCandidate, previous: nil, now: now ?? Date()) {
-                    case let .success(snapshot):
-                        try validateHistoryResult(snapshot, matches: previous.snapshot)
-                        rollbackSnapshot = snapshot
-                    case let .failure(reason):
-                        throw MenuBarBackendError.invalidSnapshot(reason)
+                    if let logicalRestoreContext {
+                        let ownedLogicalMutationItemIDs = attemptedLogicalMutationItemIDs
+                        rollbackSnapshot = try await withCompensation {
+                            try await self.compensateSupportedArrangement(
+                                restoring: previous.snapshot,
+                                displayID: nil,
+                                arrangementPlan: logicalRestoreContext.arrangement,
+                                destinationSupport: destinationSupport,
+                                transactionOwnedItemIDs: ownedLogicalMutationItemIDs,
+                                now: now ?? Date()
+                            )
+                        }
+                    } else {
+                        let rollbackCandidate = try await compensationSnapshot(restoring: previous.snapshot)
+                        switch validateBackendSnapshot(rollbackCandidate, previous: nil, now: now ?? Date()) {
+                        case let .success(snapshot):
+                            try validateHistoryResult(snapshot, matches: previous.snapshot)
+                            rollbackSnapshot = snapshot
+                        case let .failure(reason):
+                            throw MenuBarBackendError.invalidSnapshot(reason)
+                        }
                     }
                 } else {
                     rollbackSnapshot = previous.snapshot
@@ -2599,6 +2903,7 @@ public actor MenuBarStateCoordinator {
                     workspaceWasSuperseded = true
                 }
                 currentSnapshot = rollbackSnapshot
+                currentAuthorityObservation = platformAuthorityObservation(matching: rollbackSnapshot)
                 lastKnownGoodSnapshot = rollbackSnapshot
                 activeProfileID = workspaceWasSuperseded || layoutWasSuperseded ? nil : previous.activeProfileID
                 lastKnownGoodProfileID = workspaceWasSuperseded || layoutWasSuperseded ? nil : previous.activeProfileID
@@ -2639,6 +2944,51 @@ public actor MenuBarStateCoordinator {
         _ snapshot: MenuBarSnapshot,
         matches target: MenuBarSnapshot
     ) throws {
+        try validateHistoryDisplayIdentity(snapshot, matches: target)
+        let evidenceContract = activePlatformPresenceContract ?? latestBackendAuthorityObservation
+            .flatMap { $0.snapshot == snapshot ? MenuBarPlatformPresenceContract.admitting($0) : nil }
+        let layoutSnapshot = evidenceContract?.projecting(snapshot) ?? snapshot
+        let layoutTarget = evidenceContract?.projecting(target) ?? target
+        let restoredLayout = Set(layoutSnapshot.items.map {
+            LogicalLayoutItem(
+                id: $0.id,
+                displayID: $0.displayID,
+                section: $0.section,
+                order: $0.order
+            )
+        })
+        let targetLayout = Set(layoutTarget.items.map {
+            LogicalLayoutItem(
+                id: $0.id,
+                displayID: $0.displayID,
+                section: $0.section,
+                order: $0.order
+            )
+        })
+        guard restoredLayout == targetLayout else {
+            throw MenuBarBackendError.operationFailed(
+                "history restore did not reach requested layout"
+            )
+        }
+    }
+
+    private func validatePlatformPresenceHistoryTarget(
+        _ snapshot: MenuBarSnapshot,
+        contract: MenuBarPlatformPresenceContract?
+    ) throws {
+        guard let contract else { return }
+        let requestedLayout = Self.layout(from: snapshot, displayID: nil)
+        guard contract.projecting(requestedLayout) != nil else {
+            throw MenuBarBackendError.operationFailed(
+                "macOS Focus cannot be restored to a hidden section"
+            )
+        }
+    }
+
+    private func validateHistoryDisplayIdentity(
+        _ snapshot: MenuBarSnapshot,
+        matches target: MenuBarSnapshot
+    ) throws {
         guard snapshot.displayIDs == target.displayIDs else {
             throw MenuBarBackendError.operationFailed(
                 "history restore did not reach requested displays"
@@ -2663,27 +3013,6 @@ public actor MenuBarStateCoordinator {
                     )
                 }
             }
-        }
-        let restoredLayout = Set(snapshot.items.map {
-            LogicalLayoutItem(
-                id: $0.id,
-                displayID: $0.displayID,
-                section: $0.section,
-                order: $0.order
-            )
-        })
-        let targetLayout = Set(target.items.map {
-            LogicalLayoutItem(
-                id: $0.id,
-                displayID: $0.displayID,
-                section: $0.section,
-                order: $0.order
-            )
-        })
-        guard restoredLayout == targetLayout else {
-            throw MenuBarBackendError.operationFailed(
-                "history restore did not reach requested layout"
-            )
         }
     }
 
@@ -2750,10 +3079,42 @@ public actor MenuBarStateCoordinator {
     }
 
     private func validatedStartingSnapshot(now: Date?) async throws -> MenuBarSnapshot {
+        if qualifiedPlatformPresenceContractHasBeenEstablished {
+            // Once this coordinator has entered the qualified platform lane,
+            // a cached last-known-good snapshot cannot replace a lost scan
+            // envelope. Re-admit every mutation from a fresh native scan.
+            return try await refreshedQualifiedStartingSnapshot(now: now)
+        }
         if let currentSnapshot {
-            return currentSnapshot
+            if let currentAuthorityObservation,
+               currentAuthorityObservation.snapshot == currentSnapshot,
+               MenuBarPlatformPresenceContract.admitting(currentAuthorityObservation) != nil
+            {
+                return try await refreshAssumingMutationTurn(now: now, freshness: .freshRequired)
+            }
+            // A successful mutation deliberately drops ordinary scan context:
+            // only a platform-presence contract may cross the transaction
+            // boundary. Its exact postcondition has already passed strict live
+            // validation, and matching last-known-good proves this is still
+            // that committed snapshot rather than an unverified proposal.
+            if currentAuthorityObservation?.snapshot == currentSnapshot ||
+                lastKnownGoodSnapshot == currentSnapshot
+            {
+                return currentSnapshot
+            }
         }
         return try await refreshAssumingMutationTurn(now: now)
+    }
+
+    private func refreshedQualifiedStartingSnapshot(now: Date?) async throws -> MenuBarSnapshot {
+        let snapshot = try await refreshAssumingMutationTurn(now: now, freshness: .freshRequired)
+        guard let observation = currentAuthorityObservation,
+              observation.snapshot == snapshot,
+              MenuBarPlatformPresenceContract.admitting(observation) != nil
+        else {
+            throw MenuBarBackendError.invalidSnapshot(.platformPresenceContractChanged)
+        }
+        return snapshot
     }
 
     private func refreshedHistoryStartingCheckpoint(
@@ -2762,8 +3123,29 @@ public actor MenuBarStateCoordinator {
         now: Date?
     ) async throws -> HistoryCheckpoint {
         let cached = currentSnapshot
-        let live = try await refreshAssumingMutationTurn(now: now)
-        if let cached, logicalLayout(of: cached) != logicalLayout(of: live) {
+        let requiresFreshPlatformPresence = qualifiedPlatformPresenceContractHasBeenEstablished ||
+            currentAuthorityObservation.flatMap {
+                MenuBarPlatformPresenceContract.admitting($0)
+            } != nil
+        let live = try await refreshAssumingMutationTurn(
+            now: now,
+            freshness: requiresFreshPlatformPresence ? .freshRequired : .cachedAllowed
+        )
+        if qualifiedPlatformPresenceContractHasBeenEstablished {
+            guard let observation = currentAuthorityObservation,
+                  observation.snapshot == live,
+                  MenuBarPlatformPresenceContract.admitting(observation) != nil
+            else {
+                throw MenuBarBackendError.invalidSnapshot(.platformPresenceContractChanged)
+            }
+        }
+        let presenceContract = activePlatformPresenceContract ?? currentAuthorityObservation.flatMap {
+            MenuBarPlatformPresenceContract.admitting($0)
+        }
+        if let cached,
+           logicalLayout(of: cached, using: presenceContract) !=
+           logicalLayout(of: live, using: presenceContract)
+        {
             activeProfileID = nil
         }
         return HistoryCheckpoint(
@@ -2798,8 +3180,12 @@ public actor MenuBarStateCoordinator {
         return checkpoint
     }
 
-    private func logicalLayout(of snapshot: MenuBarSnapshot) -> Set<LogicalLayoutItem> {
-        Set(snapshot.items.map {
+    private func logicalLayout(
+        of snapshot: MenuBarSnapshot,
+        using contract: MenuBarPlatformPresenceContract? = nil
+    ) -> Set<LogicalLayoutItem> {
+        let snapshot = contract?.projecting(snapshot) ?? snapshot
+        return Set(snapshot.items.map {
             LogicalLayoutItem(
                 id: $0.id,
                 displayID: $0.displayID,
@@ -2841,9 +3227,9 @@ public actor MenuBarStateCoordinator {
             _ = try await backend.restore(target)
             return try await backend.authorityObservation(freshness: .freshRequired)
         }
-        // Compensation publication remains unconnected, so do not transfer
-        // its context through a bare-snapshot return value.
-        return try normalizeGeneration(of: observation).snapshot
+        let normalized = try normalizeGeneration(of: observation)
+        latestBackendAuthorityObservation = normalized
+        return normalized.snapshot
     }
 
     private func normalizedBackendSnapshot(
@@ -2857,7 +3243,60 @@ public actor MenuBarStateCoordinator {
     private func normalizedBackendObservation(
         freshness: MenuBarObservationFreshness
     ) async throws -> MenuBarAuthorityObservation {
-        try await normalizeGeneration(of: backend.authorityObservation(freshness: freshness))
+        let normalized = try await normalizeGeneration(of: backend.authorityObservation(freshness: freshness))
+        latestBackendAuthorityObservation = normalized
+        return normalized
+    }
+
+    private func validateBackendSnapshot(
+        _ snapshot: MenuBarSnapshot,
+        previous: MenuBarSnapshot?,
+        now: Date
+    ) -> Result<MenuBarSnapshot, SnapshotRejectionReason> {
+        guard let observation = latestBackendAuthorityObservation,
+              observation.snapshot == snapshot
+        else {
+            return validator.validate(snapshot, previous: previous, now: now)
+        }
+        return validateBackendObservation(observation, previous: previous, now: now)
+    }
+
+    private func validateBackendObservation(
+        _ observation: MenuBarAuthorityObservation,
+        previous: MenuBarSnapshot?,
+        now: Date
+    ) -> Result<MenuBarSnapshot, SnapshotRejectionReason> {
+        if MenuBarPlatformPresenceContract.admitting(observation) != nil {
+            qualifiedPlatformPresenceContractHasBeenEstablished = true
+        }
+        if let activePlatformPresenceContract {
+            return validator.validate(
+                observation,
+                previous: previous,
+                platformContract: activePlatformPresenceContract,
+                now: now
+            )
+        }
+        return validator.validate(observation, previous: previous, now: now)
+    }
+
+    private func layoutAuthoritySnapshot(_ snapshot: MenuBarSnapshot) -> MenuBarSnapshot {
+        activePlatformPresenceContract?.projecting(snapshot) ?? snapshot
+    }
+
+    /// Mutation publication must not carry an arbitrary helper scan forward.
+    /// Preserve runtime context only when the active transaction was admitted
+    /// with the platform-presence contract and this exact post-write scan still
+    /// proves the same native publisher and helper session.
+    private func platformAuthorityObservation(
+        matching snapshot: MenuBarSnapshot
+    ) -> MenuBarAuthorityObservation? {
+        guard let activePlatformPresenceContract,
+              let observation = latestBackendAuthorityObservation,
+              observation.snapshot == snapshot,
+              activePlatformPresenceContract.accepts(observation)
+        else { return nil }
+        return observation
     }
 
     private func normalizeGeneration(of observation: MenuBarAuthorityObservation) throws -> MenuBarAuthorityObservation {

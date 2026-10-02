@@ -1895,14 +1895,11 @@ final class ProfileManager: ObservableObject {
     private func profileMatchesCheckpoint(
         _ profile: BarlineProfile,
         checkpoint: MenuBarWorkspaceCheckpoint
-    ) async -> Bool {
-        guard let appState else { return false }
-        let destinationSupport = await appState.compatibilityCoordinator.capabilities
-            .moveDestinationSupport ?? .existingItemRequired
-        return ProfileAuthorityMatcher.matches(
+    ) async -> ProfileAuthorityAssessment {
+        guard let appState else { return .temporarilyUnavailable }
+        return await appState.compatibilityCoordinator.assessProfileAuthority(
             profile: profile,
-            checkpoint: checkpoint,
-            destinationSupport: destinationSupport
+            checkpoint: checkpoint
         )
     }
 
@@ -2021,7 +2018,26 @@ final class ProfileManager: ObservableObject {
             setActiveProfileAuthorityToken(nil)
             return nil
         }
-        guard await profileMatchesCheckpoint(profile, checkpoint: checkpoint) else {
+        let authorityAssessment = await profileMatchesCheckpoint(profile, checkpoint: checkpoint)
+        guard currentWorkspaceState() == checkpoint.workspace else {
+            _ = await appState.compatibilityCoordinator.clearActiveProfileAuthority(
+                ifMatches: profileID
+            )
+            activeProfileID = nil
+            activeProfileActivatedAt = nil
+            activePresentation = nil
+            setActiveProfileAuthorityToken(nil)
+            return nil
+        }
+        switch authorityAssessment {
+        case .matches:
+            break
+        case .temporarilyUnavailable:
+            // Menu tracking or an unavailable atomic observation is not proof
+            // that the active profile's layout authority changed. Defer the
+            // destructive reconciliation until a stable read is available.
+            return profileID
+        case .mismatch:
             _ = await appState.compatibilityCoordinator.clearActiveProfileAuthority(
                 ifMatches: profileID
             )

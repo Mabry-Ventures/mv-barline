@@ -1,8 +1,18 @@
 # macOS 27 platform-presence contract
 
-Status: **implementation prerequisite, not release approval**. The native
-suppression cause is verified on 27.0.1/26A434; the connected authority repair
-below is not yet integrated. GPT 6 Astra High independently reviewed this design.
+Status: **integrated source candidate; not release approval**. The native
+suppression cause is verified on 27.0.1/26A434. The isolated candidate now
+connects bounded MenuBarAgent observation, publisher attestation, exact Focus
+projection, and authority continuity through snapshot validation and mutation,
+profile, recovery, and history paths. On October 2, the dirty-source fast gate
+passed (823 Core tests/80 suites); CPLCODEX01 passed the same Core suite,
+Xcode 27 Debug and Release builds, static analysis, and 6 Core/integration
+tests. Its fixture UI test passed, while the two XCUITest status-item clicks
+remain skipped on macOS 27. This is not an installed Barline runtime pass: the
+installed app remains 1.0.66/build 152, no candidate is signed or installed,
+and the stable journey harness's combined permission preflight fails. macOS 26
+runtime qualification also remains open; source results do not authorize
+release.
 
 Build 152 repairs only recovery from failed activation. Its successful-profile
 guard correctly rejects loss of an admitted item, but native assessment hiding
@@ -22,7 +32,30 @@ This removes duplicate-cache stability proof. Owner-probe scheduling still
 applies, so a new observation is not necessarily complete owner enumeration.
 No missing-item validation rule is relaxed by this slice.
 
-## Required connected implementation
+## Integrated implementation and remaining proof
+
+The native provider now captures the closed MenuBarAgent scope during the same
+fresh inventory scan. Only a structurally qualified capture bound to the exact
+scan and a live verified publisher may contribute the exact Focus identity.
+Broad and closed-scope observations must agree; disagreement, cancellation,
+incomplete reads, identity changes, or failed scans yield unknown and revoke
+cached scan provenance. On macOS 27, unknown or absent qualification fails the
+inventory request closed rather than falling back to a broad Focus record. A
+Focus disappearance without the admitted runtime contract is rejected before
+generic collapse thresholds. The projection recognizes only the exact Focus
+item; all other item, display, geometry, identity, and inventory checks remain
+strict.
+
+The runtime-only observation is propagated with the non-Codable scan envelope.
+Snapshot validation, profile compatibility/resolution, mutation convergence,
+compensation, recovery, and history paths use the same immutable contract and
+drop it at persistence/sanitization boundaries. Legacy references are only
+projected for the supported visible Focus case; hidden Focus requests remain
+unsupported. Core behavior and source compile gates have passed. This does not
+prove native rendering or installed operation; the candidate must still pass
+the actual signed-installed journey on CPLCODEX01 and macOS 26 before release.
+
+## Original design requirements
 
 ### 1. Helper-owned assertion receipts
 

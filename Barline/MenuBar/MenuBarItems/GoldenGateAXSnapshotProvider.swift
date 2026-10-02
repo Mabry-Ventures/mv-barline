@@ -5,7 +5,7 @@
 
 @preconcurrency import AppKit
 @preconcurrency import AXSwift
-import BarlineCore
+@_spi(BarlinePlatformPresence) import BarlineCore
 import CoreGraphics
 import CryptoKit
 import Foundation
@@ -281,6 +281,7 @@ actor GoldenGateAXSnapshotProvider {
         category: .pointsOfInterest
     )
     private let serviceConnection = BarlineMenuService.Connection.shared
+    private let platformPresenceObserver = GoldenGatePlatformPresenceObserver()
     private var generation: UInt64 = 0
     private var cachedAt: UInt64?
     private var cachedSnapshot: MenuBarSnapshot? {
@@ -375,6 +376,19 @@ actor GoldenGateAXSnapshotProvider {
     }
 
     private func collectAuthorityObservation(forceRefresh: Bool) async throws -> MenuBarAuthorityObservation {
+        var completed = false
+        defer {
+            if !completed {
+                // An unsuccessful new observation revokes cache provenance.
+                // A later UI request cannot revive the older scan merely
+                // because the scene happens to return within its lifetime.
+                cachedAt = nil
+                cachedSnapshot = nil
+                cachedEnvironment = nil
+                cachedDisplayBounds = [:]
+            }
+        }
+        try Task.checkCancellation()
         guard !hasInvalidIdentityState else {
             throw MenuBarBackendError.operationFailed("saved menu bar identity state requires recovery")
         }
@@ -406,10 +420,16 @@ actor GoldenGateAXSnapshotProvider {
             throw MenuBarBackendError.unavailableCapability("active menu bar scene")
         }
         let now = DispatchTime.now().uptimeNanoseconds
+        let requiresQualifiedPresenceContract = GoldenGatePlatformPresenceObserver.requiresQualifiedPresenceContract
         if !forceRefresh,
+           let cachedSnapshot,
+           MenuBarPlatformPresenceContract.permitsCacheReuse(
+               scan: cachedObservationScan,
+               snapshot: cachedSnapshot,
+               requiresQualifiedPresence: requiresQualifiedPresenceContract
+           ),
            initialEnvironment.nativeConcealmentReceipt?.isStable != false,
            let cachedAt,
-           let cachedSnapshot,
            let cachedEnvironment,
            initialEnvironment.hasSameValidScene(as: cachedEnvironment),
            initialEnvironment.nativeConcealmentReceipt == cachedEnvironment.nativeConcealmentReceipt,
@@ -437,6 +457,8 @@ actor GoldenGateAXSnapshotProvider {
             self.cachedSnapshot = observed
             let envelope = MenuBarAuthorityObservation(snapshot: observed, scan: scan)
             cachedObservationScan = envelope.scan
+            try Task.checkCancellation()
+            completed = true
             return envelope
         }
 
@@ -445,8 +467,56 @@ actor GoldenGateAXSnapshotProvider {
         }
         let scanID = UUID()
         let scanStartedAt = DispatchTime.now().uptimeNanoseconds
+        let nativePresenceCapture = await captureNativePlatformPresence(scanID: scanID)
+        guard !requiresQualifiedPresenceContract || nativePresenceCapture != nil else {
+            throw MenuBarBackendError.unavailableCapability("verified macOS 27 MenuBarAgent observation")
+        }
         let entries = collectEntries()
-        let observations = entries.map(\.observation)
+        var observations = entries.map(\.observation)
+        var platformPresenceObservation: MenuBarPlatformPresenceObservation?
+        if let nativePresenceCapture,
+           let projection = platformPresenceProjection(
+               from: nativePresenceCapture,
+               expectedScanID: scanID,
+               displayBounds: displayBounds
+           )
+        {
+            let directFocusIndexes = observations.indices.filter { index in
+                let observation = observations[index]
+                return observation.bundleIdentifier.caseInsensitiveCompare("com.apple.MenuBarAgent") == .orderedSame &&
+                    observation.identifier == "com.apple.menuextra.focusmode"
+            }
+            switch projection.presence.focusPresence {
+            case .absent where directFocusIndexes.isEmpty:
+                platformPresenceObservation = projection.presence
+            case .present:
+                guard directFocusIndexes.count <= 1,
+                      let focusObservation = projection.focusObservation
+                else { break }
+                if let directFocusIndex = directFocusIndexes.first {
+                    let directObservation = observations[directFocusIndex]
+                    guard directObservation.bundleIdentifier.caseInsensitiveCompare(
+                        focusObservation.bundleIdentifier
+                    ) == .orderedSame,
+                        directObservation.identifier == focusObservation.identifier,
+                        directObservation.ownerProcessIdentifier == focusObservation.ownerProcessIdentifier,
+                        directObservation.bounds == focusObservation.bounds
+                    else { break }
+                    observations.remove(at: directFocusIndex)
+                }
+                // The closed-scope leaf is the canonical record, but only
+                // after any broad owner read has independently agreed.
+                observations.append(focusObservation)
+                platformPresenceObservation = projection.presence
+            default:
+                // A disagreement between two views of the same MenuBarAgent
+                // tree is unknown, not evidence of either presence or absence.
+                break
+            }
+        }
+        guard !requiresQualifiedPresenceContract || platformPresenceObservation != nil else {
+            throw MenuBarBackendError.unavailableCapability("verified macOS 27 Focus presence")
+        }
         guard !observations.isEmpty else {
             throw MenuBarBackendError.unavailableCapability("Accessibility menu bar inventory")
         }
@@ -578,9 +648,13 @@ actor GoldenGateAXSnapshotProvider {
                 completedAtUptimeNanoseconds: scanCompletedAt,
                 observedSnapshot: result,
                 initialEnvironment: initialEnvironment,
-                finalEnvironment: finalEnvironment
+                finalEnvironment: finalEnvironment,
+                platformPresenceObservation: platformPresenceObservation
             )
         )
+        guard !requiresQualifiedPresenceContract || envelope.scan?.platformPresenceObservation != nil else {
+            throw MenuBarBackendError.unavailableCapability("associated macOS 27 Focus presence")
+        }
         // Context records this UI scan association only. collectEntries still
         // applies owner scheduling and retained inventory; neither context
         // nor a stable receipt proves complete platform-control coverage.
@@ -596,7 +670,115 @@ actor GoldenGateAXSnapshotProvider {
         logger.info(
             "Main-process Golden Gate inventory completed: items=\(result.items.count, privacy: .public), controls=\(result.items.count(where: \.isBarlineControlItem), privacy: .public), built=\(built.items.count, privacy: .public), retainedAdded=\(result.items.count - built.items.count, privacy: .public)"
         )
+        try Task.checkCancellation()
+        completed = true
         return envelope
+    }
+
+    private func captureNativePlatformPresence(scanID: UUID) async -> GoldenGateNativeScopeCapture? {
+        let started = DispatchTime.now().uptimeNanoseconds
+        let (deadline, overflow) = started.addingReportingOverflow(2_000_000_000)
+        guard !overflow else { return nil }
+        let cancellation = AXReadCancellation()
+        return await withTaskCancellationHandler {
+            guard case let .captured(capture) = await platformPresenceObserver.capture(
+                scanID: scanID,
+                deadline: deadline,
+                cancellation: cancellation
+            ) else { return nil }
+            return capture
+        } onCancel: {
+            cancellation.cancel()
+        }
+    }
+
+    private func platformPresenceProjection(
+        from capture: GoldenGateNativeScopeCapture,
+        expectedScanID: UUID,
+        displayBounds: [MenuBarDisplayID: MenuBarRect]
+    ) -> (presence: MenuBarPlatformPresenceObservation, focusObservation: GoldenGateMenuBarObservation?)? {
+        guard RuntimePublisherAttestationSupport.acceptsMenuAgentFacts(capture.publisher.facts),
+              capture.scanID == expectedScanID,
+              let identity = capture.publisher.facts.uniqueCodeIdentity
+        else { return nil }
+
+        let focusPresence: MenuBarPlatformFocusPresence
+        let focusObservation: GoldenGateMenuBarObservation?
+        if let focusToken = capture.scope.focusToken {
+            guard let node = capture.nodes.first(where: { $0.token == focusToken }),
+                  node.before.owner == .value(capture.publisher.facts.requestedPID),
+                  case let .attributes(attributes) = node.before.identity,
+                  attributes.identifier == .value(AXNativeScopeValidationSupport.focusIdentifier),
+                  attributes.role == .value("AXMenuBarItem"),
+                  attributes.subrole == .value("AXMenuExtra"),
+                  case let .bounds(nativeBounds) = node.before.geometry
+            else { return nil }
+
+            let bounds = MenuBarRect(
+                x: nativeBounds.origin.x,
+                y: nativeBounds.origin.y,
+                width: nativeBounds.size.width,
+                height: nativeBounds.size.height
+            )
+            let displayID = MenuBarDisplayOwnershipPolicy.resolve(
+                itemBounds: bounds,
+                displays: displayBounds,
+                membershipDisplayIDs: nil
+            )
+            guard let displayID,
+                  let owningDisplayBounds = displayBounds[displayID],
+                  MenuBarVisibilityPolicy.isClickable(
+                      reportedVisible: true,
+                      itemBounds: bounds,
+                      displayBounds: [owningDisplayBounds]
+                  )
+            else { return nil }
+
+            focusPresence = .present(MenuBarPlatformFocusItem(
+                itemID: MenuBarPlatformPresenceIdentity.focusItemID,
+                bounds: bounds,
+                displayID: displayID,
+                ownerProcessIdentifier: capture.publisher.facts.requestedPID
+            ))
+            focusObservation = GoldenGateMenuBarObservation(
+                bundleIdentifier: "com.apple.MenuBarAgent",
+                localizedApplicationName: "Control Center",
+                identifier: AXNativeScopeValidationSupport.focusIdentifier,
+                displayTitle: "Focus",
+                stableTitle: "Focus",
+                fallbackFingerprint: fallbackFingerprint(
+                    bundleIdentifier: "com.apple.MenuBarAgent",
+                    stableTitle: "Focus"
+                ),
+                bounds: bounds,
+                ownerProcessIdentifier: capture.publisher.facts.requestedPID
+            )
+        } else {
+            focusPresence = .absent
+            focusObservation = nil
+        }
+
+        let facts = capture.publisher.facts
+        let codeIdentityDigest = SHA256.hash(data: Data(identity))
+            .map { String(format: "%02x", $0) }
+            .joined()
+        let presence = MenuBarPlatformPresenceObservation(
+            scanID: capture.scanID,
+            startedAtUptimeNanoseconds: capture.startedAtUptimeNanoseconds,
+            completedAtUptimeNanoseconds: capture.completedAtUptimeNanoseconds,
+            publisherBundleIdentifier: facts.bundleIdentifier ?? "",
+            publisherProcessIdentifier: facts.requestedPID,
+            publisherStartSeconds: facts.startSeconds,
+            publisherStartMicroseconds: facts.startMicroseconds,
+            publisherSealedIdentifier: facts.sealedSigningIdentifier ?? "",
+            publisherCodeIdentityDigest: codeIdentityDigest,
+            scopeIsClosed: true,
+            clockAnchorIdentifier: AXNativeScopeValidationSupport.clockIdentifier,
+            controlCenterAnchorIdentifier: AXNativeScopeValidationSupport.controlCenterIdentifier,
+            focusPresence: focusPresence
+        )
+        guard presence.isStructurallyQualified else { return nil }
+        return (presence, focusObservation)
     }
 
     func move(_ operation: MenuBarMoveOperation) async throws -> MenuBarMutationResult {

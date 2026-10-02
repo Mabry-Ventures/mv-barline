@@ -21,10 +21,13 @@
   counts as an independent stability observation. Ordinary UI caching remains.
   This is source hardening, not macOS 27 Focus compatibility or release approval.
 
-## 1.0.66 (build 152) — qualification candidate, October 1, 2026
+## 1.0.66 (build 153) — qualification candidate, October 2, 2026
 
 ### macOS 27
 
+- Native Focus presence now requires a bounded, publisher-verified observation
+  associated with the exact inventory scan. Unknown or inconsistent system
+  state fails closed rather than accepting a stale layout or profile.
 - Saved layouts validate newly discovered items at their current visibility,
   consistent with the layout planner. An unchanged visible application group
   no longer rejects a transition merely because another member appeared.
@@ -57,6 +60,9 @@
 
 ### Both
 
+- Routine inventory refreshes preserve saved-layout authority when the logical
+  layout is unchanged. Temporary menu tracking defers profile reconciliation
+  instead of revoking an otherwise valid profile.
 - Failed native-hiding transitions can restore a previously visible Focus
   control before planning rollback. Recovery requires the original complete
   inventory, preserves unrelated edits and obeys its deadline. This is a

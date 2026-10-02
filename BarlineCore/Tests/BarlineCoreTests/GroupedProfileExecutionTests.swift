@@ -57,7 +57,7 @@ struct GroupedProfileExecutionTests {
         let prior = BarlineProfile(name: "Prior", layout: ProfileLayout(visible: backend.siblings))
         _ = try await coordinator.activate(profile: prior)
         let target = BarlineProfile(name: "Hidden", layout: ProfileLayout(hidden: backend.siblings))
-        await #expect(throws: SnapshotRejectionReason.implausibleSystemItemCollapse(previous: 1, candidate: 0)) {
+        await #expect(throws: SnapshotRejectionReason.platformPresenceContractChanged) {
             try await coordinator.activate(profile: target)
         }
         #expect(await backend.nativeDeassertionCount == 1)

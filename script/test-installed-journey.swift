@@ -155,9 +155,8 @@ func sameFrame(_ lhs: CGRect, _ rhs: CGRect) -> Bool {
 
 var journeyExitCode: Int32 = 0
 do {
-    guard AXIsProcessTrusted(), CGPreflightScreenCaptureAccess() else {
-        throw JourneyError.failed("harness_accessibility_and_screen_recording_required_no_prompt")
-    }
+    guard AXIsProcessTrusted() else { throw JourneyError.failed("harness_accessibility_required_no_prompt") }
+    guard CGPreflightScreenCaptureAccess() else { throw JourneyError.failed("harness_screen_recording_required_no_prompt") }
     let appPID = try Int32(required("BARLINE_EXPECTED_PID")) ?? 0
     let fixturePID = try Int32(required("BARLINE_FIXTURE_PID")) ?? 0
     let bundleID = try required("BARLINE_APP_BUNDLE_IDENTIFIER")
@@ -365,9 +364,9 @@ do {
         }
         return nil
     }
-    /// Read-only fallback, not a guessed click. Probe points only inside the
-    /// positively identified shelf, then require its exact synthetic NSButton,
-    /// owning PID and current on-shelf geometry before returning a click target.
+    // Read-only fallback, not a guessed click. Probe points only inside the
+    // positively identified shelf, then require its exact synthetic NSButton,
+    // owning PID and current on-shelf geometry before returning a click target.
     func hitTestShelfTarget() -> AXUIElement? {
         guard let shelf = shelfWindowFrame(), shelf.width > 0, shelf.height > 0 else { return nil }
         let system = AXUIElementCreateSystemWide()

@@ -147,6 +147,7 @@ public enum PrivacySafeDiagnostics {
         case .implausibleSystemItemCollapse: "snapshot_system_item_collapse"
         case .emptySnapshot: "snapshot_empty"
         case .nonMonotonicGeneration: "snapshot_stale_generation"
+        case .platformPresenceContractChanged: "snapshot_platform_presence_changed"
         }
     }
 }

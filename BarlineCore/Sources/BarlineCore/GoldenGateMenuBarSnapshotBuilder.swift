@@ -81,6 +81,14 @@ public enum GoldenGateMenuBarSnapshotBuilder {
     ) -> [MenuBarItemID] {
         var occurrenceBySemanticKey = [MenuBarItemID: Int]()
         return observations.map { observation in
+            if observation.bundleIdentifier.caseInsensitiveCompare("com.apple.MenuBarAgent") == .orderedSame,
+               observation.identifier == "com.apple.menuextra.focusmode"
+            {
+                // The Focus menu extra is a platform-owned control whose
+                // presence is represented by an atomic runtime sidecar. Its
+                // identity must not depend on localized wording or occurrence.
+                return MenuBarPlatformPresenceIdentity.focusItemID
+            }
             // Count only indistinguishable items. Distinct AX identifiers must
             // not exchange aliases when geometry or sibling inventory changes.
             // The structured key shares MenuBarItemID's canonical normalization
@@ -172,6 +180,15 @@ public enum GoldenGateMenuBarSnapshotBuilder {
             throw MenuBarBackendError.unavailableCapability("Barline section controls")
         }
         let descriptors = preliminary.map { descriptor in
+            if MenuBarPlatformPresenceIdentity.isFocusItem(descriptor.id) {
+                // Saved legacy assignments cannot turn the native Focus
+                // control into a Barline-managed shelf item.
+                return descriptor.replacing(
+                    section: .visible,
+                    isMovable: false,
+                    canBeHidden: false
+                )
+            }
             let section: MenuBarSection
             if descriptor.isBarlineControlItem {
                 section = switch descriptor.title {
