@@ -1,5 +1,30 @@
 # Barline execution plan
 
+## General rollout withdrawn - October 2, 2026
+
+The 1.0.66 general release was briefly published, then demoted to a clearly
+marked limited prerelease. The website and latest Sparkle feed were restored
+to 1.0.65 after a late PR #50 review exposed a general-release blocker:
+`GoldenGatePlatformPresenceObserver.isQualifiedLane` accepts only macOS
+27.0.1/26A434, while `requiresQualifiedPresenceContract` is true for every
+macOS major version at least 27. `collectAuthorityObservation` rejects a
+missing capture before collecting entries. The macOS 27 backend has no legacy
+inventory fallback, so other macOS 27 versions/builds cannot discover items.
+
+The CODEX01 results remain valid for the exact tested build and host. They do
+not justify general macOS 27 distribution. This hard restriction should have
+been identified before publication, rather than described only as a coverage
+limit. The next candidate needs a bounded safe behavior outside the qualified
+lane, regression coverage for OS/build changes, and fresh candidate-bound
+qualification. No production safety predicate was removed during containment.
+
+Published app/source archives remain unchanged for traceability. Existing
+1.0.66 installations are not automatically downgraded. PR #52's released-status
+changelog change was closed in favor of this containment record. PR #51's
+fast-forward also proceeded with a documentation conversation unresolved;
+future integration must use normal PR merge enforcement and explicitly check
+review conversations, not just passing status contexts.
+
 ## Version 1.0.66 publication - October 2, 2026
 
 The user approved publishing build 157 after reviewing its qualification limits.

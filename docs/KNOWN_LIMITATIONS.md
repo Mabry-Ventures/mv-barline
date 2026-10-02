@@ -1,11 +1,20 @@
 # Known limitations and release status
 
-The public latest release is Barline 1.0.66 (build 157), published October 2,
-2026 from `29e82b395d184da46e860d2d26d796f835e7153b`. See
-[release notes](https://github.com/Mabry-Ventures/mv-barline/releases/tag/v1.0.66)
-and [execution history](EXECUTION_PLAN.md). Evidence is bound to this exact
-source and signed binary, not blanket approval for later changes or every
-supported configuration.
+The recommended public release is Barline 1.0.65 (build 142). The general
+1.0.66 rollout was withdrawn on October 2, 2026 after a post-publication review
+confirmed a hard OS-build restriction. The website and automatic-update feed
+again point to 1.0.65. This does not automatically downgrade installed copies.
+
+Build 157, source `29e82b395d184da46e860d2d26d796f835e7153b`, remains a clearly
+marked [limited prerelease](https://github.com/Mabry-Ventures/mv-barline/releases/tag/v1.0.66).
+On macOS 27 its inventory path requires exactly 27.0.1, build 26A434; other
+macOS 27 versions/builds are rejected before discovery. This is a known hard
+restriction, not just missing test coverage. Do not install that prerelease on
+another macOS 27 build. No replacement binary has been substituted for it.
+
+The next general release must correct this gate without admitting unverified
+layout mutations, cover unsupported-lane behavior with regression tests, and
+repeat qualification on the new exact candidate. See [execution history](EXECUTION_PLAN.md).
 
 ## Compatibility
 
@@ -73,7 +82,7 @@ validation requirements; see [search architecture](SEARCH_AND_APPLE_INTELLIGENCE
 
 ## Current reliability and distribution boundary
 
-Build 157's release evidence is summarized in [execution history](EXECUTION_PLAN.md).
+Build 157's limited-candidate evidence is summarized in [execution history](EXECUTION_PLAN.md).
 It passed the full Xcode 27 pipeline and signed installed journeys on one Apple
 Silicon Mac running macOS 27.0.1. The 60 measured shelf cycles had zero timeouts;
 the worst run's p95 was 104.7 ms. Actual Sparkle upgrade, prepared legacy-data
