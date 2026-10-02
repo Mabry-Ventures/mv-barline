@@ -51,6 +51,8 @@ private struct WindowSnapshot {
     let windowName: String?
     let layer: Int?
     let bounds: CGRect
+    let isOnscreen: Bool?
+    let alpha: Double?
 }
 
 private func processIsRunning(_ processIdentifier: pid_t) -> Bool {
@@ -71,6 +73,7 @@ private enum ProbeError: Error, CustomStringConvertible, Sendable {
     case coldFirstClickTimedOut
     case unexpectedForegroundUI
     case openingTimedOut(Int)
+    case windowObservationUnavailable
 
     var description: String {
         switch self {
@@ -100,6 +103,8 @@ private enum ProbeError: Error, CustomStringConvertible, Sendable {
             "Unexpected foreground UI interrupted the shelf probe; not a timing sample"
         case let .openingTimedOut(cycle):
             "Shelf opening timed out at cycle \(cycle); stopped without further clicks"
+        case .windowObservationUnavailable:
+            "Window observation is unavailable, incomplete, or ambiguous; stopped without further clicks"
         }
     }
 }
@@ -183,7 +188,7 @@ private func requestProductionReopen(
             (CFPreferencesCopyAppValue(presentationProcessIdentifierKey, applicationID) as? NSNumber)?.int32Value ?? 0
         if presentationGeneration > startingPresentationGeneration,
            acknowledgedProcessIdentifier == processIdentifier,
-           expectedApplicationIsPresented(processIdentifier: processIdentifier)
+           try expectedApplicationIsPresented(processIdentifier: processIdentifier)
         {
             presentationMilliseconds = milliseconds(start.duration(to: .now))
             break
@@ -212,19 +217,16 @@ private func requestProductionReopen(
     throw ProbeError.recoveryTimedOut
 }
 
-private func windowSnapshots() -> [WindowSnapshot] {
+private func windowSnapshots() throws -> [WindowSnapshot] {
     let options: CGWindowListOption = [.optionOnScreenOnly, .excludeDesktopElements]
-    let rows = CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]] ?? []
+    return try decodeWindowSnapshots(CGWindowListCopyWindowInfo(options, kCGNullWindowID) as? [[String: Any]])
+}
 
-    return rows.compactMap { row in
-        guard
-            let dictionary = row[kCGWindowBounds as String] as? [String: Any],
-            let x = (dictionary["X"] as? NSNumber)?.doubleValue,
-            let y = (dictionary["Y"] as? NSNumber)?.doubleValue,
-            let width = (dictionary["Width"] as? NSNumber)?.doubleValue,
-            let height = (dictionary["Height"] as? NSNumber)?.doubleValue
-        else {
-            return nil
+private func decodeWindowSnapshots(_ rows: [[String: Any]]?) throws -> [WindowSnapshot] {
+    guard let rows else { throw ProbeError.windowObservationUnavailable }
+    return rows.map { row in
+        let bounds = (row[kCGWindowBounds as String] as? [String: Any]).flatMap {
+            CGRect(dictionaryRepresentation: $0 as CFDictionary)
         }
 
         return WindowSnapshot(
@@ -235,21 +237,70 @@ private func windowSnapshots() -> [WindowSnapshot] {
             ownerName: row[kCGWindowOwnerName as String] as? String,
             windowName: row[kCGWindowName as String] as? String,
             layer: (row[kCGWindowLayer as String] as? NSNumber)?.intValue,
-            bounds: CGRect(x: x, y: y, width: width, height: height)
+            // Preserve malformed possible shelf rows. Dropping one could turn
+            // an incomplete/ambiguous observation into a false closed pass.
+            bounds: bounds ?? .null,
+            isOnscreen: (row[kCGWindowIsOnscreen as String] as? NSNumber)?.boolValue,
+            alpha: (row[kCGWindowAlpha as String] as? NSNumber)?.doubleValue
         )
     }
 }
 
-private func expectedApplicationIsPresented(processIdentifier: pid_t) -> Bool {
+private func expectedApplicationIsPresented(processIdentifier: pid_t) throws -> Bool {
     guard NSWorkspace.shared.frontmostApplication?.processIdentifier == processIdentifier else {
         return false
     }
-    return windowSnapshots().contains {
-        $0.ownerProcessIdentifier == processIdentifier &&
-            $0.layer == 0 &&
-            $0.bounds.width > 0 &&
-            $0.bounds.height > 0
+    return try validatedPresentationExists(windowSnapshots(), expectedPID: processIdentifier)
+}
+
+private func hasVisibleGeometry(_ window: WindowSnapshot) -> Bool {
+    window.windowNumber.map { $0 > 0 } == true &&
+        window.ownerProcessIdentifier.map { $0 > 0 } == true && window.layer != nil &&
+        window.isOnscreen == true && window.alpha.map { $0.isFinite && $0 > 0 } == true &&
+        [window.bounds.minX, window.bounds.minY, window.bounds.width, window.bounds.height].allSatisfy(\.isFinite) &&
+        window.bounds.width > 0 && window.bounds.height > 0
+}
+
+private func validatedPresentationExists(_ windows: [WindowSnapshot], expectedPID: pid_t) throws -> Bool {
+    let possible = windows.filter {
+        ($0.ownerProcessIdentifier == nil || $0.ownerProcessIdentifier == expectedPID) &&
+            ($0.layer == nil || $0.layer == 0)
     }
+    guard possible.allSatisfy({
+        $0.ownerProcessIdentifier == expectedPID && $0.layer == 0 && hasVisibleGeometry($0)
+    }) else { throw ProbeError.windowObservationUnavailable }
+    return !possible.isEmpty
+}
+
+private func validatedNamedIcon(
+    _ windows: [WindowSnapshot], expectedPID: pid_t, hostedPIDs: Set<pid_t>, sourceFrames: [CGRect]
+) throws -> CGPoint? {
+    // Count named candidates before validating their metadata. A malformed
+    // duplicate must not disappear and make the remaining target look unique.
+    let possible = windows.filter { $0.windowName == "Barline.ControlItem.Visible" }
+    guard !possible.isEmpty else { return nil }
+    guard possible.count == 1, let icon = possible.first,
+          hasVisibleGeometry(icon), icon.bounds.width < 100, icon.bounds.height < 100,
+          let owner = icon.ownerProcessIdentifier,
+          owner == expectedPID || (hostedPIDs.contains(owner) && sourceFrames.filter {
+              StatusItemFrameMatching.matches(source: $0, hosted: icon.bounds)
+          }.count == 1)
+    else { throw ProbeError.windowObservationUnavailable }
+    return CGPoint(x: icon.bounds.midX, y: icon.bounds.midY)
+}
+
+private func validatedCompositeIcon(_ windows: [WindowSnapshot], source: CGRect) throws -> CGPoint? {
+    guard [source.minX, source.minY, source.width, source.height].allSatisfy(\.isFinite),
+          source.width > 0, source.width < 100, source.height > 0, source.height < 100
+    else { throw ProbeError.windowObservationUnavailable }
+    let possible = windows.filter { $0.windowName == "Menubar" }
+    guard possible.allSatisfy({ $0.layer == 24 && hasVisibleGeometry($0) }) else {
+        throw ProbeError.windowObservationUnavailable
+    }
+    let center = CGPoint(x: source.midX, y: source.midY)
+    let containing = possible.filter { $0.bounds.contains(source) }
+    guard containing.count <= 1 else { throw ProbeError.windowObservationUnavailable }
+    return containing.isEmpty ? nil : center
 }
 
 private func barlineIconCenter() throws -> CGPoint {
@@ -260,41 +311,21 @@ private func barlineIconCenter() throws -> CGPoint {
           NSRunningApplication(processIdentifier: expectedProcessIdentifier)?.bundleIdentifier == Configuration.appBundleIdentifier
     else { throw ProbeError.applicationNotRunning }
     while start.duration(to: .now) < Configuration.iconTimeout {
-        let candidates = windowSnapshots().filter {
-            $0.windowName == "Barline.ControlItem.Visible" &&
-                $0.bounds.width > 0 &&
-                $0.bounds.width < 100
-        }
-        if let icon = candidates.first(where: { candidate in
-            if candidate.ownerProcessIdentifier == expectedProcessIdentifier {
-                return true
+        let windows = try windowSnapshots()
+        let named = windows.filter { $0.windowName == "Barline.ControlItem.Visible" }
+        if !named.isEmpty {
+            // macOS 26 can host the control in Control Center. Cross-check its
+            // exact owner and the source app's AX geometry before input.
+            let hosts = Set(NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.controlcenter").map(\.processIdentifier))
+            let sources = named.first?.ownerProcessIdentifier == expectedProcessIdentifier ? [] : sourceStatusFrames(processIdentifier: expectedProcessIdentifier)
+            if let point = try validatedNamedIcon(windows, expectedPID: expectedProcessIdentifier, hostedPIDs: hosts, sourceFrames: sources) {
+                return point
             }
-            // macOS 26 hosts status windows in Control Center. Never trust only a
-            // title: prove an AX extras-bar child of the exact Barline process has
-            // the same geometry, and require the known system hosting process.
-            guard let owner = candidate.ownerProcessIdentifier,
-                  NSRunningApplication(processIdentifier: owner)?.bundleIdentifier == "com.apple.controlcenter"
-            else { return false }
-            return sourceStatusFrames(processIdentifier: expectedProcessIdentifier).contains {
-                StatusItemFrameMatching.matches(source: $0, hosted: candidate.bounds)
-            }
-        }) {
-            return CGPoint(x: icon.bounds.midX, y: icon.bounds.midY)
-        }
-        if candidates.isEmpty,
-           let source = sourceVisibleStatusFrame(processIdentifier: expectedProcessIdentifier)
+        } else if let source = sourceVisibleStatusFrame(processIdentifier: expectedProcessIdentifier),
+                  let point = try validatedCompositeIcon(windows, source: source)
         {
-            let compositedMenuBars = windowSnapshots().filter {
-                $0.windowName == "Menubar" && $0.layer == 24 &&
-                    $0.bounds.width > 0 && $0.bounds.height > 0 &&
-                    $0.bounds.contains(CGPoint(x: source.midX, y: source.midY))
-            }
-            if compositedMenuBars.count == 1 {
-                // macOS 27 no longer publishes one named CGWindow per status
-                // item. Require the exact app-owned AX control to lie within
-                // the one visible WindowServer Menubar composite.
-                return CGPoint(x: source.midX, y: source.midY)
-            }
+            // macOS 27 exposes a composite, not one CGWindow per status item.
+            return point
         }
         usleep(Configuration.pollingIntervalMicroseconds)
     }
@@ -311,17 +342,18 @@ private func sourceVisibleStatusFrame(processIdentifier: pid_t) -> CGRect? {
     var rawChildren: CFTypeRef?
     guard AXUIElementCopyAttributeValue(bar, kAXChildrenAttribute as CFString, &rawChildren) == .success,
           let children = rawChildren as? [AXUIElement] else { return nil }
-    let matches = children.compactMap { child -> CGRect? in
+    let matches = children.filter { child in
         var rawIdentifier: CFTypeRef?
         var rawRole: CFTypeRef?
         guard AXUIElementCopyAttributeValue(child, kAXIdentifierAttribute as CFString, &rawIdentifier) == .success,
               AXUIElementCopyAttributeValue(child, kAXRoleAttribute as CFString, &rawRole) == .success,
               rawIdentifier as? String == "Barline.ControlItem.Visible",
-              rawRole as? String == kAXMenuBarItemRole else { return nil }
-        return sourceStatusFrame(child)
+              rawRole as? String == kAXMenuBarItemRole else { return false }
+        return true
     }
-    guard matches.count == 1, let match = matches.first,
-          match.width > 0, match.width < 100, match.height > 0 else { return nil }
+    guard matches.count == 1, let child = matches.first, let match = sourceStatusFrame(child),
+          [match.minX, match.minY, match.width, match.height].allSatisfy(\.isFinite),
+          match.width > 0, match.width < 100, match.height > 0, match.height < 100 else { return nil }
     return match
 }
 
@@ -370,8 +402,8 @@ private func sourceStatusFrames(processIdentifier: pid_t) -> [CGRect] {
     }
 }
 
-private func isBarlineShelfVisible(snapshots: [WindowSnapshot]? = nil) -> Bool {
-    barlineShelfSnapshot(snapshots: snapshots) != nil
+private func isBarlineShelfVisible(snapshots: [WindowSnapshot]? = nil) throws -> Bool {
+    try barlineShelfSnapshot(snapshots: snapshots) != nil
 }
 
 /// macOS 27 can omit the owner and title of a nonactivating panel from its
@@ -399,36 +431,205 @@ private func runtimeSmokePanelWindowNumber(expectedProcessIdentifier: pid_t?) ->
     return CGWindowID(windowNumber)
 }
 
-private func barlineShelfSnapshot(snapshots: [WindowSnapshot]? = nil) -> WindowSnapshot? {
+private func barlineShelfSnapshot(snapshots: [WindowSnapshot]? = nil) throws -> WindowSnapshot? {
     let expectedProcessIdentifier = ProcessInfo.processInfo.environment["BARLINE_EXPECTED_PID"]
         .flatMap(pid_t.init)
-    let windows = snapshots ?? windowSnapshots()
+    let windows = try snapshots ?? windowSnapshots()
     let runtimeWindowNumber = runtimeSmokePanelWindowNumber(
         expectedProcessIdentifier: expectedProcessIdentifier
     )
-    if let namedOrRuntimeShelf = windows.first(where: {
-        let ownerMatches = expectedProcessIdentifier == nil ||
-            $0.ownerProcessIdentifier == expectedProcessIdentifier
-        let namedShelf = $0.ownerName == "Barline" && $0.windowName == "Barline Bar"
-        let runtimeShelf = runtimeWindowNumber != nil && $0.windowNumber == runtimeWindowNumber
-        return ownerMatches && (namedShelf || runtimeShelf)
+    guard let expectedProcessIdentifier else { throw ProbeError.windowObservationUnavailable }
+    return try validatedShelfSnapshot(windows, expectedPID: expectedProcessIdentifier, runtimeWindowNumber: runtimeWindowNumber)
+}
+
+private func validatedShelfSnapshot(
+    _ windows: [WindowSnapshot], expectedPID: pid_t, runtimeWindowNumber: CGWindowID?
+) throws -> WindowSnapshot? {
+    if windows.contains(where: {
+        $0.windowName == "Barline Bar" && ($0.ownerProcessIdentifier == nil || $0.ownerProcessIdentifier == expectedPID) && $0.layer != 25
     }) {
-        return namedOrRuntimeShelf
+        throw ProbeError.windowObservationUnavailable
     }
-    guard let expectedProcessIdentifier else { return nil }
+    if let runtimeWindowNumber, windows.contains(where: {
+        $0.windowNumber == runtimeWindowNumber && ($0.ownerProcessIdentifier != expectedPID || $0.layer != 25)
+    }) {
+        throw ProbeError.windowObservationUnavailable
+    }
     // macOS 27 omits the title of Release accessory panels from WindowServer.
     // The shelf is the only Barline-owned mainMenu+1 surface in this probe.
     // Requiring one exact-PID, exact-layer, onscreen window avoids a synchronous
     // AX query on every 10 ms poll; that query inflated the measured latency.
-    let matchingSurfaces = windows.filter {
-        $0.ownerProcessIdentifier == expectedProcessIdentifier &&
-            $0.layer == 25 &&
-            $0.windowNumber != nil &&
-            $0.bounds.width > 0 &&
-            $0.bounds.height > 0 &&
-            $0.bounds.height < 100
+    let possibleSurfaces = windows.filter {
+        ($0.ownerProcessIdentifier == nil || $0.ownerProcessIdentifier == expectedPID) &&
+            ($0.layer == nil || $0.layer == 25)
     }
-    return matchingSurfaces.count == 1 ? matchingSurfaces[0] : nil
+    guard !possibleSurfaces.isEmpty else { return nil }
+    guard possibleSurfaces.count == 1, let surface = possibleSurfaces.first,
+          surface.ownerProcessIdentifier == expectedPID, surface.layer == 25,
+          hasVisibleGeometry(surface), let number = surface.windowNumber, surface.bounds.height < 100,
+          surface.windowName == nil || surface.windowName == "" || surface.windowName == "Barline Bar",
+          runtimeWindowNumber == nil || runtimeWindowNumber == number
+    else { throw ProbeError.windowObservationUnavailable }
+    return surface
+}
+
+private func testWindowObserver() throws {
+    let row: [String: Any] = [
+        kCGWindowNumber as String: NSNumber(value: 7),
+        kCGWindowOwnerPID as String: NSNumber(value: 42),
+        kCGWindowLayer as String: NSNumber(value: 25),
+        kCGWindowIsOnscreen as String: NSNumber(value: true),
+        kCGWindowAlpha as String: NSNumber(value: 1.0),
+        kCGWindowBounds as String: CGRect(x: 200, y: 25, width: 80, height: 32).dictionaryRepresentation,
+    ]
+    func observe(_ rows: [[String: Any]]?, witness: CGWindowID? = nil) throws -> WindowSnapshot? {
+        try validatedShelfSnapshot(decodeWindowSnapshots(rows), expectedPID: 42, runtimeWindowNumber: witness)
+    }
+    var cases = 0
+    func reject(_ rows: [[String: Any]]?, witness: CGWindowID? = nil) {
+        cases += 1
+        do {
+            _ = try observe(rows, witness: witness)
+            preconditionFailure("unknown observation was accepted")
+        } catch ProbeError.windowObservationUnavailable {} catch { preconditionFailure("wrong observation error") }
+    }
+    let visible = try observe([row])
+    precondition(visible?.windowNumber == 7)
+    let closed = try observe([])
+    precondition(closed == nil)
+    reject(nil)
+    reject([row, row])
+    for key in [kCGWindowNumber, kCGWindowOwnerPID, kCGWindowLayer, kCGWindowIsOnscreen, kCGWindowAlpha, kCGWindowBounds] {
+        var incomplete = row
+        incomplete.removeValue(forKey: key as String)
+        reject([incomplete])
+        reject([row, incomplete])
+    }
+    for (key, value) in [
+        (kCGWindowNumber as String, NSNumber(value: 0)),
+        (kCGWindowIsOnscreen as String, NSNumber(value: false)),
+        (kCGWindowAlpha as String, NSNumber(value: 0.0)),
+        (kCGWindowAlpha as String, NSNumber(value: Double.nan)),
+        (kCGWindowAlpha as String, NSNumber(value: Double.infinity)),
+    ] {
+        var malformed = row
+        malformed[key] = value
+        reject([malformed])
+        malformed[kCGWindowName as String] = "Barline Bar"
+        reject([malformed], witness: 7)
+    }
+    for rect in [CGRect.zero, CGRect(x: 0, y: 0, width: 80, height: 100), CGRect(x: CGFloat.infinity, y: 0, width: 80, height: 32)] {
+        var malformed = row
+        malformed[kCGWindowBounds as String] = rect.dictionaryRepresentation
+        reject([malformed])
+    }
+    var named = row
+    named[kCGWindowName as String] = "Barline Bar"
+    let namedVisible = try observe([named], witness: 7)
+    precondition(namedVisible?.windowNumber == 7)
+    reject([named], witness: 8)
+    named[kCGWindowName as String] = "Other Panel"
+    reject([named])
+    var foreign = row
+    foreign[kCGWindowOwnerPID as String] = NSNumber(value: 43)
+    foreign.removeValue(forKey: kCGWindowBounds as String)
+    let foreignOnly = try observe([foreign])
+    let uniqueWithForeign = try observe([row, foreign])
+    precondition(foreignOnly == nil && uniqueWithForeign?.windowNumber == 7)
+    reject([foreign], witness: 7)
+    var wrongLayer = row
+    wrongLayer[kCGWindowLayer as String] = 24
+    // A known status control is not a shelf. A named shelf at that layer is
+    // inconsistent evidence and must not become a closed baseline.
+    let statusOnly = try observe([wrongLayer])
+    precondition(statusOnly == nil)
+    wrongLayer[kCGWindowName as String] = "Barline Bar"
+    reject([wrongLayer])
+    func rejectConsumer(_ operation: () throws -> Void) {
+        cases += 1
+        do {
+            try operation()
+            preconditionFailure("incomplete target/presentation was accepted")
+        } catch ProbeError.windowObservationUnavailable {} catch { preconditionFailure("wrong consumer error") }
+    }
+    var settings = row
+    settings[kCGWindowLayer as String] = 0
+    var icon = row
+    icon[kCGWindowName as String] = "Barline.ControlItem.Visible"
+    icon[kCGWindowLayer as String] = 24
+    var menuBar = row
+    menuBar[kCGWindowName as String] = "Menubar"
+    menuBar[kCGWindowLayer as String] = 24
+    menuBar[kCGWindowOwnerPID as String] = 43
+    menuBar[kCGWindowBounds as String] = CGRect(x: 0, y: 0, width: 1920, height: 30).dictionaryRepresentation
+    let source = CGRect(x: 200, y: 3, width: 24, height: 24)
+    func presentation(_ rows: [[String: Any]]) throws -> Bool {
+        try validatedPresentationExists(decodeWindowSnapshots(rows), expectedPID: 42)
+    }
+    func namedIcon(_ rows: [[String: Any]]) throws -> CGPoint? {
+        try validatedNamedIcon(decodeWindowSnapshots(rows), expectedPID: 42, hostedPIDs: [], sourceFrames: [])
+    }
+    func composite(_ rows: [[String: Any]]) throws -> CGPoint? {
+        try validatedCompositeIcon(decodeWindowSnapshots(rows), source: source)
+    }
+    let presented = try presentation([settings])
+    let absent = try presentation([])
+    let namedPoint = try namedIcon([icon])
+    let compositePoint = try composite([menuBar])
+    precondition(presented && !absent && namedPoint != nil)
+    precondition(compositePoint == CGPoint(x: source.midX, y: source.midY))
+    rejectConsumer { _ = try namedIcon([icon, icon]) }
+    rejectConsumer { _ = try composite([menuBar, menuBar]) }
+    for key in [kCGWindowNumber, kCGWindowOwnerPID, kCGWindowLayer, kCGWindowIsOnscreen, kCGWindowAlpha, kCGWindowBounds] {
+        var incompleteSettings = settings
+        incompleteSettings.removeValue(forKey: key as String)
+        rejectConsumer { _ = try presentation([incompleteSettings]) }
+        rejectConsumer { _ = try presentation([settings, incompleteSettings]) }
+        var incompleteIcon = icon
+        incompleteIcon.removeValue(forKey: key as String)
+        rejectConsumer { _ = try namedIcon([incompleteIcon]) }
+        rejectConsumer { _ = try namedIcon([icon, incompleteIcon]) }
+        var incompleteBar = menuBar
+        incompleteBar.removeValue(forKey: key as String)
+        rejectConsumer { _ = try composite([incompleteBar]) }
+        rejectConsumer { _ = try composite([menuBar, incompleteBar]) }
+    }
+    for (key, value) in [
+        (kCGWindowAlpha as String, NSNumber(value: 0.0)),
+        (kCGWindowAlpha as String, NSNumber(value: Double.nan)),
+        (kCGWindowIsOnscreen as String, NSNumber(value: false)),
+        (kCGWindowBounds as String, CGRect(x: CGFloat.infinity, y: 0, width: 20, height: 20).dictionaryRepresentation),
+        (kCGWindowBounds as String, CGRect.zero.dictionaryRepresentation),
+    ] as [(String, Any)] {
+        var malformedSettings = settings; malformedSettings[key] = value
+        var malformedIcon = icon; malformedIcon[key] = value
+        var malformedBar = menuBar; malformedBar[key] = value
+        rejectConsumer { _ = try presentation([malformedSettings]) }
+        rejectConsumer { _ = try namedIcon([malformedIcon]) }
+        rejectConsumer { _ = try composite([malformedBar]) }
+    }
+    var foreignIcon = icon
+    foreignIcon[kCGWindowOwnerPID as String] = 99
+    rejectConsumer { _ = try namedIcon([foreignIcon]) }
+    let hostedRows = try decodeWindowSnapshots([foreignIcon])
+    let hostedFrame = hostedRows[0].bounds
+    let hostedPoint = try validatedNamedIcon(hostedRows, expectedPID: 42, hostedPIDs: [99], sourceFrames: [hostedFrame])
+    precondition(hostedPoint == CGPoint(x: hostedFrame.midX, y: hostedFrame.midY))
+    rejectConsumer {
+        _ = try validatedNamedIcon(hostedRows, expectedPID: 42, hostedPIDs: [99], sourceFrames: [])
+    }
+    rejectConsumer {
+        _ = try validatedNamedIcon(hostedRows, expectedPID: 42, hostedPIDs: [99], sourceFrames: [hostedFrame, hostedFrame])
+    }
+    var secondDisplay = menuBar
+    secondDisplay[kCGWindowBounds as String] = CGRect(x: 1920, y: 0, width: 1920, height: 30).dictionaryRepresentation
+    let multiDisplayPoint = try composite([menuBar, secondDisplay])
+    precondition(multiDisplayPoint != nil)
+    do {
+        _ = try waitForVisibility(false, timeout: .zero)
+        preconditionFailure("an unscheduled observation became a retryable timeout")
+    } catch ProbeError.windowObservationUnavailable {}
+    print("PASS: performance observer rejects \(cases) unavailable, malformed, ambiguous and mismatched cases; known open/closed and zero-poll deadline verified")
 }
 
 /// Buffer transport metadata rather than logging/querying windows in the hot
@@ -484,6 +685,7 @@ private let clickDispatchRecorder = ClickDispatchRecorder()
 private func click(at point: CGPoint) throws {
     switch Configuration.probe {
     case "runtime-smoke":
+        _ = try isBarlineShelfVisible()
         DistributedNotificationCenter.default().postNotificationName(
             Configuration.notificationName("runtime-smoke.toggle-shelf"),
             object: nil,
@@ -494,9 +696,14 @@ private func click(at point: CGPoint) throws {
         // Status items can move while Control Center relays out the bar. Resolve
         // the exact app's current target for every dispatch, not once per burst.
         let currentPoint = try barlineIconCenter()
+        let freshWindows = try windowSnapshots()
+        let shelfBefore = try isBarlineShelfVisible(snapshots: freshWindows)
+        guard try !unexpectedForegroundUIPresent(snapshots: freshWindows) else {
+            throw ProbeError.unexpectedForegroundUI
+        }
         if ProcessInfo.processInfo.environment["BARLINE_PERFORMANCE_TRACE"] == "1" {
             let moved = hypot(currentPoint.x - point.x, currentPoint.y - point.y) > 1
-            print("TRACE click monotonic_ns=\(DispatchTime.now().uptimeNanoseconds) target_moved=\(moved) shelf_before=\(isBarlineShelfVisible())")
+            print("TRACE click monotonic_ns=\(DispatchTime.now().uptimeNanoseconds) target_moved=\(moved) shelf_before=\(shelfBefore)")
             fflush(stdout)
         }
         guard
@@ -550,16 +757,18 @@ private func waitForVisibility(
     let measurementStart = measurementStart ?? .now
     let deadline = measurementStart.advanced(by: timeout)
     var consecutiveSamples = 0
+    var observedSamples = 0
     var committedWindowNumber: CGWindowID?
     while ContinuousClock.now < deadline {
         if isCancelled?() == true {
             return nil
         }
-        let snapshots = windowSnapshots()
-        if unexpectedForegroundUIPresent(snapshots: snapshots) {
+        let snapshots = try windowSnapshots()
+        if try unexpectedForegroundUIPresent(snapshots: snapshots) {
             throw ProbeError.unexpectedForegroundUI
         }
-        let shelfSnapshot = barlineShelfSnapshot(snapshots: snapshots)
+        let shelfSnapshot = try barlineShelfSnapshot(snapshots: snapshots)
+        observedSamples += 1
         let matchesTarget: Bool
         if target, let shelfSnapshot {
             if let committedWindowNumber {
@@ -583,6 +792,7 @@ private func waitForVisibility(
         }
         usleep(max(Configuration.pollingIntervalMicroseconds, 16000))
     }
+    guard observedSamples > 0 else { throw ProbeError.windowObservationUnavailable }
     return nil
 }
 
@@ -608,7 +818,7 @@ private func observeVisibilityConcurrently(
     }
 }
 
-private func unexpectedForegroundUIPresent(snapshots: [WindowSnapshot]? = nil) -> Bool {
+private func unexpectedForegroundUIPresent(snapshots: [WindowSnapshot]? = nil) throws -> Bool {
     guard Configuration.probe == "status-item-click" else {
         return false
     }
@@ -621,13 +831,8 @@ private func unexpectedForegroundUIPresent(snapshots: [WindowSnapshot]? = nil) -
     if Thread.isMainThread, NSWorkspace.shared.frontmostApplication?.processIdentifier == expectedProcessIdentifier {
         return true
     }
-    let windows = snapshots ?? windowSnapshots()
-    return windows.contains {
-        $0.ownerProcessIdentifier == expectedProcessIdentifier &&
-            $0.layer == 0 &&
-            $0.bounds.width > 0 &&
-            $0.bounds.height > 0
-    }
+    let windows = try snapshots ?? windowSnapshots()
+    return try validatedPresentationExists(windows, expectedPID: expectedProcessIdentifier)
 }
 
 private func milliseconds(_ duration: Duration) -> Double {
@@ -674,7 +879,7 @@ private func percentile(_ values: [Double], _ percentile: Double) -> Double {
 }
 
 private func ensureClosed(iconPoint: CGPoint) throws {
-    guard isBarlineShelfVisible() else {
+    guard try isBarlineShelfVisible() else {
         return
     }
     try click(at: iconPoint)
@@ -684,21 +889,20 @@ private func ensureClosed(iconPoint: CGPoint) throws {
 }
 
 private func runSingleClick(iconPoint: CGPoint) throws -> Double? {
-    let start = ContinuousClock.now
     var openingObservation: ConcurrentVisibilityObservation?
     return try ShelfProbeCycle.run(
-        baselineClosed: { !isBarlineShelfVisible() },
+        baselineClosed: { try !isBarlineShelfVisible() },
         click: {
             if openingObservation == nil {
                 openingObservation = observeVisibilityConcurrently(
                     target: true,
                     timeout: Configuration.openTimeout,
-                    relativeTo: start
+                    relativeTo: .now
                 )
             }
             do {
                 try click(at: iconPoint)
-                guard !unexpectedForegroundUIPresent() else {
+                guard try !unexpectedForegroundUIPresent() else {
                     openingObservation?.cancel()
                     _ = try? openingObservation?.value()
                     throw ProbeError.unexpectedForegroundUI
@@ -716,7 +920,7 @@ private func runSingleClick(iconPoint: CGPoint) throws -> Double? {
             else {
                 return nil
             }
-            guard !unexpectedForegroundUIPresent() else {
+            guard try !unexpectedForegroundUIPresent() else {
                 throw ProbeError.unexpectedForegroundUI
             }
             return milliseconds(duration)
@@ -726,6 +930,7 @@ private func runSingleClick(iconPoint: CGPoint) throws -> Double? {
 }
 
 private func runRapidRetry(iconPoint: CGPoint) throws -> (feedbackInBudget: Bool, silentCancellation: Bool) {
+    guard try !isBarlineShelfVisible() else { throw ShelfProbeCycle.Failure.baselineStillOpen }
     let start = ContinuousClock.now
     let openingObservation = observeVisibilityConcurrently(
         target: true,
@@ -734,7 +939,7 @@ private func runRapidRetry(iconPoint: CGPoint) throws -> (feedbackInBudget: Bool
     )
     do {
         try click(at: iconPoint)
-        guard !unexpectedForegroundUIPresent() else {
+        guard try !unexpectedForegroundUIPresent() else {
             openingObservation.cancel()
             _ = try? openingObservation.value()
             throw ProbeError.unexpectedForegroundUI
@@ -745,7 +950,7 @@ private func runRapidRetry(iconPoint: CGPoint) throws -> (feedbackInBudget: Bool
         throw error
     }
     if let duration = try openingObservation.value() {
-        guard !unexpectedForegroundUIPresent() else {
+        guard try !unexpectedForegroundUIPresent() else {
             throw ProbeError.unexpectedForegroundUI
         }
         let feedbackInBudget = duration <= Configuration.feedbackBudget
@@ -756,17 +961,26 @@ private func runRapidRetry(iconPoint: CGPoint) throws -> (feedbackInBudget: Bool
         return (feedbackInBudget, false)
     }
 
-    // Reproduce a user retrying because the first click produced no visible feedback.
-    try click(at: iconPoint)
-    let silentCancellation = try waitForVisibility(true, timeout: Configuration.closeTimeout) == nil
+    // This is a delayed-feedback retry probe, not general double-click coverage.
+    // Do not cancel a first opening that arrived just after the budget expired.
+    let retried = try ShelfProbeCycle.retryIfClosed(
+        isVisible: { try isBarlineShelfVisible() },
+        click: { try click(at: iconPoint) }
+    )
+    let silentCancellation = try retried && waitForVisibility(true, timeout: Configuration.closeTimeout) == nil
 
-    if isBarlineShelfVisible() {
+    if try isBarlineShelfVisible() {
         try click(at: iconPoint)
         guard try waitForVisibility(false, timeout: Configuration.closeTimeout) != nil else {
             throw ShelfProbeCycle.Failure.closeTimedOut
         }
     }
     return (false, silentCancellation)
+}
+
+if ProcessInfo.processInfo.environment["BARLINE_PERFORMANCE_OBSERVER_SELF_TEST"] == "1" {
+    try testWindowObserver()
+    exit(0)
 }
 
 private let initialPointer = CGEvent(source: nil)?.location
@@ -860,7 +1074,7 @@ do {
 
     let iconPoint = try barlineIconCenter()
 
-    guard !unexpectedForegroundUIPresent() else {
+    guard try !unexpectedForegroundUIPresent() else {
         throw ProbeError.unexpectedForegroundUI
     }
     try ensureClosed(iconPoint: iconPoint)

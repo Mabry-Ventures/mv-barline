@@ -21,7 +21,7 @@
   counts as an independent stability observation. Ordinary UI caching remains.
   This is source hardening, not macOS 27 Focus compatibility or release approval.
 
-## 1.0.66 (build 156) — qualification candidate, October 2, 2026
+## 1.0.66 (build 157) — qualification candidate, October 2, 2026
 
 ### macOS 27
 

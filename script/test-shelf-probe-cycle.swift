@@ -13,6 +13,17 @@ struct ShelfProbeCycleTests {
         precondition(success == 42 && clicks == 2)
 
         clicks = 0
+        do {
+            _ = try ShelfProbeCycle.run(
+                baselineClosed: { throw ObservationError.foregroundInterrupted }, click: { clicks += 1 },
+                waitForOpen: { fatalError("unknown baseline must not start observation") },
+                waitForClose: { fatalError("unknown baseline must not close") }
+            )
+            fatalError("unreadable baseline must throw without clicking")
+        } catch ObservationError.foregroundInterrupted {
+            precondition(clicks == 0)
+        }
+        clicks = 0
         let openFailure = try ShelfProbeCycle.run(
             baselineClosed: { true }, click: { clicks += 1 },
             waitForOpen: { nil }, waitForClose: { fatalError("must not close an unopened shelf") }
@@ -29,6 +40,7 @@ struct ShelfProbeCycleTests {
         } catch ShelfProbeCycle.Failure.closeTimedOut {
             precondition(clicks == 2)
         }
+        clicks = 0
         do {
             _ = try ShelfProbeCycle.run(
                 baselineClosed: { false }, click: { clicks += 1 },
@@ -36,7 +48,7 @@ struct ShelfProbeCycleTests {
             )
             fatalError("an unclosed baseline cannot start the next cycle")
         } catch ShelfProbeCycle.Failure.baselineStillOpen {
-            precondition(clicks == 2)
+            precondition(clicks == 0)
         }
         clicks = 0
         do {
@@ -59,7 +71,20 @@ struct ShelfProbeCycleTests {
         } catch ObservationError.foregroundInterrupted {
             precondition(clicks == 2)
         }
-        print("PASS: six shelf cycle cases: success, open timeout, close timeout, baseline, interrupted open/close")
+        print("PASS: seven shelf cycle cases: success, open timeout, close timeout, baseline, unreadable baseline, interrupted open/close")
+
+        clicks = 0
+        do {
+            _ = try ShelfProbeCycle.retryIfClosed(
+                isVisible: { throw ObservationError.foregroundInterrupted }, click: { clicks += 1 }
+            )
+            fatalError("unknown retry state must throw")
+        } catch ObservationError.foregroundInterrupted { precondition(clicks == 0) }
+        let alreadyOpen = try ShelfProbeCycle.retryIfClosed(isVisible: { true }, click: { clicks += 1 })
+        precondition(!alreadyOpen && clicks == 0)
+        let knownClosed = try ShelfProbeCycle.retryIfClosed(isVisible: { false }, click: { clicks += 1 })
+        precondition(knownClosed && clicks == 1)
+        print("PASS: delayed-feedback retry aborts on unknown, preserves late opening, clicks once only when known closed")
 
         let successfulObservation = ConcurrentObservation<Int> { _ in 42 }
         let successfulValue = try successfulObservation.value()

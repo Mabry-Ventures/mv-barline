@@ -224,6 +224,7 @@ run_fast() {
     run_step "activation-routing-topology" ruby ./script/test-activation-routing-topology.rb
     require_gate_script ./script/test-golden-gate-transaction-state.sh
     if [[ "$(uname -s)" == Darwin ]]; then
+        run_step "performance-window-observer" bash ./script/test-performance-observer.sh
         run_step "installed-journey-shelf-observer" env BARLINE_JOURNEY_OBSERVER_SELF_TEST=1 swift ./script/test-installed-journey.swift
         run_step "service-recovery-coordinator" bash ./script/test-service-recovery.sh
         run_step "typed-ax-identity-reads" bash ./script/test-ax-identity-reads.sh

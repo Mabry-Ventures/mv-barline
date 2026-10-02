@@ -1,5 +1,33 @@
 # Barline execution plan
 
+## Release observer hardening - October 2, 2026
+
+Frozen `4314c90f` (1.0.66 build 156) passed clean fast and the full CPLCODEX01
+Xcode 27 gate, with 828 Core tests, then Developer ID signing, notarization,
+stapling and Gatekeeper. Seven exact-installed receipts passed: native left and
+right click, popover first-use and reuse, 20-cycle shelf response, helper
+interruption preserving the app process, and another 20-cycle response run.
+The two response p95 measurements were 106.2ms and 84.3ms. Those are bounded
+end-to-end probe results, not continuous no-flicker or resource/soak evidence.
+
+Final independent audit found a separate performance-observer weakness: nil,
+malformed or ambiguous WindowServer rows could be treated as closed. Build 157
+changes only qualification scripts, documentation and build numbers. The
+observer now preserves incomplete rows, requires exact owned and visible
+geometry, and propagates unknown state without another click. Presentation,
+foreground and status-target consumers use the same strict geometry rules.
+The timed observer remains CG-only; baseline work is outside its interval while
+fresh target resolution and input safety checks remain included. A delayed
+opening after the retry deadline is no longer automatically clicked closed.
+Fast CI includes 87 observation rejection vectors and explicit unknown/late/
+known-closed retry cases. Production app behavior is unchanged from build 156.
+
+Build 157 must receive fresh clean gates, packaging and installed qualification;
+build 156 receipts are not transferred. Runtime scope remains CPLCODEX01 only.
+Native Focus, rendered Clock behavior, public-version upgrade and resource
+measurements remain candidate-bound installed gates. Public release and the
+update feed are unchanged; this candidate is staged, not published.
+
 ## Installed interaction qualification and final delivery hardening - October 2, 2026
 
 Frozen `2077c14d` (1.0.66 build 155) passed clean fast and full CPLCODEX01
