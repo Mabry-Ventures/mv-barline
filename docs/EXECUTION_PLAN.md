@@ -1,5 +1,31 @@
 # Barline execution plan
 
+## Version 1.0.66 publication - October 2, 2026
+
+The user approved publishing build 157 after reviewing its qualification limits.
+The exact qualified source, `29e82b395d184da46e860d2d26d796f835e7153b`, was
+integrated through PR #50 after the required local and Linux checks passed.
+The annotated `v1.0.66` tag preserves that commit without a rebase or rebuild.
+GitHub release assets and the signed Sparkle feed are published. The website
+publication changes only release links, tests and documentation; its separate
+deployment is verified against the production domain after upload.
+
+Fresh build-157 evidence passed: 828 Core tests, 216 fixture tests, the full
+Xcode 27 pipeline, signing/notarization/stapling/Gatekeeper, four installed
+native-menu/popover journeys, helper recovery, three Work Focus round trips,
+saved-layout Apply/Undo/Redo and three visually verified Clock cycles. Sixty
+shelf cycles had no timeout; worst run p95 was 104.7 ms. Actual Sparkle updates
+from public build 142 preserved selected preferences and layouts; a separate
+prepared legacy-only migration preserved all 25 tested assignments.
+
+Astra and Gemini found no remaining demonstrated blocker in this tested scope.
+Runtime qualification is one Apple Silicon macOS 27.0.1 configuration, not a
+macOS 26 regression pass, hardware/display matrix, fresh-user onboarding,
+broad third-party-app matrix or extended sleep/wake soak. The ten-minute
+resource sample is not a multi-day leak guarantee. These limits are included
+in the public release notes. Raw screenshots and private preference backups
+remain local, not public release assets.
+
 ## Release observer hardening - October 2, 2026
 
 Frozen `4314c90f` (1.0.66 build 156) passed clean fast and the full CPLCODEX01

@@ -63,11 +63,12 @@ test('every local link and asset resolves, every local fragment exists', async (
 });
 test('production links the qualified release and presents the supported configuration', async () => {
   const html = await readFile(join(output, 'index.html'), 'utf8');
-  assert.match(html, /Download Barline 1\.0\.65/);
-  assert.match(html, /Barline 1\.0\.65 release notes/);
+  assert.match(html, /Download Barline 1\.0\.66/);
+  assert.match(html, /Barline 1\.0\.66 release notes/);
   assert.match(html, /Corresponding source/);
   assert.match(html, /Checksums/);
   assert.match(html, /Apple Silicon · macOS 26 and macOS 27/);
+  assert.match(html, /Tested on macOS 27\.0\.1\. See the release notes for validation scope\./);
   assert.doesNotMatch(html, /macOS 27 compatibility has not yet been qualified\./);
   for (const capability of ['visible, hidden, and always-hidden', 'three-dot control', 'Search your menu bar locally', 'Save useful layouts', 'native macOS Focus Filter', 'display-specific layouts']) {
     assert.ok(html.includes(capability), capability);

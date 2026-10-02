@@ -1,10 +1,11 @@
 # Known limitations and release status
 
-The public latest release is Barline 1.0.65 (build 142), published September 27,
-2026 at `887d335`. See [execution history](EXECUTION_PLAN.md). The clock repair
-in 1.0.66 (build 148) is an internal candidate, not a qualified release. Evidence
-is bound to exact source and signed binary; it is not blanket approval for
-later changes.
+The public latest release is Barline 1.0.66 (build 157), published October 2,
+2026 from `29e82b395d184da46e860d2d26d796f835e7153b`. See
+[release notes](https://github.com/Mabry-Ventures/mv-barline/releases/tag/v1.0.66)
+and [execution history](EXECUTION_PLAN.md). Evidence is bound to this exact
+source and signed binary, not blanket approval for later changes or every
+supported configuration.
 
 ## Compatibility
 
@@ -31,12 +32,13 @@ later changes.
   evidence on a macOS 26 host).
 
 - On macOS 27, Barline hides items with a system Assessment Mode assertion,
-  which stops the clock from opening Notification Center. The unpublished
-  clock repair lifts the assertion before pressing the clock, so hidden items
-  can briefly appear. The September 30 controlled fixture remained hit-testable
-  at an early 400 ms observation and was excluded at later sampled observations
-  while Notification Center remained open. Native activation latency is not a hard quarter-second
-  guarantee. Volume, brightness, capture indicators, Globe+N, multiple displays,
+  which stops the clock from opening Notification Center. The clock repair in
+  1.0.66 lifts the assertion before pressing the clock, so hidden items can
+  briefly appear. Build 157 passed three Clock/Notification Center cycles on
+  macOS 27.0.1: the panel opened, stayed open and dismissed; sampled frames
+  showed no Barline shelf or visible hidden fixture labels. This is not
+  continuous no-flicker evidence or a hard quarter-second native activation
+  guarantee. Volume, brightness, capture indicators, Globe+N, multiple displays
   and every restoration failure mode need separate qualification.
 
 - An earlier internal unnotarized 1.0.66 candidate's own control was not reachable under
@@ -71,14 +73,19 @@ validation requirements; see [search architecture](SEARCH_AND_APPLE_INTELLIGENCE
 
 ## Current reliability and distribution boundary
 
-The 1.0.65 release evidence is listed in [execution history](EXECUTION_PLAN.md).
-No macOS 26 runtime is currently available for the takeover candidate. Local
-Xcode 27 builds and pure tests on macOS 27 cannot certify macOS 26 behavior.
-The September 30 notarization preflight rejected authentication with HTTP 401.
-That boundary was resolved: builds 146 and 147 passed notarization, stapling and
-Gatekeeper. Their trust receipts do not qualify the changed build 148, and
-notarization alone is not production-readiness proof. See the current
-[candidate qualification contract](MACOS_27_BUILD_148_READINESS.md).
+Build 157's release evidence is summarized in [execution history](EXECUTION_PLAN.md).
+It passed the full Xcode 27 pipeline and signed installed journeys on one Apple
+Silicon Mac running macOS 27.0.1. The 60 measured shelf cycles had zero timeouts;
+the worst run's p95 was 104.7 ms. Actual Sparkle upgrade, prepared legacy-data
+migration, saved-layout operations, native Focus and Clock checks passed.
+
+macOS 26 was not retested for this release. Controlled native-menu/popover
+fixtures do not prove every third-party app's behavior. Fresh-user permission
+onboarding, the notched/multi-display matrix and extended sleep/wake use remain
+unqualified for this build. A roughly ten-minute resource sample does not prove
+multi-day stability or absence of leaks. The earlier credential boundary was
+resolved and build 157 is notarized and stapled; notarization is a distribution
+trust check, not proof that the app is bug-free.
 
 ### Historical 1.0.31 evidence
 
