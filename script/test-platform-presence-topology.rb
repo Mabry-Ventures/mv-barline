@@ -7,6 +7,14 @@ observer = File.read('Barline/MenuBar/MenuBarItems/GoldenGatePlatformPresenceObs
 provider = File.read('Barline/MenuBar/MenuBarItems/GoldenGateAXSnapshotProvider.swift')
 helper = File.read('BarlineMenuService/Backends/GoldenGateConcealmentController.swift')
 scope = File.read('Shared/Utilities/AXNativeScopeValidationSupport.swift')
+inventory = File.read('BarlineMenuService/WindowServer/GoldenGateAXInventory.swift')
+publisher_probe = inventory.split('static func publisherHasStatusItem(', 2).last
+  .split('static func identifiers(', 2).first
+unless publisher_probe.include?('maximumCount: AXIdentityReadSupport.maximumChildCount') &&
+       publisher_probe.scan('bundleIdentifier == bundleIdentifier').length == 2 &&
+       publisher_probe.scan('publisherLifetime(for: pid) == lifetime').length == 2
+  abort('publisher advisory probe must share the bounded reader cap and bind bundle plus lifetime before and after AX')
+end
 
 unless observer.include?('AXNativeScopeValidationSupport.canAttemptObservation(on: ProcessInfo.processInfo.operatingSystemVersion)') &&
        observer.include?('guard Self.requiresQualifiedPresenceContract else')

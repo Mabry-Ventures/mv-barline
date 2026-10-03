@@ -34,6 +34,20 @@ enum AXIdentityReadTests {
     }
 
     static func main() async {
+        // This is the production publisher probe's cap, not an independently
+        // chosen test limit. A larger unsupported cap used to reject every read.
+        expect(AXIdentityReadSupport.maximumChildCount == 64, "shared_publisher_child_cap")
+        let publisherChild = AXUIElementCreateApplication(123)
+        let publisherRead = AXIdentityReadSupport.children(
+            maximumCount: AXIdentityReadSupport.maximumChildCount,
+            deadline: 1_000_000_000, now: { 1 }, cancelled: { false }, setTimeout: { _ in .success },
+            count: { (.success, 1) }, copy: { _ in (.success, [publisherChild] as CFArray) }
+        )
+        if case let .elements(values) = publisherRead {
+            expect(values.count == 1, "production_publisher_cap_admits_a_live_child")
+        } else {
+            expect(false, "production_publisher_cap_rejected")
+        }
         let slots: [AnyObject] = ["exact.identifier" as NSString, "AXMenuBarItem" as NSString, "AXMenuExtra" as NSString]
         let decoded = AXIdentityReadSupport.decodeIdentity(status: .success, values: slots as CFArray)
         expect(attributes(decoded) == AXIdentityAttributes(

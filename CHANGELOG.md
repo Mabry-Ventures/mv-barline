@@ -4,7 +4,7 @@
 
 No unreleased changes.
 
-## 1.0.67 (build 162) — candidate
+## 1.0.67 (build 163) — candidate
 
 - macOS 27 menu bar discovery is no longer restricted to one exact OS patch
   and build number. Every discovery attempt still verifies the live system
@@ -31,6 +31,14 @@ No unreleased changes.
 - Menu Bar Layout refreshes after native visibility changes, so a relaunched
   app does not stay missing from Settings after its menu bar icons return.
   Unchanged visibility acknowledgements do not trigger repeated refreshes.
+- The first shelf click after a hidden app relaunch now performs its required
+  visibility recovery before opening the item. Apps that publish their menu
+  items late are checked using live observations, not only saved assignments.
+- A failed menu bar refresh can retry without being mistaken for a completed
+  refresh. Stale or cancelled requests cannot overwrite a newer refresh.
+- Publisher recovery prioritizes the clicked app and preserves the native
+  system-control path. Unresponsive hidden apps cannot consume another app's
+  foreground recovery probe, and failed recovery keeps the accepted layout.
 
 This candidate is not published or fully qualified. Installed runtime testing
 now includes CODEX01 and a notched MacBook Pro; additional OS builds are not

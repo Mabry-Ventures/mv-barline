@@ -4,6 +4,19 @@ import CryptoKit
 import Foundation
 import OSLog
 
+/// Ephemeral kernel birth evidence, not signing, item or display authority.
+struct GoldenGatePublisherLifetime: Hashable, Sendable {
+    let seconds: UInt64
+    let microseconds: UInt64
+
+    init?(pid: Int32, reportedPID: UInt32, bytes: Int32, expectedBytes: Int32, seconds: UInt64, microseconds: UInt64) {
+        guard pid > 0, reportedPID == UInt32(pid), expectedBytes > 0, bytes == expectedBytes,
+              seconds > 0, microseconds < 1_000_000 else { return nil }
+        self.seconds = seconds
+        self.microseconds = microseconds
+    }
+}
+
 @available(macOS 27.0, *)
 final class GoldenGateConcealmentController: @unchecked Sendable {
     private let logger = Logger(category: "GoldenGateConcealmentController")
@@ -27,7 +40,12 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     private struct PublisherInstance: Hashable, Sendable {
         let bundleIdentifier: String
         let processIdentifier: Int32
-        let launchDate: Date?
+        let lifetime: GoldenGatePublisherLifetime
+    }
+
+    private struct RunningPublisher: Sendable {
+        let bundleIdentifier: String
+        let processIdentifier: Int32
     }
 
     private struct PreparedState: Sendable {
@@ -36,6 +54,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         let running: Set<PublisherInstance>
         let observedPublishers: Set<PublisherInstance>
         let visiblePublishers: Set<PublisherInstance>
+        let proposedRevealPublishers: Set<PublisherInstance>
         let configurationDigest: String
         let effectiveDigest: String
         let hasTemporaryReveal: Bool
@@ -46,6 +65,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     private var settledPublishers = Set<PublisherInstance>()
     private var hasDeassertionBoundary = true
     private var publisherRefreshPending = false
+    private var lastProbedPublisherPID: Int32 = 0
     private var receiptLedger = NativeConcealmentReceiptLedger()
     /// A new helper session has no acknowledged native state. Discovery needs
     /// a real deasserted acknowledgement before it can derive the first saved
@@ -201,8 +221,8 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     /// of holding the foreground queue through four three-second attempts.
     private func reapplyAfterLift() async throws {
         do {
-            try await applyCurrentState(timeout: GoldenGateTiming.clockRestoreBudget)
-            cancelBackgroundRecovery()
+            try await applyCurrentState(timeout: GoldenGateTiming.clockRestoreBudget, observesPublishers: false)
+            finishSuccessfulReconciliation()
         } catch {
             receiptLedger.markUnknown()
             appliedResolution = nil
@@ -284,15 +304,39 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     private func applyCurrentState(
         temporaryRevealLedger: TemporaryRevealLedger? = nil,
         timeout: Duration = .seconds(3),
-        permitsPublisherRefresh: Bool = true
+        permitsPublisherRefresh: Bool = true,
+        observesPublishers: Bool = true
     ) async throws {
         initialEnvironmentStatePending = false
         guard let opaqueController = controller() else {
             throw MenuBarBackendError.unavailableCapability("Golden Gate native concealment")
         }
         let candidateRevealLedger = temporaryRevealLedger ?? self.temporaryRevealLedger
+        let prepared = try await prepareState(candidateRevealLedger: candidateRevealLedger, observesPublishers: observesPublishers)
+        let hasUnsettledPublisher = !prepared.visiblePublishers.isSubset(of: settledPublishers)
+        if permitsPublisherRefresh, observesPublishers, hasUnsettledPublisher,
+           let appliedNativeState, expectedAssertionState(appliedNativeState) == 1,
+           checkedReceipt().hasKnownEffectiveState,
+           self.temporaryRevealLedger.visibleItemIDs.isEmpty,
+           let acceptedConfiguration
+        {
+            try await refreshPublishers(candidateRevealLedger: candidateRevealLedger, restoring: acceptedConfiguration, timeout: timeout)
+            return
+        }
+        // Identical healthy assertions must not churn on ordinary shelf clicks.
+        if appliedNativeState == prepared.native,
+           checkedReceipt().hasKnownEffectiveState,
+           BLNGoldenGateAssessmentCommittedState(opaqueController) == expectedAssertionState(prepared.native)
+        {
+            accept(prepared, nativeTransition: false, crossedDeassertionBoundary: false)
+            return
+        }
+        try await commitNativeState(prepared, timeout: timeout)
+    }
+
+    private func prepareState(candidateRevealLedger: TemporaryRevealLedger, observesPublishers: Bool) async throws -> PreparedState {
         let temporarilyVisible = candidateRevealLedger.visibleItemIDs
-        let revealOwnershipChanged = candidateRevealLedger != self.temporaryRevealLedger
+        let revealOwnershipChanged = candidateRevealLedger != temporaryRevealLedger
         let configuration = MenuBarConcealmentConfiguration(
             visibleItemIDs: desiredConfiguration.visibleItemIDs + temporarilyVisible,
             concealedItemIDs: desiredConfiguration.concealedItemIDs.filter {
@@ -303,21 +347,28 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             configuration,
             barlineBundleIdentifier: barlineBundleIdentifier
         )
-        let running = await MainActor.run {
-            Set(NSWorkspace.shared.runningApplications.compactMap { application -> PublisherInstance? in
+        let applications = await MainActor.run {
+            NSWorkspace.shared.runningApplications.compactMap { application -> RunningPublisher? in
                 guard !application.isTerminated, application.processIdentifier > 0,
                       let bundleIdentifier = application.bundleIdentifier, !bundleIdentifier.isEmpty
                 else { return nil }
-                return PublisherInstance(
+                return RunningPublisher(
                     bundleIdentifier: bundleIdentifier,
-                    processIdentifier: application.processIdentifier,
-                    launchDate: application.launchDate
+                    processIdentifier: application.processIdentifier
                 )
-            })
+            }
         }
         try Task.checkCancellation()
+        let running = Set(applications.compactMap { application -> PublisherInstance? in
+            guard let lifetime = GoldenGateAXInventory.publisherLifetime(for: application.processIdentifier) else { return nil }
+            return PublisherInstance(
+                bundleIdentifier: application.bundleIdentifier,
+                processIdentifier: application.processIdentifier, lifetime: lifetime
+            )
+        })
         let nativeState = GoldenGateNativeConcealmentState(
-            resolution: resolved, runningBundleIdentifiers: running.map(\.bundleIdentifier),
+            // A missing kernel witness must not remove an otherwise allowed app.
+            resolution: resolved, runningBundleIdentifiers: applications.map(\.bundleIdentifier),
             barlineBundleIdentifier: barlineBundleIdentifier
         )
         let configurationDigest = try digest([
@@ -337,46 +388,76 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         let visibleBundles = Set(configuration.visibleItemIDs.map { $0.bundleIdentifier.lowercased() })
         let observedBundles = visibleBundles.union(configuration.concealedItemIDs.map { $0.bundleIdentifier.lowercased() })
         let allowedBundles = Set(nativeState.allowedBundleIdentifiers.map { $0.lowercased() })
-        let prepared = PreparedState(
+        let configuredPublishers = running.filter { observedBundles.contains($0.bundleIdentifier.lowercased()) }
+        // Known native system controls use the existing enum-backed path, not
+        // a fictitious standalone app publisher. All other authority stays in
+        // normal discovery and activation's fresh target resolution.
+        let proposedRevealBundles = Set(temporarilyVisible.filter {
+            GoldenGateConcealmentPolicy.systemItemIdentifier(for: $0) == nil
+        }.map { $0.bundleIdentifier.lowercased() })
+        let proposedRevealPublishers = running.filter { proposedRevealBundles.contains($0.bundleIdentifier.lowercased()) }
+        let allowedVisiblePublishers = configuredPublishers.filter {
+            visibleBundles.contains($0.bundleIdentifier.lowercased()) && allowedBundles.contains($0.bundleIdentifier.lowercased())
+        }
+        let observedPublishers = observesPublishers ? observedPublishers(
+            configuredPublishers, proposed: proposedRevealPublishers, visible: allowedVisiblePublishers
+        ) : configuredPublishers.intersection(settledPublishers)
+        if revealOwnershipChanged, temporaryRevealLedger.visibleItemIDs.isEmpty,
+           !proposedRevealBundles.isSubset(of: Set(proposedRevealPublishers.map { $0.bundleIdentifier.lowercased() }))
+        {
+            throw MenuBarBackendError.operationFailed("Menu bar publisher lifetime is unavailable")
+        }
+        return PreparedState(
             configuration: desiredConfiguration, native: nativeState, running: running,
-            observedPublishers: running.filter { observedBundles.contains($0.bundleIdentifier.lowercased()) },
-            visiblePublishers: running.filter {
-                visibleBundles.contains($0.bundleIdentifier.lowercased()) && allowedBundles.contains($0.bundleIdentifier.lowercased())
-            },
+            observedPublishers: observedPublishers,
+            visiblePublishers: observesPublishers ? allowedVisiblePublishers.intersection(observedPublishers.union(proposedRevealPublishers)) : allowedVisiblePublishers,
+            proposedRevealPublishers: proposedRevealPublishers,
             configurationDigest: configurationDigest, effectiveDigest: effectiveDigest,
             hasTemporaryReveal: !temporarilyVisible.isEmpty, revealOwnershipChanged: revealOwnershipChanged
         )
-        let hasUnsettledPublisher = !prepared.visiblePublishers.isSubset(of: settledPublishers)
-        if permitsPublisherRefresh, hasUnsettledPublisher,
-           let appliedNativeState, expectedAssertionState(appliedNativeState) == 1,
-           checkedReceipt().hasKnownEffectiveState,
-           candidateRevealLedger.visibleItemIDs.isEmpty, self.temporaryRevealLedger.visibleItemIDs.isEmpty,
-           let acceptedConfiguration
-        {
-            try await refreshPublishers(prepared, restoring: acceptedConfiguration, timeout: timeout)
-            return
+    }
+
+    private func observedPublishers(
+        _ candidates: Set<PublisherInstance>, proposed: Set<PublisherInstance>, visible: Set<PublisherInstance>
+    ) -> Set<PublisherInstance> {
+        var observed = candidates.intersection(settledPublishers)
+        // A single bounded read budget, only for previously unsettled owners.
+        // Missing AX evidence is pending, not a reason to clear repeatedly.
+        let deadline = DispatchTime.now().uptimeNanoseconds + 200_000_000
+        func priority(_ candidate: PublisherInstance) -> Int {
+            proposed.contains(candidate) ? 0 : visible.contains(candidate) ? 1 : 2
         }
-        // Assessment-mode assertions are stateful. Replacing a healthy
-        // assertion with an identical one on every shelf click can be rejected
-        // by macOS 27 and turns an otherwise-ready shelf into a silent no-op.
-        // Keep the committed assertion when the effective allowlists have not
-        // changed; real visibility changes still flow through the transactional
-        // activate-then-commit path below.
-        if appliedNativeState == nativeState,
-           checkedReceipt().hasKnownEffectiveState,
-           BLNGoldenGateAssessmentCommittedState(opaqueController) == expectedAssertionState(nativeState)
-        {
-            accept(prepared, nativeTransition: false, crossedDeassertionBoundary: false)
-            return
+        let cursor = lastProbedPublisherPID
+        // A foreground reveal probes its target only. Unrelated unresponsive
+        // hidden owners must not add latency or starve a readable clicked item.
+        let probeCandidates = proposed.isEmpty ? candidates : proposed
+        let ordered = probeCandidates.subtracting(settledPublishers).sorted {
+            if priority($0) != priority($1) {
+                return priority($0) < priority($1)
+            }
+            if ($0.processIdentifier > cursor) != ($1.processIdentifier > cursor) {
+                return $0.processIdentifier > cursor
+            }
+            return $0.processIdentifier < $1.processIdentifier
         }
-        try await commitNativeState(prepared, timeout: timeout)
+        for candidate in ordered {
+            guard !Task.isCancelled, DispatchTime.now().uptimeNanoseconds < deadline else { break }
+            lastProbedPublisherPID = candidate.processIdentifier
+            if GoldenGateAXInventory.publisherHasStatusItem(
+                processIdentifier: candidate.processIdentifier, bundleIdentifier: candidate.bundleIdentifier,
+                lifetime: candidate.lifetime, deadline: deadline
+            ) {
+                observed.insert(candidate)
+            }
+        }
+        return observed
     }
 
     /// Native replacement acknowledgements do not reposition a publisher born
     /// under an earlier restriction. Cross a bounded, receipt-transient clear
     /// edge only for unsettled visible publishers, not ordinary shelf clicks.
     private func refreshPublishers(
-        _ prepared: PreparedState,
+        candidateRevealLedger: TemporaryRevealLedger,
         restoring previousConfiguration: MenuBarConcealmentConfiguration,
         timeout: Duration
     ) async throws {
@@ -388,33 +469,48 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         appliedResolution = nil
         appliedNativeState = nil
         hasDeassertionBoundary = true
+        let deassertionDeadline = ContinuousClock.now.advanced(by: .milliseconds(230))
+        var attemptedNativeCommit = false
         do {
             // Candidate interval derived from the independently verified Clock
             // lift (80ms before + 150ms after); installed proof remains required.
-            try await Task.sleep(for: .milliseconds(230))
+            try await Task.sleep(until: deassertionDeadline, clock: .continuous)
             try Task.checkCancellation()
-            try await commitNativeState(prepared, timeout: min(timeout, GoldenGateTiming.clockRestoreBudget))
+            // Hidden owners may have no AX surface until the assertion lifts.
+            // This clear may settle only live observations of the exact sampled
+            // lifetime, never retained configuration IDs or a replaced process.
+            let refreshed = try await prepareState(candidateRevealLedger: candidateRevealLedger, observesPublishers: true)
+            guard refreshed.proposedRevealPublishers.isSubset(of: refreshed.observedPublishers) else {
+                throw MenuBarBackendError.operationFailed("Menu bar publisher has not published its item")
+            }
+            attemptedNativeCommit = true
+            try await commitNativeState(refreshed, timeout: min(timeout, GoldenGateTiming.clockRestoreBudget))
             logger.notice("Reconciled a newly observed menu bar publisher")
         } catch {
             let candidateError = error
+            let renewBoundary = attemptedNativeCommit
             desiredConfiguration = previousConfiguration
             do {
                 // Clearing removed the bridge's previous-assertion rollback.
                 // Compensate accepted intent even if the caller was cancelled;
                 // never reacquire the gate already held by this transaction.
                 try await Task.detached { [self] in
-                    // Commit may have succeeded before verification failed.
-                    // Its boundary was consumed by that attempt's sample, not
-                    // by a publisher born beneath its new assertion. Establish
-                    // a fresh boundary before sampling for compensation.
+                    // Begin may activate before Commit or verification fails,
+                    // consuming this boundary. Only those attempts need a new
+                    // full wait. Pre-Begin failure or cancellation completes
+                    // the existing clear interval, without a second 230ms wait.
                     receiptLedger.beginNativeTransition()
                     BLNGoldenGateAssessmentInvalidate(controller)
                     appliedResolution = nil
                     appliedNativeState = nil
                     hasDeassertionBoundary = true
-                    try await Task.sleep(for: .milliseconds(230))
+                    if renewBoundary {
+                        try await Task.sleep(for: .milliseconds(230))
+                    } else if ContinuousClock.now < deassertionDeadline {
+                        try await Task.sleep(until: deassertionDeadline, clock: .continuous)
+                    }
                     try await applyCurrentState(
-                        timeout: GoldenGateTiming.clockRestoreBudget, permitsPublisherRefresh: false
+                        timeout: GoldenGateTiming.clockRestoreBudget, permitsPublisherRefresh: false, observesPublishers: false
                     )
                 }.value
             } catch {

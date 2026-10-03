@@ -267,7 +267,7 @@ extension MenuBarItemManager {
     /// An actor that manages menu bar item cache operations.
     private final actor CacheActor {
         /// Stored task for the current cache operation.
-        private var cacheTask: Task<Void, Never>?
+        private var cacheTask: Task<Bool, Never>?
 
         /// Identifier of the newest cache request accepted by this actor.
         private var currentRequestID: UInt64 = 0
@@ -283,12 +283,12 @@ extension MenuBarItemManager {
         /// running, that task is cancelled and replaced.
         func runCacheTask(
             requestID: UInt64,
-            operation: @escaping @MainActor @Sendable (UInt64) async -> Void
-        ) async {
+            operation: @escaping @MainActor @Sendable (UInt64) async -> Bool
+        ) async -> Bool {
             // MainActor callers assign increasing IDs. Reject an older request
             // if actor scheduling ever delivers it after a newer one.
             guard requestID > currentRequestID else {
-                return
+                return false
             }
             currentRequestID = requestID
             cacheTask.take()?.cancel()
@@ -296,10 +296,11 @@ extension MenuBarItemManager {
                 await operation(requestID)
             }
             cacheTask = task
-            await task.value
+            let succeeded = await task.value
             if currentRequestID == requestID {
                 cacheTask = nil
             }
+            return succeeded
         }
 
         /// Returns whether the given request still owns cache publication.
@@ -700,8 +701,9 @@ extension MenuBarItemManager {
         // normal sync, but its unchanged receipt cannot form a refresh loop.
         // This physical-state change supersedes any stale in-flight discovery:
         // an automatic request could be lost inside an already trailing pass.
-        if concealmentPresentationRefreshGate.requestRefresh(after: receipt) {
-            await cacheItemsRegardless(intent: .authoritative)
+        if let request = concealmentPresentationRefreshGate.requestRefresh(after: receipt) {
+            let succeeded = await cacheItemsRegardless(intent: .authoritative)
+            concealmentPresentationRefreshGate.finish(request, succeeded: succeeded)
         }
     }
 
@@ -711,13 +713,14 @@ extension MenuBarItemManager {
     /// Before caching, this method ensures that the control items for
     /// the hidden and always-hidden sections are correctly ordered,
     /// arranging them into valid positions if needed.
+    @discardableResult
     func cacheItemsRegardless(
         _ currentItemIDs: [MenuBarItemID]? = nil,
         intent: MenuBarDiscoveryRefreshIntent = .authoritative,
         allowsTrailingAutomaticRefresh: Bool = true
-    ) async {
+    ) async -> Bool {
         guard let requestID = beginDiscoveryRequest(intent: intent) else {
-            return
+            return false
         }
         defer {
             finishDiscoveryRequest(
@@ -727,16 +730,17 @@ extension MenuBarItemManager {
         }
         await discardSupersededRestorations()
 
-        await runCacheDiscovery(currentItemIDs: currentItemIDs, requestID: requestID)
+        return await runCacheDiscovery(currentItemIDs: currentItemIDs, requestID: requestID)
     }
 
+    @discardableResult
     private func runCacheDiscovery(
         currentItemIDs: [MenuBarItemID]?,
         requestID: UInt64
-    ) async {
+    ) async -> Bool {
         await cacheActor.runCacheTask(requestID: requestID) { [weak self] requestID in
             guard let self else {
-                return
+                return false
             }
             let hadUsableSnapshot = itemDiscoveryState.hasUsableSnapshot
             if !hadUsableSnapshot, itemDiscoveryState != .failed {
@@ -750,7 +754,7 @@ extension MenuBarItemManager {
                             for: itemDiscoveryRetryPolicy.delay(forAttempt: attempt - 1)
                         )
                     } catch {
-                        return
+                        return false
                     }
                 }
 
@@ -760,6 +764,7 @@ extension MenuBarItemManager {
                 )
                 switch result {
                 case .success:
+                    guard requestID == cacheRequestSequence, !Task.isCancelled else { return false }
                     itemDiscoveryState = .completed(
                         managedItemCount: itemCache.managedItems.count
                     )
@@ -767,9 +772,9 @@ extension MenuBarItemManager {
                         attemptCount: attempt + 1,
                         managedItemCount: itemCache.managedItems.count
                     )
-                    return
+                    return true
                 case .cancelled:
-                    return
+                    return false
                 case let .retryableFailure(failure):
                     itemDiscoveryDiagnostics.recordAttemptFailure(code: failure)
                     continue
@@ -780,7 +785,7 @@ extension MenuBarItemManager {
                 await cacheActor.isCurrent(requestID),
                 requestID == cacheRequestSequence
             else {
-                return
+                return false
             }
             itemDiscoveryState = hadUsableSnapshot
                 ? itemDiscoveryState.preservingUsableSnapshotOrFailure()
@@ -789,6 +794,7 @@ extension MenuBarItemManager {
                 attemptCount: itemDiscoveryRetryPolicy.maximumAttempts
             )
             logger.error("Menu bar item discovery exhausted its bounded retry budget")
+            return false
         }
     }
 

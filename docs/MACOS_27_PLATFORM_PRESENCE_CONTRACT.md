@@ -1,8 +1,8 @@
 # macOS 27 platform-presence contract
 
-## Current contract: capability-based attempt eligibility
+## Current contract: capability-based eligibility and bounded live evidence
 
-The 1.0.67/build 158 candidate removes the accidental exact-OS-build gate in
+The 1.0.67 candidate removes the accidental exact-OS-build gate in
 1.0.66. macOS 27 and later may attempt the observer; an OS version or kernel
 build is never proof of native Focus presence or absence. Every existing live
 publisher, closed-tree, same-scan, receipt and scene check must still pass.
@@ -16,8 +16,47 @@ after final envelope association. Already-cancelled work is rejected before
 commit; cancellation arriving during synchronous persistence can still leave
 valid associated identity saves while the caller receives cancellation.
 
-Fresh signed installed qualification is pending on the owner-approved CODEX01
-runtime. Public stable remains 1.0.65. The records below are historical context,
+### Closed native overflow sibling (since build159)
+
+The closed extras -> hosting-wrapper -> terminal-item forest admits at most
+one additional direct terminal node with the exact typed tuple: identifier
+`noValue`, role `AXButton`, subrole `unsupported`. It must have successfully
+read empty children, finite positive geometry, the same verified native owner,
+and identical before/after identity, geometry and ordered membership. Unknown
+reads and other shapes remain rejected. This anonymous native overflow button
+participates only in closure; it supplies no item identity, Focus identity,
+anchor, concealment key or mutation authority. It is not inferred from a notch,
+glyph, title or OS build, and is not claimed to occur on every notched Mac.
+
+### Ephemeral publisher lifecycle and presentation (build163 repair)
+
+Native assessment replacement can leave an item published under an existing
+restriction physically parked. Lifecycle settlement therefore needs a validated
+kernel PID/birth tuple and fresh bounded owner AX item evidence, not retained
+configuration IDs or an optional AppKit launch date. This helper-local advisory
+evidence cannot grant item/display/Focus capabilities or replace the authority
+scan. Missing kernel reads do not remove otherwise allowed running apps.
+
+A first proposed app-item reveal may cross the bounded deassertion edge before
+ownership is accepted; an existing reveal defers it. After the clear interval,
+fresh workspace and owner observations determine the recommitted allowlist and
+eligible settlement. Missing clicked-owner evidence fails boundedly and restores
+accepted intent without installing a reveal lease. Known enum-backed system
+items retain their separate native route. The clicked publisher has priority;
+unrelated hidden owners cannot consume its observation budget. Other owner
+probes rotate within bounded priority groups. Bundle and kernel lifetime must
+match before and after observation. Clock restoration and compensation perform
+no advisory AX work; unsettled owners are reconciled separately.
+
+Presentation refresh reserves a request before suspension, supersedes stale
+automatic discovery, and consumes an acknowledgement only after current fresh
+discovery succeeds. Retaining an old usable snapshot after failure is not
+refresh success. Failed/cancelled attempts release the receipt for the next
+bounded synchronization; stale completions cannot release newer reservations.
+No periodic retry loop or additional authority exception is introduced.
+
+Fresh signed installed qualification is pending on the owner-approved local Mac
+and CODEX01. Public stable remains 1.0.65. The records below are historical context,
 not current release approval or a requirement to use an unauthorized test Mac.
 
 ## Historical implementation checkpoints

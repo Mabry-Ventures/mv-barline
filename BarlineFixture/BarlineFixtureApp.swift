@@ -156,6 +156,34 @@ private final class FixtureJourneyController: NSObject, NSMenuDelegate, NSPopove
             processIdentifier: ProcessInfo.processInfo.processIdentifier
         )
         super.init()
+        popover.behavior = .transient
+        popover.delegate = self
+        let controller = NSViewController()
+        let button = NSButton(title: "Fixture Receipt Action", target: self, action: #selector(receiveAction))
+        button.setAccessibilityIdentifier("fixture-journey-action")
+        button.frame = NSRect(x: 20, y: 20, width: 220, height: 40)
+        controller.view = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 80))
+        controller.view.addSubview(button)
+        popover.contentViewController = controller
+
+        // Bounded fixture-only late publisher. Unlike the Delayed AX case,
+        // this process starts with no status items at all. Retained hidden IDs
+        // can therefore outlive one process and precede its replacement's items.
+        let delay = min(5000, max(0, Int(environment["BARLINE_FIXTURE_PUBLISH_DELAY_MS"] ?? "0") ?? 0))
+        if delay > 0 {
+            receipt.kind = "starting"
+            publish()
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(for: .milliseconds(delay))
+                guard let self, !Task.isCancelled else { return }
+                createItems(environment: environment)
+            }
+        } else {
+            createItems(environment: environment)
+        }
+    }
+
+    private func createItems(environment: [String: String]) {
         // Fixed synthetic names only. No real menu inventory is written to disk.
         let allowedNames = ["Native", "Popover", "Delayed", "Unresponsive"]
         let configuredNames = environment["BARLINE_FIXTURE_JOURNEY_ITEMS"]?
@@ -191,15 +219,7 @@ private final class FixtureJourneyController: NSObject, NSMenuDelegate, NSPopove
             }
             items.append(item)
         }
-        popover.behavior = .transient
-        popover.delegate = self
-        let controller = NSViewController()
-        let button = NSButton(title: "Fixture Receipt Action", target: self, action: #selector(receiveAction))
-        button.setAccessibilityIdentifier("fixture-journey-action")
-        button.frame = NSRect(x: 20, y: 20, width: 220, height: 40)
-        controller.view = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 80))
-        controller.view.addSubview(button)
-        popover.contentViewController = controller
+        receipt.kind = "ready"
         publish()
     }
 

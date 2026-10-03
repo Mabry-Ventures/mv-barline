@@ -1,22 +1,44 @@
 import Foundation
 
-/// Requests at most one presentation reload for an acknowledged native state.
+/// Reserves one presentation reload at a time for an acknowledged native state.
 /// A reload uses ordinary discovery and never promotes receipt evidence into
 /// item capability, geometry, display ownership or Focus authority.
 public struct MenuBarConcealmentRefreshGate: Sendable {
+    public struct Request: Equatable, Sendable {
+        fileprivate let id = UUID()
+        fileprivate let receipt: NativeConcealmentReceipt
+    }
+
     private var lastRequestedReceipt: NativeConcealmentReceipt?
+    private var inFlight: Request?
+    private var completedReceipt: NativeConcealmentReceipt?
 
     public init() {}
 
-    public mutating func requestRefresh(after receipt: NativeConcealmentReceipt?) -> Bool {
-        guard let receipt, receipt.isStable, receipt != lastRequestedReceipt else { return false }
+    public mutating func requestRefresh(after receipt: NativeConcealmentReceipt?) -> Request? {
+        guard let receipt, receipt.isStable, receipt != completedReceipt else { return nil }
         if let previous = lastRequestedReceipt, previous.helperSessionID == receipt.helperSessionID,
-           receipt.assertionRevision <= previous.assertionRevision
+           receipt != previous, receipt.assertionRevision <= previous.assertionRevision
         {
-            return false
+            return nil
         }
+        guard inFlight?.receipt != receipt else { return nil }
         lastRequestedReceipt = receipt
-        return true
+        let request = Request(receipt: receipt)
+        inFlight = request
+        return request
+    }
+
+    /// Only this reservation's successful fresh publication consumes a receipt.
+    /// Failure/cancellation releases it for the next bounded synchronization;
+    /// it does not enqueue a polling loop. Older completions cannot release or
+    /// acknowledge a newer reservation, including a retry of the same receipt.
+    public mutating func finish(_ request: Request, succeeded: Bool) {
+        guard inFlight == request else { return }
+        inFlight = nil
+        if succeeded {
+            completedReceipt = request.receipt
+        }
     }
 }
 

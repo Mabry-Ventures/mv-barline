@@ -119,7 +119,7 @@ unless concealment.include?('BLNGoldenGateAssessmentCreate()') &&
   abort('Golden Gate concealment bridge is not compile-time linked')
 end
 
-unless concealment.match?(/if appliedNativeState == nativeState,\s*checkedReceipt\(\)\.hasKnownEffectiveState,\s*BLNGoldenGateAssessmentCommittedState\(opaqueController\) == expectedAssertionState\(nativeState\).*?accept\(prepared, nativeTransition: false, crossedDeassertionBoundary: false\)\s*return/m) &&
+unless concealment.match?(/if appliedNativeState == prepared\.native,\s*checkedReceipt\(\)\.hasKnownEffectiveState,\s*BLNGoldenGateAssessmentCommittedState\(opaqueController\) == expectedAssertionState\(prepared\.native\).*?accept\(prepared, nativeTransition: false, crossedDeassertionBoundary: false\)\s*return/m) &&
        concealment.match?(/GoldenGateNativeConcealmentState\(.*?runningBundleIdentifiers:/m) &&
        concealment.match?(/private func accept\(.*?appliedNativeState = prepared\.native.*?forceObservationChange: nativeTransition \|\| prepared\.revealOwnershipChanged/m) &&
        concealment.match?(/BLNGoldenGateAssessmentCommit\(.*?BLNGoldenGateAssessmentCommittedState\(opaqueController\) == expectedAssertionState\(prepared\.native\).*?accept\(prepared, nativeTransition: true, crossedDeassertionBoundary: crossedDeassertionBoundary\)/m)

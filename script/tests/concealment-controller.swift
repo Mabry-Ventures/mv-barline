@@ -29,6 +29,8 @@ final class NSWorkspace: @unchecked Sendable {
         var processIdentifier: Int32 = 1
         var launchDate: Date? = Date(timeIntervalSince1970: 1)
         var isTerminated = false
+        var hasLiveMenuItem = true
+        var kernelStartSeconds: UInt64? = 1
     }
 
     private let lock = NSLock()
@@ -36,6 +38,41 @@ final class NSWorkspace: @unchecked Sendable {
     var runningApplications: [Application] {
         get { lock.withLock { applications } }
         set { lock.withLock { applications = newValue } }
+    }
+}
+
+enum GoldenGateAXInventory {
+    static func publisherLifetime(for pid: Int32) -> GoldenGatePublisherLifetime? {
+        let callback = bridgeSpy.withState {
+            let callback = $0.beforeNextLifetimeRead
+            $0.beforeNextLifetimeRead = nil
+            return callback
+        }
+        callback?()
+        guard let app = NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == pid }),
+              let seconds = app.kernelStartSeconds else { return nil }
+        return GoldenGatePublisherLifetime(pid: pid, reportedPID: UInt32(pid), bytes: 100, expectedBytes: 100, seconds: seconds, microseconds: 0)
+    }
+
+    static func publisherHasStatusItem(processIdentifier pid: Int32, bundleIdentifier: String, lifetime: GoldenGatePublisherLifetime, deadline: UInt64) -> Bool {
+        let stall = bridgeSpy.withState {
+            $0.publisherProbes.append(pid)
+            return $0.stalledPublisherPID == pid
+        }
+        let now = DispatchTime.now().uptimeNanoseconds
+        if stall, now < deadline {
+            Thread.sleep(forTimeInterval: Double(deadline - now) / 1_000_000_000)
+        }
+        let visible = publisherLifetime(for: pid) == lifetime && DispatchTime.now().uptimeNanoseconds < deadline &&
+            NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == pid && $0.bundleIdentifier == bundleIdentifier })?.hasLiveMenuItem == true
+        let callback = bridgeSpy.withState {
+            let callback = $0.afterNextPublisherObservation
+            $0.afterNextPublisherObservation = nil
+            return callback
+        }
+        callback?()
+        return visible && publisherLifetime(for: pid) == lifetime &&
+            NSWorkspace.shared.runningApplications.first(where: { $0.processIdentifier == pid })?.bundleIdentifier == bundleIdentifier
     }
 }
 
@@ -64,6 +101,11 @@ private final class BridgeSpy: @unchecked Sendable {
         var cancelNextInvalidate = false
         var rejectBegins = 0
         var afterNextCommit: (@Sendable () -> Void)?
+        var afterNextInvalidate: (@Sendable () -> Void)?
+        var afterNextPublisherObservation: (@Sendable () -> Void)?
+        var beforeNextLifetimeRead: (@Sendable () -> Void)?
+        var stalledPublisherPID: Int32?
+        var publisherProbes: [Int32] = []
     }
 
     private let lock = NSLock()
@@ -176,12 +218,16 @@ func BLNGoldenGateAssessmentInvalidate(_: UnsafeMutableRawPointer) {
     if cancel {
         withUnsafeCurrentTask { $0?.cancel() }
     }
-    bridgeSpy.withState {
+    let callback = bridgeSpy.withState {
         $0.invalidations += 1
         $0.pending.removeAll()
         $0.committed = nil
         $0.acknowledgedState = false
+        let callback = $0.afterNextInvalidate
+        $0.afterNextInvalidate = nil
+        return callback
     }
+    callback?()
 }
 
 func BLNGoldenGateAssessmentDestroy(_: UnsafeMutableRawPointer) {}
@@ -200,7 +246,196 @@ private func require(_ condition: Bool, _ message: String) throws {
 struct ControllerSkipPathProbe {
     @MainActor
     @available(macOS 27.0, *)
+    private static func verifyReviewRegressions() async throws {
+        let hidden = MenuBarItemID(bundleIdentifier: "test.review.hidden", accessibilityIdentifier: "item")
+        let other = MenuBarItemID(bundleIdentifier: "test.review.other", accessibilityIdentifier: "item")
+        let configuration = MenuBarConcealmentConfiguration(visibleItemIDs: [], concealedItemIDs: [hidden, other])
+        var failures = [String]()
+        for scenario in 0 ... 2 {
+            bridgeSpy.withState { $0 = BridgeSpy.State() }
+            var target = NSWorkspace.Application(bundleIdentifier: hidden.bundleIdentifier, processIdentifier: 40)
+            if scenario == 1 {
+                target.hasLiveMenuItem = false
+            }
+            if scenario == 2 {
+                target.launchDate = nil
+            }
+            let sibling = NSWorkspace.Application(bundleIdentifier: other.bundleIdentifier, processIdentifier: 41)
+            NSWorkspace.shared.runningApplications = [target, sibling]
+            let controller = GoldenGateConcealmentController()
+            try await controller.configure(configuration)
+            switch scenario {
+            case 0:
+                target.processIdentifier = 42
+                NSWorkspace.shared.runningApplications = [target, sibling]
+                _ = try await controller.beginTemporaryReveal(hidden)
+            case 1:
+                // The retained assignment existed while the owner had no AX
+                // status item. Logical configuration is not observation proof.
+                target.hasLiveMenuItem = true
+                NSWorkspace.shared.runningApplications = [target, sibling]
+                try await controller.configure(.init(visibleItemIDs: [hidden], concealedItemIDs: [other]))
+            default:
+                // Same PID and unavailable AppKit launch date, new kernel birth.
+                target.kernelStartSeconds = 2
+                NSWorkspace.shared.runningApplications = [target, sibling]
+                try await controller.configure(.init(visibleItemIDs: [hidden], concealedItemIDs: [other]))
+            }
+            let messages = [
+                "first reveal of a relaunched hidden owner requires a clear before the proposed lease",
+                "retained hidden ID without a live AX item must not settle a delayed publisher",
+                "nil AppKit launch dates cannot alias a recycled PID with a new kernel birth",
+            ]
+            if bridgeSpy.withState({ $0.invalidations }) != 1 {
+                failures.append(messages[scenario])
+                print("FAIL: \(messages[scenario])")
+            }
+            await controller.invalidate()
+        }
+        try require(failures.isEmpty, "review regressions: \(failures.joined(separator: "; "))")
+        print("PASS: first hidden reveal, retained delayed publisher and unavailable launch date regressions")
+    }
+
+    @MainActor
+    @available(macOS 27.0, *)
+    private static func verifyPublisherObservationFailures() async throws {
+        for values in [(Int32(0), UInt32(40), Int32(100), UInt64(1), UInt64(0)),
+                       (40, 41, 100, 1, 0), (40, 40, 99, 1, 0),
+                       (40, 40, 100, 0, 0), (40, 40, 100, 1, 1_000_000)]
+        {
+            try require(GoldenGatePublisherLifetime(
+                pid: values.0, reportedPID: values.1, bytes: values.2, expectedBytes: 100,
+                seconds: values.3, microseconds: values.4
+            ) == nil, "invalid, short, mismatched or missing kernel birth cannot settle an owner")
+        }
+        let target = MenuBarItemID(bundleIdentifier: "test.probe.target", accessibilityIdentifier: "item")
+        let sibling = MenuBarItemID(bundleIdentifier: "test.probe.sibling", accessibilityIdentifier: "item")
+        let hidden = MenuBarConcealmentConfiguration(visibleItemIDs: [], concealedItemIDs: [target, sibling])
+        func applications(pid: Int32, live: Bool = true, birth: UInt64? = 1) -> [NSWorkspace.Application] {
+            [
+                .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: pid, hasLiveMenuItem: live, kernelStartSeconds: birth),
+                .init(bundleIdentifier: sibling.bundleIdentifier, processIdentifier: 51),
+            ]
+        }
+        for failure in [true, false] {
+            bridgeSpy.withState { $0 = BridgeSpy.State() }
+            NSWorkspace.shared.runningApplications = applications(pid: 50)
+            let controller = GoldenGateConcealmentController()
+            try await controller.configure(hidden)
+            NSWorkspace.shared.runningApplications = applications(pid: 52, live: false)
+            if !failure {
+                let published = applications(pid: 52)
+                bridgeSpy.withState { $0.afterNextInvalidate = { NSWorkspace.shared.runningApplications = published } }
+            }
+            var rejected = false
+            do { _ = try await controller.beginTemporaryReveal(target) } catch { rejected = true }
+            try require(rejected == failure, "first reveal requires a fresh post-clear publisher observation")
+            if failure {
+                try await require(controller.receipt().isStable, "missing post-clear AX must compensate accepted hidden state")
+                try require(bridgeSpy.withState {
+                    $0.committed?.concealed == Set([target.bundleIdentifier, sibling.bundleIdentifier]) && $0.invalidations == 2
+                }, "failed first reveal must not acquire ownership or keep rejected visibility")
+                NSWorkspace.shared.runningApplications = applications(pid: 52)
+                _ = try await controller.beginTemporaryReveal(target)
+                try require(bridgeSpy.withState { $0.invalidations == 3 }, "later retry must still own its first clear")
+            } else {
+                try require(bridgeSpy.withState { $0.invalidations == 1 }, "item born while deasserted needs only one clear")
+            }
+            try await controller.endTemporaryReveal(target)
+            try await require(controller.receipt().isStable, "single successful lease ends cleanly after missing AX")
+            await controller.invalidate()
+        }
+
+        bridgeSpy.withState { $0 = BridgeSpy.State() }
+        NSWorkspace.shared.runningApplications = applications(pid: 50)
+        let controller = GoldenGateConcealmentController()
+        try await controller.configure(hidden)
+        let visible = MenuBarConcealmentConfiguration(visibleItemIDs: [target], concealedItemIDs: [sibling])
+        NSWorkspace.shared.runningApplications = applications(pid: 52, birth: nil)
+        try await controller.configure(visible)
+        let count = bridgeSpy.withState { $0.begins.count }
+        for _ in 0 ..< 100 {
+            try await controller.configure(visible)
+        }
+        try require(bridgeSpy.withState {
+            $0.begins.count == count && $0.invalidations == 0 && $0.committed?.allowed.contains(target.bundleIdentifier) == true
+        }, "missing birth cannot drop allowlist membership or cause repeated clear churn")
+        NSWorkspace.shared.runningApplications = applications(pid: 52)
+        let replacement = applications(pid: 52, birth: 2)
+        bridgeSpy.withState { $0.afterNextPublisherObservation = { NSWorkspace.shared.runningApplications = replacement } }
+        try await controller.configure(visible)
+        try require(bridgeSpy.withState { $0.invalidations == 0 }, "replacement during AX read must remain unobserved")
+        try await controller.configure(visible)
+        try require(bridgeSpy.withState { $0.invalidations == 1 }, "fresh replacement observation needs its own clear")
+        await controller.invalidate()
+        print("PASS: bounded missing AX, post-clear publication, compensation, birth validation, replacement and no-churn regressions")
+    }
+
+    @MainActor
+    @available(macOS 27.0, *)
+    private static func verifyPublisherRoutingAndBudget() async throws {
+        for name in ["battery", "bluetooth", "clock", "displays", "keyboard", "sound", "wifi", "screenmirroring", "controlcenter"] {
+            bridgeSpy.withState { $0 = BridgeSpy.State() }
+            NSWorkspace.shared.runningApplications = []
+            let controller = GoldenGateConcealmentController()
+            let system = MenuBarItemID(bundleIdentifier: "com.apple.MenuBarAgent", accessibilityIdentifier: "com.apple.menuextra.\(name)")
+            try await controller.configure(.init(visibleItemIDs: [], concealedItemIDs: [system]))
+            _ = try await controller.beginTemporaryReveal(system)
+            try await controller.endTemporaryReveal(system)
+            try require(bridgeSpy.withState { $0.invalidations == 0 && $0.publisherProbes.isEmpty },
+                        "known enum-backed system reveals cannot require a standalone application witness")
+            try await require(controller.receipt().isStable, "system reveal restores stable ownership")
+            await controller.invalidate()
+        }
+
+        bridgeSpy.withState { $0 = BridgeSpy.State() }
+        let target = MenuBarItemID(bundleIdentifier: "test.priority.target", accessibilityIdentifier: "item")
+        let stalled = MenuBarItemID(bundleIdentifier: "test.priority.stalled", accessibilityIdentifier: "item")
+        let hidden = MenuBarConcealmentConfiguration(visibleItemIDs: [], concealedItemIDs: [target, stalled])
+        let stalledApp = NSWorkspace.Application(bundleIdentifier: stalled.bundleIdentifier, processIdentifier: 1, hasLiveMenuItem: false)
+        NSWorkspace.shared.runningApplications = [stalledApp, .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: 60)]
+        let controller = GoldenGateConcealmentController()
+        try await controller.configure(hidden)
+        NSWorkspace.shared.runningApplications = [stalledApp, .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: 61)]
+        bridgeSpy.withState { $0.stalledPublisherPID = 1; $0.publisherProbes = [] }
+        _ = try await controller.beginTemporaryReveal(target)
+        try require(bridgeSpy.withState { !$0.publisherProbes.contains(1) && $0.publisherProbes.first == 61 && $0.invalidations == 1 },
+                    "foreground reveal must probe clicked publisher before and instead of unrelated stalled hidden owner")
+        try await controller.endTemporaryReveal(target)
+
+        // Newly running apps during the clear interval join the fresh allowlist.
+        NSWorkspace.shared.runningApplications = [stalledApp, .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: 62)]
+        let afterClear = NSWorkspace.shared.runningApplications + [.init(bundleIdentifier: "test.priority.late", processIdentifier: 63)]
+        bridgeSpy.withState {
+            $0.stalledPublisherPID = nil
+            $0.afterNextInvalidate = { NSWorkspace.shared.runningApplications = afterClear }
+        }
+        _ = try await controller.beginTemporaryReveal(target)
+        try require(bridgeSpy.withState { $0.committed?.allowed.contains("test.priority.late") == true },
+                    "post-clear native allowlist must include apps launched during settlement")
+        try await controller.endTemporaryReveal(target)
+        await controller.invalidate()
+
+        // Old workspace bundle plus a reused PID's new kernel identity cannot
+        // count as observation of the old publisher.
+        bridgeSpy.withState { $0 = BridgeSpy.State() }
+        NSWorkspace.shared.runningApplications = [stalledApp, .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: 70)]
+        let secondController = GoldenGateConcealmentController()
+        try await secondController.configure(hidden)
+        NSWorkspace.shared.runningApplications = [stalledApp, .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: 71)]
+        let differentBundle = [stalledApp, NSWorkspace.Application(bundleIdentifier: "test.priority.replacement", processIdentifier: 71, kernelStartSeconds: 2)]
+        bridgeSpy.withState { $0.beforeNextLifetimeRead = { NSWorkspace.shared.runningApplications = differentBundle } }
+        try await secondController.configure(.init(visibleItemIDs: [target], concealedItemIDs: [stalled]))
+        try require(bridgeSpy.withState { $0.invalidations == 0 }, "stale bundle metadata cannot settle another process's AX item")
+        await secondController.invalidate()
+        print("PASS: all nine system reveal routes, target-first budget, post-clear workspace and stale-bundle safeguards")
+    }
+
+    @MainActor
+    @available(macOS 27.0, *)
     private static func verifyColdEnvironmentBootstrap() async throws {
+        bridgeSpy.withState { $0 = BridgeSpy.State() }
+        NSWorkspace.shared.runningApplications = []
         let controller = GoldenGateConcealmentController()
         let initial = try await controller.receipt()
         try require(!initial.isStable, "receipt reads must not manufacture startup proof")
@@ -385,19 +620,20 @@ struct ControllerSkipPathProbe {
         }, "ambiguous committed candidate must clear again before settling compensation's new incarnation")
         let afterCompensation = bridgeSpy.withState { $0.begins.count }
         try await controller.configure(configuration)
-        try require(bridgeSpy.withState { $0.begins.count == afterCompensation },
-                    "fresh compensation boundary may settle only its own captured publisher sample")
+        try require(bridgeSpy.withState { $0.begins.count == afterCompensation + 1 },
+                    "bounded compensation restores intent without AX work; new lifetime stays unsettled until reconciliation")
 
         // A recycled PID is not the same process incarnation.
         NSWorkspace.shared.runningApplications = compensatingSample.map { application in
             var replacement = application
             if application.bundleIdentifier == publisher.bundleIdentifier {
                 replacement.launchDate = Date(timeIntervalSince1970: 2)
+                replacement.kernelStartSeconds = 2
             }
             return replacement
         }
         try await controller.configure(configuration)
-        try require(bridgeSpy.withState { $0.begins.count == afterCompensation + 1 },
+        try require(bridgeSpy.withState { $0.begins.count == afterCompensation + 2 },
                     "recycled PID with a different launch date must receive a new clear boundary")
 
         publisherPID = 14
@@ -430,6 +666,9 @@ struct ControllerSkipPathProbe {
         guard #available(macOS 27.0, *) else {
             throw CheckFailure(description: "Requires macOS 27; no controller test executed")
         }
+        try await verifyReviewRegressions()
+        try await verifyPublisherObservationFailures()
+        try await verifyPublisherRoutingAndBudget()
         try await verifyColdEnvironmentBootstrap()
         for failure in 0 ... 4 {
             try await verifyFailedBootstrapRemainsUnknown(failure)

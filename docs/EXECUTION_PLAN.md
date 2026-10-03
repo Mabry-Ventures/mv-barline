@@ -1,5 +1,45 @@
 # Barline execution plan
 
+## 1.0.67 lifecycle review repairs - October 3, 2026
+
+Build162 completed CODEX01 installed shelf/activation/Clock/Focus/layout/recovery
+and public142-to162 Sparkle upgrade checks. The local Mac locked before its
+interactive162 checks, so those remain unverified. Independent PR review and
+Astra confirmed three additional controller defects, reproduced in the actual
+production controller with isolated transport/workspace doubles: a newly
+relaunched hidden owner's first reveal skipped its required clear; retained
+logical IDs could settle a process before its first live AX item; nil AppKit
+launch dates could alias a recycled PID. The presentation gate also permanently
+consumed acknowledgements after failed full discovery. Both incomplete endurance
+runs were stopped and preserved as interrupted, not passes. Public142 unchanged.
+
+Build163 repairs these with kernel-birth and bounded live-publisher evidence,
+accepted/proposed reveal separation, target-first/fair probe scheduling, fresh
+post-clear workspace sampling, cancellation-independent compensation and
+request-scoped presentation completion. Native system-item routes remain separate.
+No item/display/Focus authority is granted by lifecycle evidence. Clock restore
+and compensation skip advisory AX reads and leave new publishers unsettled for
+later reconciliation. The canonical platform-presence contract now documents
+the exact anonymous overflow-button closure exception introduced in159.
+
+Review caught an incompatible child-count argument in the initial advisory
+adapter; the production reader now shares its maximum cap with the caller,
+backed by executable decoder and source-wiring checks. Controller regression
+tests cover missing post-clear AX, first-item publication while deasserted,
+kernel-read rejection, PID/bundle replacement, unchanged100-call boundedness,
+all nine native system reveal routes and unrelated slow-owner isolation.
+Tests using doubles do not replace signed installed evidence.
+
+Astra High and Gemini Flash3.8High independently approve freezing163 for fresh
+qualification after the repairs above. Neither grants runtime or release GO.
+Pre-Begin compensation completes only the remainder of the original clear
+interval; an attempted native activation still requires a fresh230ms boundary.
+
+This checkpoint is implementation, not release approval. Obtain clean fast/full
+gates and reviewer closure before normal protected integration. Freeze the clean
+resulting main SHA, then rerun its package/installed/upgrade/lifecycle/resource
+qualification. PR-head receipts cannot be relabeled as merged-main evidence.
+
 ## 1.0.67 post-reconciliation presentation repair - October 3, 2026
 
 Signed161 passed clean fast/full gates and restored physical fixture geometry
