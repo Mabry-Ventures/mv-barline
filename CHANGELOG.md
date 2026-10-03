@@ -4,6 +4,22 @@
 
 No unreleased changes.
 
+## 1.0.67 (build 158) — candidate
+
+- macOS 27 menu bar discovery is no longer restricted to one exact OS patch
+  and build number. Every discovery attempt still verifies the live system
+  publisher, item structure, screen context and native-hiding state before
+  accepting menu bar items or allowing changes.
+- Custom-configured builds keep their own menu bar controls visible during
+  native hiding, using the same configured identity as the authenticated helper.
+- Rejected menu bar observations no longer save identity migration or cached
+  inventory before the final observation checks pass. Temporary layout
+  verification also leaves remembered sections unchanged.
+
+This candidate is not published or fully qualified. Installed runtime testing
+is scoped to CODEX01; additional OS builds and display configurations are not
+claimed as tested merely because they may attempt the live safety checks.
+
 ## 1.0.66 (build 157) — limited prerelease, October 2, 2026
 
 General rollout withdrawn. The macOS 27 inventory path requires exactly

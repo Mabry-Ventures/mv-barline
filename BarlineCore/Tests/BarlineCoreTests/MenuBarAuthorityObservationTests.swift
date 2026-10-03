@@ -266,6 +266,23 @@ struct MenuBarAuthorityObservationTests {
         #expect(await backend.moveCalls == 2)
     }
 
+    @Test("A rejected provider observation never synchronizes native hiding at cold start or from cache",
+          arguments: [false, true])
+    func rejectedProviderObservationCannotSynchronize(hasPriorSnapshot: Bool) async throws {
+        let backend = AtomicObservationBackend()
+        let coordinator = MenuBarStateCoordinator(backend: backend, retryPolicy: RetryPolicy(maximumAttempts: 1))
+        if hasPriorSnapshot {
+            _ = try await coordinator.refresh()
+        }
+        let original = await coordinator.lastKnownGoodSnapshot
+        await backend.failObservations()
+        await #expect(throws: MenuBarBackendError.operationFailed("fixture observation failed")) {
+            try await coordinator.synchronizeConcealment(concealedSections: [.hidden, .alwaysHidden])
+        }
+        #expect(await backend.configureCalls == 0)
+        #expect(await coordinator.lastKnownGoodSnapshot == original)
+    }
+
     @Test("A superseded recovery without a qualified scan cannot admit a cached retry")
     func supersededRecoveryRequiresQualifiedRetryAdmission() async throws {
         let validationNow = Date()
@@ -1205,6 +1222,12 @@ private actor AtomicObservationBackend: MenuBarBackend {
     private var forcedGeneration: UInt64?
     private(set) var observationCalls = 0
     private(set) var freshCalls = 0
+    private(set) var configureCalls = 0
+
+    func configureConcealment(_: MenuBarConcealmentConfiguration) {
+        configureCalls += 1
+    }
+
     func snapshot() throws -> MenuBarSnapshot {
         throw MenuBarBackendError.operationFailed("legacy path unexpectedly called")
     }

@@ -76,6 +76,15 @@ actor GoldenGateAXSnapshotProvider {
         let descriptorData: Data
     }
 
+    private struct PreparedIdentityMigration {
+        let assignments: [MenuBarItemID: GoldenGateLogicalAssignment]
+        let remembered: [MenuBarItemID: BarlineCore.MenuBarSection]
+        let descriptors: [MenuBarItemDescriptor]
+        let layoutData: Data
+        let rememberedData: Data
+        let descriptorData: Data
+    }
+
     private enum RecoveryPersistenceError: Error {
         case invalidCompanion
         case synchronizeFailed
@@ -587,16 +596,23 @@ actor GoldenGateAXSnapshotProvider {
             )
             throw error
         }
-        if verificationAssignments == nil {
-            try commitIdentityMigrationIfNeeded(
+        let preparedMigration = if verificationAssignments == nil {
+            try prepareIdentityMigrationIfNeeded(
                 assignments: migratedAssignments,
                 remembered: migratedRemembered,
                 live: built
             )
+        } else {
+            nil as PreparedIdentityMigration?
         }
+        // Project the same bounded migrated inventory without committing it.
+        // A later failed association must leave every saved document intact.
+        let projectionDescriptors = preparedMigration.map { migration in
+            Dictionary(uniqueKeysWithValues: migration.descriptors.map { ($0.id, $0) })
+        } ?? retainedDescriptors
         var result = GoldenGateRetainedInventoryPolicy.merging(
             live: built,
-            retainedDescriptors: retainedDescriptors,
+            retainedDescriptors: projectionDescriptors,
             assignments: effectiveAssignments,
             runningBundleIdentifiers: Set(
                 NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
@@ -616,34 +632,7 @@ actor GoldenGateAXSnapshotProvider {
             // down discovery or authorize concealment for unrelated apps.
             result = GoldenGateIdentityMigration.isolatingAmbiguousBundles(ambiguousBundles, in: result)
         }
-        // A fail-visible projection must never overwrite unresolved remembered
-        // intent. Leave that document unchanged until the ambiguity is resolved.
-        if explicitAssignments.isEmpty, ambiguousBundles.isEmpty {
-            rememberSections(from: result)
-        }
-        if verificationAssignments == nil {
-            if !canonicalization.repairedItemIDs.isEmpty {
-                // A temporary item from the same bundle can make an otherwise
-                // supported saved assignment mixed. Fail visible for this
-                // snapshot, but never replace the user's saved intent on a read.
-                logger.debug(
-                    "Golden Gate temporarily failed unsupported concealment visible: count=\(canonicalization.repairedItemIDs.count, privacy: .public)"
-                )
-            }
-            if retainedInventoryNeedsUpdate(from: result),
-               let prepared = try? prepareRetainedInventory(
-                   from: result,
-                   requiredItemIDs: []
-               )
-            {
-                commitRetainedInventory(prepared)
-            }
-        }
-        // Cache reuse starts after the successful scan and projection finish;
-        // the snapshot's capturedAt still describes the observation itself.
         let scanCompletedAt = DispatchTime.now().uptimeNanoseconds
-        cachedAt = scanCompletedAt
-        cachedSnapshot = result
         let envelope = MenuBarAuthorityObservation(
             snapshot: result,
             scan: MenuBarObservationScan(
@@ -659,6 +648,31 @@ actor GoldenGateAXSnapshotProvider {
         guard !requiresQualifiedPresenceContract || envelope.scan?.platformPresenceObservation != nil else {
             throw MenuBarBackendError.unavailableCapability("associated macOS 27 Focus presence")
         }
+        try Task.checkCancellation()
+        if verificationAssignments == nil {
+            if let preparedMigration {
+                try commitIdentityMigration(preparedMigration)
+            }
+            // Never overwrite unresolved remembered intent or persist a
+            // transaction's temporary verification assignments on a read.
+            if explicitAssignments.isEmpty, ambiguousBundles.isEmpty {
+                rememberSections(from: result)
+            }
+            if !canonicalization.repairedItemIDs.isEmpty {
+                logger.debug(
+                    "Golden Gate temporarily failed unsupported concealment visible: count=\(canonicalization.repairedItemIDs.count, privacy: .public)"
+                )
+            }
+            if retainedInventoryNeedsUpdate(from: result),
+               let prepared = try? prepareRetainedInventory(from: result, requiredItemIDs: [])
+            {
+                commitRetainedInventory(prepared)
+            }
+        }
+        // Cache lifetime begins only after qualification and persistence.
+        // The observation's own timestamp and scan interval remain unchanged.
+        cachedAt = DispatchTime.now().uptimeNanoseconds
+        cachedSnapshot = result
         // Context records this UI scan association only. collectEntries still
         // applies owner scheduling and retained inventory; neither context
         // nor a stable receipt proves complete platform-control coverage.
@@ -1558,12 +1572,13 @@ actor GoldenGateAXSnapshotProvider {
 
     /// Alias migration is not a layout edit: retain exact saved sections and
     /// ranks, including absent apps, and commit all three identity documents
-    /// together before the new projection can authorize native concealment.
-    private func commitIdentityMigrationIfNeeded(
+    /// together after scan association and before publication. Preparation
+    /// does not mutate in-memory authority or any persistence document.
+    private func prepareIdentityMigrationIfNeeded(
         assignments: [MenuBarItemID: GoldenGateLogicalAssignment],
         remembered: [MenuBarItemID: BarlineCore.MenuBarSection],
         live snapshot: MenuBarSnapshot
-    ) throws {
+    ) throws -> PreparedIdentityMigration? {
         let inventory = GoldenGateIdentityMigration.reconcilingRetainedDescriptors(
             retainedDescriptors,
             preserving: Set(assignments.keys).union(remembered.keys),
@@ -1572,7 +1587,7 @@ actor GoldenGateAXSnapshotProvider {
         let removedLegacyIDs = Set(retainedDescriptors.keys).subtracting(inventory.keys)
         guard assignments != explicitAssignments || remembered != rememberedSections ||
             !removedLegacyIDs.isEmpty
-        else { return }
+        else { return nil }
         let layoutData = try JSONEncoder().encode(ExplicitLayout(
             version: 1, assignments: assignments.values.sorted(by: Self.persistencePriority)
         ))
@@ -1589,17 +1604,28 @@ actor GoldenGateAXSnapshotProvider {
             requiredItemIDs: Set(assignments.values.filter { $0.section != .visible }.map(\.itemID)),
             preserving: inventory
         )
-        guard commitIdentityState(
-            assignments: assignments.values.sorted(by: Self.persistencePriority),
+        return PreparedIdentityMigration(
+            assignments: assignments,
             remembered: remembered,
-            descriptors: retained.elements
+            descriptors: retained.elements,
+            layoutData: layoutData,
+            rememberedData: rememberedData,
+            descriptorData: retained.data
+        )
+    }
+
+    private func commitIdentityMigration(_ prepared: PreparedIdentityMigration) throws {
+        guard commitIdentityState(
+            assignments: prepared.assignments.values.sorted(by: Self.persistencePriority),
+            remembered: prepared.remembered,
+            descriptors: prepared.descriptors
         ) else { throw MenuBarBackendError.operationFailed("menu bar identity migration could not be synchronized") }
-        UserDefaults.standard.set(layoutData, forKey: Self.explicitLayoutKey)
-        UserDefaults.standard.set(rememberedData, forKey: Self.rememberedSectionsKey)
-        UserDefaults.standard.set(retained.data, forKey: Self.retainedInventoryKey)
-        explicitAssignments = assignments
-        rememberedSections = remembered
-        retainedDescriptors = Dictionary(uniqueKeysWithValues: retained.elements.map { ($0.id, $0) })
+        UserDefaults.standard.set(prepared.layoutData, forKey: Self.explicitLayoutKey)
+        UserDefaults.standard.set(prepared.rememberedData, forKey: Self.rememberedSectionsKey)
+        UserDefaults.standard.set(prepared.descriptorData, forKey: Self.retainedInventoryKey)
+        explicitAssignments = prepared.assignments
+        rememberedSections = prepared.remembered
+        retainedDescriptors = Dictionary(uniqueKeysWithValues: prepared.descriptors.map { ($0.id, $0) })
     }
 
     private func commitRetainedInventory(

@@ -10,6 +10,18 @@ import AppKit
 import BarlineCore
 import Foundation
 
+// Isolated replacement for the helper's sealed Info.plist lookup. The actual
+// production controller must use this identity in both resolver and allowlist;
+// no application is running with this identifier in the workspace double.
+enum BarlineMenuService {
+    static let configuredAppIdentifier = "test.barline.CustomIdentity"
+
+    static func requiredIdentity(forInfoKey key: String) -> String {
+        precondition(key == "BarlineAppSigningIdentifier")
+        return configuredAppIdentifier
+    }
+}
+
 @MainActor
 final class NSWorkspace {
     static let shared = NSWorkspace()
@@ -277,7 +289,7 @@ struct ControllerSkipPathProbe {
         let configuration = MenuBarConcealmentConfiguration(visibleItemIDs: [], concealedItemIDs: [hidden])
         let allVisible = MenuBarConcealmentConfiguration(visibleItemIDs: [], concealedItemIDs: [])
         let mandatory: Set = [
-            "com.mabryventures.Barline", "com.apple.systemuiserver", "com.apple.finder", "com.apple.dock",
+            BarlineMenuService.configuredAppIdentifier, "com.apple.systemuiserver", "com.apple.finder", "com.apple.dock",
         ]
         func running(_ bundles: [String]) {
             NSWorkspace.shared.runningApplications = bundles.map { .init(bundleIdentifier: $0) }
@@ -457,6 +469,17 @@ struct ControllerSkipPathProbe {
         try await Task.sleep(for: .milliseconds(1100))
         try await require(controller.receipt() == revoked,
                           "revoked recovery worker must not establish successor authority")
+        bridgeSpy.withState { $0 = BridgeSpy.State() }
+        let alternateController = GoldenGateConcealmentController()
+        let selfItem = MenuBarItemID(bundleIdentifier: BarlineMenuService.configuredAppIdentifier.lowercased(), accessibilityIdentifier: "control")
+        try await alternateController.configure(.init(visibleItemIDs: [], concealedItemIDs: [hidden, selfItem]))
+        try require(bridgeSpy.withState {
+            $0.committed?.concealed == [hiddenBundle] &&
+                $0.committed?.allowed.contains(BarlineMenuService.configuredAppIdentifier) == true &&
+                $0.committed?.allowed.contains("com.mabryventures.Barline") == false
+        }, "configured self identity must survive both production resolver and native allowlist, even absent from running apps")
+        await alternateController.invalidate()
         print("PASS: real concealment controller receipts, skip path, exact bridge payload, uncertain failures, reveal leases, clock recovery, and invalidation")
+        print("PASS: configured helper identity protects the app through the actual controller and bridge payload")
     }
 }

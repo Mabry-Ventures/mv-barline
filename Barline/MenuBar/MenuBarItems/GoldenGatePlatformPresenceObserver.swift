@@ -5,7 +5,6 @@
 
 @preconcurrency import AppKit
 import ApplicationServices
-import Darwin
 import Foundation
 
 /// A live, closed AX scope, not yet an item exception. The provider must bind
@@ -38,7 +37,7 @@ struct GoldenGateNativeScopeCapture: Equatable, Sendable {
 }
 
 enum GoldenGateNativeScopeFailure: Equatable, Sendable {
-    case unqualifiedLane, publisherUnavailable, extrasUnavailable, membershipChanged
+    case unsupportedSystem, publisherUnavailable, extrasUnavailable, membershipChanged
     case cancelled, deadlineExceeded, publisherChanged
     case tree(AXNativeScopeFailure)
     case read(AXReadFailure)
@@ -62,10 +61,11 @@ actor GoldenGatePlatformPresenceObserver {
     }
 
     /// Golden Gate changed native Focus assessment behavior. On macOS 27 and
-    /// later, an unqualified/unknown scan cannot be treated as an ordinary
-    /// complete inventory. Earlier supported systems keep their legacy scan.
+    /// later, an unknown scan cannot be treated as a complete inventory.
+    /// Eligibility to attempt a scan does not qualify its results. Earlier
+    /// supported systems keep their legacy backend.
     static var requiresQualifiedPresenceContract: Bool {
-        ProcessInfo.processInfo.operatingSystemVersion.majorVersion >= 27
+        AXNativeScopeValidationSupport.canAttemptObservation(on: ProcessInfo.processInfo.operatingSystemVersion)
     }
 
     /// Synchronous body on this actor: no handle can outlive the scan through
@@ -76,7 +76,7 @@ actor GoldenGatePlatformPresenceObserver {
         let started = DispatchTime.now().uptimeNanoseconds
         do {
             try requireAdmission(deadline: deadline, cancellation: cancellation)
-            guard Self.isQualifiedLane() else { return .unknown(.unqualifiedLane) }
+            guard Self.requiresQualifiedPresenceContract else { return .unknown(.unsupportedSystem) }
             let applications = NSRunningApplication.runningApplications(
                 withBundleIdentifier: RuntimePublisherAttestationSupport.menuAgentBundleIdentifier
             )
@@ -200,16 +200,5 @@ actor GoldenGatePlatformPresenceObserver {
     private func requireAdmission(deadline: UInt64, cancellation: AXReadCancellation) throws {
         guard !Task.isCancelled, !cancellation.isCancelled else { throw ScanFailure(reason: .cancelled) }
         guard DispatchTime.now().uptimeNanoseconds < deadline else { throw ScanFailure(reason: .deadlineExceeded) }
-    }
-
-    private static func isQualifiedLane() -> Bool {
-        let version = ProcessInfo.processInfo.operatingSystemVersion
-        guard version.majorVersion == 27, version.minorVersion == 0, version.patchVersion == 1 else { return false }
-        var length = 0
-        guard sysctlbyname("kern.osversion", nil, &length, nil, 0) == 0, length > 1, length <= 64 else { return false }
-        var bytes = [UInt8](repeating: 0, count: length)
-        let result = bytes.withUnsafeMutableBytes { sysctlbyname("kern.osversion", $0.baseAddress, &length, nil, 0) }
-        guard result == 0, length > 1, length <= bytes.count, bytes[length - 1] == 0 else { return false }
-        return String(bytes: bytes.prefix(length - 1), encoding: .utf8) == "26A434"
     }
 }

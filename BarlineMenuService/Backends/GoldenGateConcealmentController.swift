@@ -9,6 +9,11 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     private let logger = Logger(category: "GoldenGateConcealmentController")
     private let transactionGate = AsyncExclusiveOperationGate()
     private let controllerLock = NSLock()
+    /// The same sealed configuration authenticates the XPC peer. Never use the
+    /// helper's own bundle ID or accept the protected app identity from a caller.
+    private let barlineBundleIdentifier = BarlineMenuService.requiredIdentity(
+        forInfoKey: "BarlineAppSigningIdentifier"
+    )
     private var opaqueController: UnsafeMutableRawPointer?
     private var desiredConfiguration = MenuBarConcealmentConfiguration(
         visibleItemIDs: [], concealedItemIDs: []
@@ -255,14 +260,15 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         )
         let resolved = GoldenGateConcealmentPolicy.resolve(
             configuration,
-            barlineBundleIdentifier: "com.mabryventures.Barline"
+            barlineBundleIdentifier: barlineBundleIdentifier
         )
         let runningBundles = await MainActor.run {
             NSWorkspace.shared.runningApplications.compactMap(\.bundleIdentifier)
         }
         try Task.checkCancellation()
         let nativeState = GoldenGateNativeConcealmentState(
-            resolution: resolved, runningBundleIdentifiers: runningBundles
+            resolution: resolved, runningBundleIdentifiers: runningBundles,
+            barlineBundleIdentifier: barlineBundleIdentifier
         )
         let configurationDigest = try digest([
             "visible": Set(desiredConfiguration.visibleItemIDs.map(\.searchDocumentID.value)).sorted(),

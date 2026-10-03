@@ -43,7 +43,11 @@ public struct GoldenGateNativeConcealmentState: Equatable, Sendable {
     public let resolution: GoldenGateResolvedConcealment
     public let allowedBundleIdentifiers: Set<String>
 
-    public init(resolution: GoldenGateResolvedConcealment, runningBundleIdentifiers: [String]) {
+    public init(
+        resolution: GoldenGateResolvedConcealment,
+        runningBundleIdentifiers: [String],
+        barlineBundleIdentifier: String
+    ) {
         self.resolution = resolution
         guard !resolution.concealedBundleIdentifiers.isEmpty ||
             resolution.allowedSystemItemIdentifiers != GoldenGateConcealmentPolicy.allSystemItemIdentifiers
@@ -57,7 +61,7 @@ public struct GoldenGateNativeConcealmentState: Equatable, Sendable {
         allowedBundleIdentifiers = Set(runningBundleIdentifiers.filter {
             !$0.isEmpty && !concealed.contains($0.lowercased())
         }).union([
-            "com.mabryventures.Barline", "com.apple.systemuiserver",
+            barlineBundleIdentifier, "com.apple.systemuiserver",
             "com.apple.finder", "com.apple.dock",
         ])
     }

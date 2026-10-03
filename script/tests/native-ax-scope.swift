@@ -57,6 +57,16 @@ enum NativeScopeTests {
         func unknown(_ nodes: [AXNativeScopeNode], _ reason: AXNativeScopeFailure) -> Bool {
             AXNativeScopeValidationSupport.validate(extrasToken: 1, nodes: nodes, ownerPID: pid) == .unknown(reason)
         }
+        for (major, minor, patch) in [(26, 0, 0), (26, 9, 9), (27, 0, 0), (27, 0, 1), (27, 0, 2), (27, 1, 0), (28, 0, 0)] {
+            let version = OperatingSystemVersion(majorVersion: major, minorVersion: minor, patchVersion: patch)
+            let admitted = AXNativeScopeValidationSupport.canAttemptObservation(on: version)
+            expect(admitted == (major >= 27), "observation_attempt_eligibility_\(major)_\(minor)_\(patch)")
+            if admitted {
+                // Eligibility is not qualification, including on future OS releases.
+                expect(closed(forest()) != nil, "eligible_closed_scope_\(major)_\(minor)_\(patch)")
+                expect(unknown([], .nodeLimit), "eligible_unknown_still_rejected_\(major)_\(minor)_\(patch)")
+            }
+        }
         let baseline = forest()
         expect(closed(baseline)?.leafTokens == [4, 5] && closed(baseline)?.focusToken == nil, "closed_no_focus_scope_not_mode_state")
         expect(closed(forest(focus: true))?.focusToken == 7, "exact_focus_leaf_in_closed_scope")
