@@ -46,6 +46,15 @@ the earlier source-freeze opinions and clean gates do not qualify this repair.
 Pre-Begin compensation completes only the remainder of the original clear
 interval; an attempted native activation still requires a fresh230ms boundary.
 
+The next clean full gate passed852 Core tests, but final review
+reproduced same-bundle probe starvation: a settled sibling plus a stalled new
+companion could prevent observation of a readable new publisher. Probe scheduling
+now reserves each owner a share of the remaining200ms budget; silence/timeout
+alone never authorizes repeated clears. Removal-only workspace changes also no
+longer renew the lifecycle window, while remembering departures and preserving
+the existing launch opportunity. Both regressions were captured failing before
+repair; new exact-source gates and source review supersede prior results.
+
 This checkpoint is implementation, not release approval. Obtain clean fast/full
 gates and reviewer closure before normal protected integration. Freeze the clean
 resulting main SHA, then rerun its package/installed/upgrade/lifecycle/resource

@@ -308,6 +308,33 @@ struct ControllerSkipPathProbe {
             }
         }
         await duplicateController.invalidate()
+
+        // A settled sibling is not evidence that a new same-bundle owner was
+        // observed. A stalled companion must leave a bounded read opportunity
+        // for the readable publisher ordered behind it.
+        bridgeSpy.withState { $0 = BridgeSpy.State() }
+        let settled = NSWorkspace.Application(bundleIdentifier: target.bundleIdentifier, processIdentifier: 90)
+        NSWorkspace.shared.runningApplications = [settled, siblingApp]
+        let fairnessController = GoldenGateConcealmentController()
+        try await fairnessController.configure(hidden)
+        NSWorkspace.shared.runningApplications = [settled,
+                                                  .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: 91, hasLiveMenuItem: false),
+                                                  .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: 92), siblingApp]
+        bridgeSpy.withState { $0.stalledPublisherPID = 91; $0.publisherProbes = [] }
+        _ = try await fairnessController.beginTemporaryReveal(target)
+        if !bridgeSpy.withState({ $0.publisherProbes.contains(92) && $0.invalidations == 1 }) {
+            failures.append("settled sibling and stalled companion must not mask a newly readable publisher")
+        }
+        try await fairnessController.endTemporaryReveal(target)
+        let fairnessClears = bridgeSpy.withState { $0.invalidations }
+        for _ in 0 ..< 3 {
+            _ = try await fairnessController.beginTemporaryReveal(target)
+            try await fairnessController.endTemporaryReveal(target)
+        }
+        if bridgeSpy.withState({ $0.invalidations }) != fairnessClears {
+            failures.append("stalled same-bundle companion must not cause repeated reveal clears")
+        }
+        await fairnessController.invalidate()
         for failure in failures {
             print("FAIL: \(failure)")
         }

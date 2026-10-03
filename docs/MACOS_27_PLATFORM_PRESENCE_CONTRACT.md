@@ -47,12 +47,19 @@ unrelated hidden owners cannot consume its observation budget. Other owner
 probes rotate within bounded priority groups. Bundle and kernel lifetime must
 match before and after observation. Clock restoration and compensation perform
 no advisory AX work; unsettled owners are reconciled separately.
+Each unsettled owner receives a share of the remaining 200ms probe budget, so
+a stalled same-bundle companion cannot consume a readable new owner's entire
+foreground observation opportunity. Timeouts are still unknown, not settlement
+or proof that an owner has no item.
 
 Pending observation and reset eligibility are distinct. An unseen configured
 visible owner, including unavailable kernel evidence, receives a bounded retry
 opportunity but cannot cause a clear until live evidence exists. Per-candidate
 deadlines are not renewed by identical configuration calls or new peer owners.
 Expiry stops autonomous observation, not later fresh explicit eligibility.
+Removal-only workspace samples update lifecycle history without starting a new
+follow-up window or revoking an existing launch window. Setup, additions,
+replacements and explicit wake/display/unlock signals may start a bounded window.
 Proposed reveal requires observed coverage per app bundle, not every same-bundle
 process. Only individually observed lifetimes settle; exact target resolution
 and ambiguity rejection still occur before any input delivery.

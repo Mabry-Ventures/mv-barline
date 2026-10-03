@@ -37,9 +37,9 @@ public struct MenuBarPublisherObservationBudget<Key: Hashable & Sendable, Witnes
 }
 
 /// One revocable opportunity per lifecycle signal, not a permanent poller.
-/// Repeated identical workspace samples cannot renew an exhausted window.
-public struct MenuBarLifecycleRefreshWindow<Signal: Equatable & Sendable>: Sendable {
-    private var signal: Signal?
+/// Repeated identical or removal-only workspace samples cannot renew a window.
+public struct MenuBarLifecycleRefreshWindow<Element: Hashable & Sendable>: Sendable {
+    private var signal: Set<Element>?
     private var generation: UInt64 = 0
     private var deadline: UInt64 = 0
     private let durationNanoseconds: UInt64
@@ -48,9 +48,12 @@ public struct MenuBarLifecycleRefreshWindow<Signal: Equatable & Sendable>: Senda
         self.durationNanoseconds = durationNanoseconds
     }
 
-    public mutating func begin(signal: Signal, now: UInt64, force: Bool = false) -> UInt64? {
-        guard force || self.signal != signal else { return nil }
+    public mutating func begin(signal: Set<Element>, now: UInt64, force: Bool = false) -> UInt64? {
+        let hasAddition = self.signal.map { !signal.isSubset(of: $0) } ?? true
+        // Remember removals without cancelling an earlier launch opportunity.
+        // A later reappearance must compare against the actual last sample.
         self.signal = signal
+        guard force || hasAddition else { return nil }
         generation &+= 1
         let (end, overflow) = now.addingReportingOverflow(durationNanoseconds)
         deadline = overflow ? UInt64.max : end

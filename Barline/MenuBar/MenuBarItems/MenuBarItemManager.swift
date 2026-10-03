@@ -46,7 +46,7 @@ final class MenuBarItemManager: ObservableObject {
         let launchDate: Date?
     }
 
-    private var lifecycleRefreshWindow = MenuBarLifecycleRefreshWindow<Set<LifecycleApplication>>()
+    private var lifecycleRefreshWindow = MenuBarLifecycleRefreshWindow<LifecycleApplication>()
     private var lifecycleRefreshTask: Task<Void, Never>?
 
     deinit {

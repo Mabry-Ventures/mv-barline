@@ -48,7 +48,7 @@ struct MenuBarPublisherObservationBudgetTests {
 
     @Test("Repeated workspace signals never renew the window; replacement revokes the old token")
     func lifecycleWindowIsRevocableAndFinite() throws {
-        var window = MenuBarLifecycleRefreshWindow<Set<Int>>(durationNanoseconds: 30)
+        var window = MenuBarLifecycleRefreshWindow<Int>(durationNanoseconds: 30)
         let first = try require(window.begin(signal: [1], now: 0))
         for time in 1 ..< 30 {
             #expect(window.begin(signal: [1], now: UInt64(time)) == nil)
@@ -71,9 +71,25 @@ struct MenuBarPublisherObservationBudgetTests {
         #expect(budget.pending([1: 10], now: UInt64.max - 2) == [1])
         #expect(budget.pending([1: 10], now: UInt64.max).isEmpty)
         var window = MenuBarLifecycleRefreshWindow<Int>(durationNanoseconds: 30)
-        let token = try require(window.begin(signal: 1, now: UInt64.max - 2))
+        let token = try require(window.begin(signal: [1], now: UInt64.max - 2))
         #expect(window.isCurrent(token, now: UInt64.max - 1))
         #expect(!window.isCurrent(token, now: UInt64.max))
+    }
+
+    @Test("Removal-only workspace samples update history without renewing or revoking a launch window")
+    func removalDoesNotStartFollowUp() throws {
+        var window = MenuBarLifecycleRefreshWindow<Int>(durationNanoseconds: 30)
+        let first = try require(window.begin(signal: [1, 2, 3], now: 0))
+        #expect(window.begin(signal: [1, 2], now: 5) == nil)
+        #expect(window.isCurrent(first, now: 29))
+        #expect(!window.isCurrent(first, now: 30))
+        #expect(window.begin(signal: [1], now: 35) == nil)
+        let readded = try require(window.begin(signal: [1, 2], now: 40))
+        #expect(window.isCurrent(readded, now: 69))
+        #expect(!window.isCurrent(readded, now: 70))
+        #expect(window.begin(signal: [], now: 71) == nil)
+        let wake = try require(window.begin(signal: [], now: 72, force: true))
+        #expect(window.isCurrent(wake, now: 73))
     }
 }
 

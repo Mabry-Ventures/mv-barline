@@ -46,6 +46,9 @@ No unreleased changes.
 - An additional process from the same app no longer blocks a working menu
   item's reveal merely because that extra process has no menu icon. Each real
   publisher still requires its own live observation and identity checks.
+- A stalled companion process cannot consume another menu publisher's entire
+  first-click observation budget. Quitting an app no longer starts a new
+  30-second delayed-startup observation window.
 
 This candidate is not published or fully qualified. Installed runtime testing
 now includes CODEX01 and a notched MacBook Pro; additional OS builds are not

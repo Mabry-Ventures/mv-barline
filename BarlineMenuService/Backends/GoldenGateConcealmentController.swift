@@ -481,12 +481,18 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             }
             return $0.processIdentifier < $1.processIdentifier
         }
-        for candidate in ordered {
-            guard !Task.isCancelled, DispatchTime.now().uptimeNanoseconds < deadline else { break }
+        for (index, candidate) in ordered.enumerated() {
+            let now = DispatchTime.now().uptimeNanoseconds
+            guard !Task.isCancelled, now < deadline else { break }
+            // Reserve an equal share of the remaining budget for each owner.
+            // A stalled same-bundle companion cannot consume the whole first
+            // click opportunity before a readable new publisher is visited.
+            // A timeout remains unknown, not evidence of a silent publisher.
+            let ownerDeadline = now + (deadline - now) / UInt64(ordered.count - index)
             lastProbedPublisherPID = candidate.processIdentifier
             if GoldenGateAXInventory.publisherHasStatusItem(
                 processIdentifier: candidate.processIdentifier, bundleIdentifier: candidate.bundleIdentifier,
-                lifetime: candidate.lifetime, deadline: deadline
+                lifetime: candidate.lifetime, deadline: ownerDeadline
             ) {
                 observed.insert(candidate)
             }
