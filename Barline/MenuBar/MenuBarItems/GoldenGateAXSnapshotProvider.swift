@@ -582,6 +582,7 @@ actor GoldenGateAXSnapshotProvider {
                 appSigningIdentifier: signingIdentifier,
                 rememberedSections: migratedRemembered,
                 assignedSections: effectiveAssignments.mapValues(\.section),
+                sectionPolicy: .nativeVisibilityAssignments,
                 generation: generation
             )
         } catch {

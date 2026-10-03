@@ -4,7 +4,7 @@
 
 No unreleased changes.
 
-## 1.0.67 (build 159) — candidate
+## 1.0.67 (build 160) — candidate
 
 - macOS 27 menu bar discovery is no longer restricted to one exact OS patch
   and build number. Every discovery attempt still verifies the live system
@@ -20,6 +20,10 @@ No unreleased changes.
   leaving Menu Bar Layout unable to load on a crowded, notched display.
 - Native discovery failures now record a privacy-safe reason category for
   troubleshooting, without recording menu item names or other user content.
+- Newly discovered items remain available to arrange when macOS 27 parks
+  Barline's divider off-screen. Native visibility now follows saved assignments
+  and defaults new items to visible, without depending on divider position.
+  Unknown display ownership and unsupported system controls remain protected.
 
 This candidate is not published or fully qualified. Installed runtime testing
 now includes CODEX01 and a notched MacBook Pro; additional OS builds are not

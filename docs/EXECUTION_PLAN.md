@@ -1,5 +1,32 @@
 # Barline execution plan
 
+## 1.0.67 native assignment repair - October 3, 2026
+
+Installed159 passed cold shelf responsiveness and the clean CODEX01 full gate,
+but local functional testing found an independent blocker: the native snapshot
+contained22items while Layout showed only five saved hidden apps and no visible
+items. The local hidden divider was parked below/outside the display. The
+snapshot builder's geometric fallback removed concealment eligibility from new
+unassigned items; the managed-item cache then excluded them. Both Astra and
+Gemini independently verified this source chain. No privacy permission reset,
+native-tree relaxation or inference from the display notch is part of this fix.
+
+Build160 selects an explicit native-visibility section policy only in the
+qualified provider. Explicit assignments precede remembered sections; new items
+default visible and retain semantic eligibility only with resolved display
+ownership. The default geometric policy, missing-control rejection, Focus
+override, builder immovability and all transaction/association/persistence
+guards remain. The shared managed/shelf cache is not broadened to unsupported
+items. Settings wording no longer promises to display every unsupported item.
+
+Red builder tests reproduced four failing expectations before repair. Targeted
+coverage includes a parked divider, geometry-independent default visibility,
+assignment precedence, unresolved/ambiguous displays, Focus/control safeguards
+and the unchanged default geometric policy. Exact160 clean gates, package and
+installed regression on both hosts, extended observation, independent reviews
+and protected integration remain mandatory before publication.159 receipts are
+historical, not160evidence. Public1.0.65remains unchanged.
+
 ## 1.0.67 native overflow repair - October 3, 2026
 
 The newly authorized local notched-Mac qualification found an additional real

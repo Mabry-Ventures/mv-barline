@@ -111,6 +111,13 @@ public enum GoldenGateMenuBarSnapshotBuilder {
         }
     }
 
+    /// Section classification is separate from authorization to mutate. The
+    /// native policy is selected only by the qualified macOS 27 provider.
+    public enum SectionPolicy: Sendable {
+        case dividerGeometry
+        case nativeVisibilityAssignments
+    }
+
     public static func build(
         observations: [GoldenGateMenuBarObservation],
         displayIdentities: [MenuBarDisplayIdentity],
@@ -121,6 +128,7 @@ public enum GoldenGateMenuBarSnapshotBuilder {
         appSigningIdentifier: String,
         rememberedSections: [MenuBarItemID: MenuBarSection] = [:],
         assignedSections: [MenuBarItemID: MenuBarSection] = [:],
+        sectionPolicy: SectionPolicy = .dividerGeometry,
         generation: UInt64,
         capturedAt: Date = Date()
     ) throws -> MenuBarSnapshot {
@@ -199,6 +207,22 @@ public enum GoldenGateMenuBarSnapshotBuilder {
             } else {
                 if let assigned = assignedSections[descriptor.id] {
                     return descriptor.replacingSection(assigned)
+                }
+                if sectionPolicy == .nativeVisibilityAssignments {
+                    if let remembered = rememberedSections[descriptor.id] {
+                        return descriptor.replacingSection(remembered)
+                    }
+                    // Native visibility is a logical assignment, not a
+                    // position relative to our collapsed divider. macOS can
+                    // park that divider off-screen even while ordinary items
+                    // remain visible. New items fail visible without losing
+                    // their semantic eligibility for an explicit assignment.
+                    // Unresolved display ownership still grants no capability.
+                    return descriptor.replacing(
+                        section: .visible,
+                        isMovable: false,
+                        canBeHidden: descriptor.displayID != nil && descriptor.canBeHidden
+                    )
                 }
                 let sameDisplayControls = preliminary.filter {
                     descriptor.displayID != nil && $0.displayID == descriptor.displayID &&
