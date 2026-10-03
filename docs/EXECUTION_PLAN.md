@@ -1,5 +1,40 @@
 # Barline execution plan
 
+## 1.0.67 native overflow repair - October 3, 2026
+
+The newly authorized local notched-Mac qualification found an additional real
+blocker in build158 before publication. The exact native observer returned
+`tree.unexpectedShape` in three independent captures while CODEX01 captured
+three complete scopes. A successfully read anonymous direct `AXButton` sibling
+(the native double-chevron overflow control) violated the wrapper-only schema.
+Clock, Control Center and Focus remained in normal closed hosting wrappers.
+This was not a deadline, permission, display-coordinate or persistence failure.
+
+Build159 explicitly recognizes at most one such direct terminal button with
+the observed typed role, identifier-noValue and subrole-unsupported dispositions.
+Successful empty children, finite positive geometry, owner and identical double
+reads are required. It participates in closure but supplies no inventory item,
+Focus identity, anchor, concealment key or mutation authority. Other schemas
+remain unknown. Explicit read kinds replace geometry-based second-pass inference.
+Privacy-safe failure categories are now retained in native-discovery logs.
+
+A red fixture reproduced the precise rejection. The repaired validator passes
+92 scope checks including adversarial near-misses and root-order permutations; the repaired exact observer
+captures the local live tree in three independent read-only diagnostic scans.
+These are iteration proofs, not signed-candidate runtime qualification. Astra
+and Gemini independently agreed with the bounded design. Gemini's assertion
+that all notched Macs inject this control is not established by our evidence;
+only the observed overflowing display is established.
+
+The owner authorized overnight local and CODEX01 test/fix work and publication
+only after exact-candidate gates pass. Rebuild/sign/notarize159, rerun clean
+fast/full gates and installed journeys on both hosts, verify settings/layout
+preservation, native activation, Clock/Focus/recovery, performance and extended
+resource observation. Obtain final independent reviews and normal protected
+integration before publishing matching binaries/source/checksums/release notes,
+then verify the live site/feed/downloads. Keep public1.0.65 unchanged until then.
+Build158 receipts remain historical and must not be relabeled for159.
+
 ## 1.0.67 compatibility repair candidate - October 2, 2026
 
 Build 158 removes the exact 27.0.1/26A434 observation-attempt restriction.

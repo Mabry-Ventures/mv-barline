@@ -52,7 +52,23 @@ enum AXNativeScopeValidationSupport {
         version.majorVersion >= 27
     }
 
-    /// Validates a closed extras -> hosting wrapper -> terminal-item forest.
+    /// The observed direct overflow control is an anonymous, closed native
+    /// button, not an item identity. Unsupported subrole is its exact typed
+    /// disposition; unreadable identifiers/children are never interchangeable.
+    static func isAnonymousNativeButton(_ identity: AXIdentityAttributes) -> Bool {
+        identity.identifier == .noValue && identity.role == .value("AXButton") && identity.subrole == .unsupported
+    }
+
+    private static func hasUsableGeometry(_ geometry: AXGeometryRead?) -> Bool {
+        guard case let .bounds(bounds) = geometry else { return false }
+        return bounds.origin.x.isFinite && bounds.origin.y.isFinite &&
+            bounds.size.width.isFinite && bounds.size.height.isFinite &&
+            bounds.size.width > 0 && bounds.size.height > 0 &&
+            (bounds.origin.x + bounds.size.width).isFinite && (bounds.origin.y + bounds.size.height).isFinite
+    }
+
+    /// Validates a closed extras -> hosting wrapper -> terminal-item forest,
+    /// optionally accompanied by one direct, anonymous terminal native button.
     /// No-value/unsupported children never become empty; every edge must have
     /// exactly one record, and before/after ordered membership must match.
     static func validate(extrasToken: UInt32, nodes: [AXNativeScopeNode], ownerPID: Int32) -> AXNativeScopeValidation {
@@ -75,11 +91,21 @@ enum AXNativeScopeValidationSupport {
         var clock: UInt32?
         var controlCenter: UInt32?
         var focus: UInt32?
+        var hasAnonymousButton = false
         guard wrappers.count <= 64 else { return .unknown(.nodeLimit) }
         for wrapperToken in wrappers {
             guard referenced.insert(wrapperToken).inserted else { return .unknown(.duplicateNode) }
             guard let wrapper = byToken[wrapperToken], case let .attributes(identity) = wrapper.before.identity else {
                 return .unknown(.orphanNode)
+            }
+            if isAnonymousNativeButton(identity) {
+                guard !hasAnonymousButton else { return .unknown(.unexpectedShape) }
+                guard wrapper.before.children == .elements([]) else { return .unknown(.openFrontier) }
+                guard hasUsableGeometry(wrapper.before.geometry) else { return .unknown(.unusableGeometry) }
+                hasAnonymousButton = true
+                // Its token participates in closed membership and double-read
+                // checks, but cannot identify Focus, an anchor or an item.
+                continue
             }
             guard identity.identifier == .noValue, identity.role == .value("AXGroup"), identity.subrole == .value("AXHostingView"),
                   case let .elements(children) = wrapper.before.children else { return .unknown(.unexpectedShape) }
@@ -96,12 +122,7 @@ enum AXNativeScopeValidationSupport {
                 let normalized = identifier.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
                 guard !normalized.isEmpty, normalizedIdentifiers.insert(normalized).inserted else { return .unknown(.duplicateNode) }
                 guard leaf.before.children == .elements([]) else { return .unknown(.openFrontier) }
-                guard case let .bounds(bounds) = leaf.before.geometry,
-                      bounds.origin.x.isFinite, bounds.origin.y.isFinite,
-                      bounds.size.width.isFinite, bounds.size.height.isFinite,
-                      bounds.size.width > 0, bounds.size.height > 0,
-                      (bounds.origin.x + bounds.size.width).isFinite,
-                      (bounds.origin.y + bounds.size.height).isFinite else { return .unknown(.unusableGeometry) }
+                guard hasUsableGeometry(leaf.before.geometry) else { return .unknown(.unusableGeometry) }
                 leaves.append(leafToken)
                 switch identifier {
                 case clockIdentifier: clock = leafToken

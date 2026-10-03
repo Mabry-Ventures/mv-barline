@@ -4,7 +4,7 @@
 
 No unreleased changes.
 
-## 1.0.67 (build 158) — candidate
+## 1.0.67 (build 159) — candidate
 
 - macOS 27 menu bar discovery is no longer restricted to one exact OS patch
   and build number. Every discovery attempt still verifies the live system
@@ -15,9 +15,14 @@ No unreleased changes.
 - Rejected menu bar observations no longer save identity migration or cached
   inventory before the final observation checks pass. Temporary layout
   verification also leaves remembered sections unchanged.
+- Menu bar discovery recognizes macOS 27's native overflow-arrow button. It
+  previously rejected the complete inventory when that extra control appeared,
+  leaving Menu Bar Layout unable to load on a crowded, notched display.
+- Native discovery failures now record a privacy-safe reason category for
+  troubleshooting, without recording menu item names or other user content.
 
 This candidate is not published or fully qualified. Installed runtime testing
-is scoped to CODEX01; additional OS builds and display configurations are not
+now includes CODEX01 and a notched MacBook Pro; additional OS builds are not
 claimed as tested merely because they may attempt the live safety checks.
 
 ## 1.0.66 (build 157) — limited prerelease, October 2, 2026
