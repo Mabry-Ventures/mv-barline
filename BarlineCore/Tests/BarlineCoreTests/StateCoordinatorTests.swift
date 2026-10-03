@@ -9,6 +9,182 @@ import Testing
 
 @Suite("Transactional state coordinator")
 struct StateCoordinatorTests {
+    @Test("A planned assignment cannot be invalidated by a queued background refresh")
+    func plannedAssignmentOwnsRefreshAndMutationTurn() async throws {
+        let id = MenuBarItemID(bundleIdentifier: "com.example.fixture", accessibilityIdentifier: "native")
+        let before = makeProfileSnapshot(generation: 1, layout: ProfileLayout(hidden: [id]))
+        let after = makeProfileSnapshot(generation: 2, layout: ProfileLayout(visible: [id]))
+        let observed = makeProfileSnapshot(generation: 3, layout: ProfileLayout(visible: [id]))
+        let gate = SuspensionGate()
+        let backend = FakeBackend(snapshots: [before, after, observed], firstHealthGate: gate)
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let assignment = Task {
+            try await coordinator.performPlannedMove { snapshot in
+                #expect(snapshot == before)
+                return MenuBarMoveOperation(itemID: id, section: .visible, index: 0)
+            }
+        }
+        await gate.waitUntilSuspended()
+        let background = Task { try await coordinator.refresh() }
+        #expect(await waitForQueuedMutation(in: coordinator))
+        await gate.open()
+
+        let result = try await assignment.value
+        #expect(result.snapshot == after)
+        #expect(result.didMutate)
+        #expect(try await background.value == observed)
+        #expect(await backend.moveOperations.count == 1)
+        #expect(await coordinator.currentSnapshot == observed)
+    }
+
+    @Test("Qualified assignment plans and commits from one native observation")
+    func plannedAssignmentUsesExactQualifiedSnapshot() async throws {
+        let id = MenuBarItemID(bundleIdentifier: "com.example.fixture", accessibilityIdentifier: "native")
+        let before = makeProfileSnapshot(generation: 1, layout: ProfileLayout(hidden: [id]))
+        let after = makeProfileSnapshot(generation: 2, layout: ProfileLayout(visible: [id]))
+        let receipt = MenuBarAuthorityObservationTests.receipt()
+        let display = try #require(before.displayIDs.first)
+        let scene = MenuBarAuthorityObservationTests.environment(receipt, display: display)
+        let observations = [before, after].map { snapshot in
+            let scanID = UUID()
+            return MenuBarAuthorityObservation(snapshot: snapshot, scan: MenuBarObservationScan(
+                scanID: scanID, startedAtUptimeNanoseconds: 1, completedAtUptimeNanoseconds: 30,
+                observedSnapshot: snapshot, initialEnvironment: scene, finalEnvironment: scene,
+                platformPresenceObservation: MenuBarAuthorityObservationTests.nativePresence(scanID: scanID, focus: .absent)
+            ))
+        }
+        #expect(MenuBarPlatformPresenceContract.admitting(observations[0]) != nil)
+        let backend = FakeBackend(snapshots: [], environment: scene, authorityObservations: observations)
+        let coordinator = MenuBarStateCoordinator(
+            backend: backend, retryPolicy: RetryPolicy(maximumAttempts: 1, baseDelay: .zero, maximumDelay: .zero)
+        )
+        let result = try await coordinator.performPlannedMove { snapshot in
+            #expect(snapshot == before)
+            return MenuBarMoveOperation(itemID: id, section: .visible, index: 0)
+        }
+        #expect(result.snapshot == after)
+        #expect(await backend.moveOperations.count == 1)
+        #expect(await backend.restoredSnapshots.isEmpty)
+        #expect(await coordinator.canUndo)
+    }
+
+    @Test("A nil or rejected assignment plan has no native or history effects", arguments: [false, true])
+    func plannedAssignmentNoOpAndPlannerFailure(throwsError: Bool) async throws {
+        let before = makeSnapshot(generation: 1, count: 3)
+        let backend = FakeBackend(snapshots: [before])
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        await coordinator.setBeforeAuthoritativeLayoutMutation {
+            Issue.record("A nil or throwing planner must not supersede reveals")
+        }
+        do {
+            let result = try await coordinator.performPlannedMove { snapshot in
+                #expect(snapshot == before)
+                if throwsError {
+                    throw MenuBarBackendError.interrupted
+                }
+                return nil
+            }
+            #expect(!throwsError)
+            #expect(result.snapshot == before)
+            #expect(!result.didMutate)
+        } catch {
+            #expect(throwsError)
+            #expect(error as? MenuBarBackendError == .interrupted)
+        }
+        #expect(await backend.moveOperations.isEmpty)
+        #expect(await backend.restoredSnapshots.isEmpty)
+        #expect(await coordinator.canUndo == false)
+        #expect(await coordinator.canRedo == false)
+    }
+
+    @Test("A cancelled queued assignment never plans or writes")
+    func plannedAssignmentQueuedCancellation() async throws {
+        let before = makeSnapshot(generation: 1, count: 3)
+        let next = makeSnapshot(generation: 2, count: 3)
+        let gate = SuspensionGate()
+        let backend = FakeBackend(snapshots: [before, next], firstHealthGate: gate)
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let background = Task { try await coordinator.refresh() }
+        await gate.waitUntilSuspended()
+        let assignment = Task {
+            try await coordinator.performPlannedMove { _ in
+                Issue.record("Cancelled queued assignment must not run its planner")
+                return nil
+            }
+        }
+        #expect(await waitForQueuedMutation(in: coordinator))
+        assignment.cancel()
+        await gate.open()
+        #expect(try await background.value == before)
+        await #expect(throws: CancellationError.self) { try await assignment.value }
+        #expect(await backend.snapshotCallCount == 1)
+        #expect(await backend.moveOperations.isEmpty)
+        #expect(try await coordinator.refresh() == next)
+    }
+
+    @Test("Cancellation during a nil assignment plan is not reported as success")
+    func plannedAssignmentCancellationBeforeNoOp() async throws {
+        let before = makeSnapshot(generation: 1, count: 3)
+        let backend = FakeBackend(snapshots: [before])
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let assignment = Task {
+            try await coordinator.performPlannedMove { _ in
+                withUnsafeCurrentTask { $0?.cancel() }
+                return nil
+            }
+        }
+        await #expect(throws: CancellationError.self) { try await assignment.value }
+        #expect(await backend.moveOperations.isEmpty)
+        #expect(await coordinator.canUndo == false)
+    }
+
+    @Test("A missing assignment target is rejected before native mutation")
+    func plannedAssignmentMissingTarget() async throws {
+        let before = makeSnapshot(generation: 1, count: 3)
+        let missing = MenuBarItemID(bundleIdentifier: "com.example.absent", accessibilityIdentifier: "missing")
+        let backend = FakeBackend(snapshots: [before])
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        await #expect(throws: MenuBarBackendError.staleItem(missing)) {
+            try await coordinator.performPlannedMove { _ in
+                MenuBarMoveOperation(itemID: missing, section: .hidden, index: 0)
+            }
+        }
+        #expect(await backend.moveOperations.isEmpty)
+        #expect(await coordinator.canUndo == false)
+    }
+
+    @Test("A failed planned assignment compensates from its exact planning snapshot")
+    func plannedAssignmentPreservesRollbackOrigin() async throws {
+        let before = makeSnapshot(generation: 1, count: 3)
+        let restored = makeSnapshot(generation: 2, count: 3)
+        let backend = FakeBackend(snapshots: [before, restored], failMoveAt: 1)
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        await #expect(throws: MenuBarBackendError.operationFailed("injected move failure")) {
+            try await coordinator.performPlannedMove { snapshot in
+                #expect(snapshot == before)
+                return MenuBarMoveOperation(itemID: snapshot.items[0].id, section: .hidden, index: 0)
+            }
+        }
+        #expect(await backend.restoredSnapshots == [before])
+        #expect(await coordinator.currentSnapshot == restored)
+        #expect(await coordinator.canUndo == false)
+    }
+
+    @Test("Planned assignment retains the active item-interaction boundary")
+    func plannedAssignmentRespectsInteractionLease() async throws {
+        let backend = FakeBackend(snapshots: [makeSnapshot(generation: 1, count: 3)])
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        _ = try await coordinator.withItemInteraction { _ in
+            await #expect(throws: MenuBarBackendError.unsafeMenuTracking) {
+                try await coordinator.performPlannedMove { _ in
+                    Issue.record("An unleased assignment cannot plan during item activation")
+                    return nil
+                }
+            }
+        }
+        #expect(await backend.snapshotCallCount == 0)
+    }
+
     @Test("Saved visibility transitions preserve newly observed and omitted items", arguments: [false, true])
     func reconcilesCompleteGoldenGateVisibility(rejectMixedGroup: Bool) async throws {
         let display = MenuBarDisplayID("test-display")
@@ -6329,6 +6505,8 @@ private actor FakeBackend: MenuBarBackend {
     private let cancelOnMove: Bool
     private let restoreDelay: Duration
     private(set) var restoreIsActive = false
+    private let firstHealthGate: SuspensionGate?
+    private var didWaitForFirstHealth = false
 
     init(
         snapshots: [MenuBarSnapshot],
@@ -6355,7 +6533,8 @@ private actor FakeBackend: MenuBarBackend {
         checksCancellationDuringCompensation: Bool = false,
         cancelOnMove: Bool = false,
         restoreDelay: Duration = .zero,
-        authorityObservations: [MenuBarAuthorityObservation] = []
+        authorityObservations: [MenuBarAuthorityObservation] = [],
+        firstHealthGate: SuspensionGate? = nil
     ) {
         self.snapshots = snapshots
         self.authorityObservations = authorityObservations
@@ -6374,6 +6553,7 @@ private actor FakeBackend: MenuBarBackend {
         self.checksCancellationDuringCompensation = checksCancellationDuringCompensation
         self.cancelOnMove = cancelOnMove
         self.restoreDelay = restoreDelay
+        self.firstHealthGate = firstHealthGate
     }
 
     func snapshot() throws -> MenuBarSnapshot {
@@ -6492,8 +6672,12 @@ private actor FakeBackend: MenuBarBackend {
         )
     }
 
-    func health() -> MenuBarBackendHealth {
-        MenuBarBackendHealth(backendName: "Fake", state: .healthy)
+    func health() async -> MenuBarBackendHealth {
+        if let firstHealthGate, !didWaitForFirstHealth {
+            didWaitForFirstHealth = true
+            await firstHealthGate.suspendUntilOpened()
+        }
+        return MenuBarBackendHealth(backendName: "Fake", state: .healthy)
     }
 
     func restart() async {

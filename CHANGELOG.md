@@ -4,7 +4,7 @@
 
 No unreleased changes.
 
-## 1.0.67 (build 163) — candidate
+## 1.0.67 (build 164) — candidate
 
 - macOS 27 menu bar discovery is no longer restricted to one exact OS patch
   and build number. Every discovery attempt still verifies the live system
@@ -49,6 +49,10 @@ No unreleased changes.
 - A stalled companion process cannot consume another menu publisher's entire
   first-click observation budget. Quitting an app no longer starts a new
   30-second delayed-startup observation window.
+- Changing an item's visibility now reads and updates the layout in one
+  serialized transaction. Background discovery can no longer interrupt that
+  handoff with a stale-layout error. Failed edits still preserve recovery and
+  undo safeguards rather than bypassing layout validation.
 
 This candidate is not published or fully qualified. Installed runtime testing
 now includes CODEX01 and a notched MacBook Pro; additional OS builds are not
