@@ -1,5 +1,46 @@
 # Barline execution plan
 
+## 1.0.67 publisher lifecycle repair - October 3, 2026
+
+Build160 passed clean local gates, signed packaging and CODEX01 installed
+hide/show, native-left/right, popover and helper-recovery checks. Local testing
+then reproduced a separate blocker: a freshly launched or rapidly relaunched
+fixture's items were parked below the display despite native assertion update
+acknowledgement. Correct signing and fresh nonpersistent fixture positions did
+not resolve it. Lifting and restoring the assertion through the existing Clock
+path immediately put the same process's items on-screen without changing any
+assignment or divider. Restarting Barline with the fixture already alive also
+resolved it. Neither is accepted as a user workaround.
+
+Both Astra High and Gemini Flash3.8High independently traced ordinary bridge
+replacement's overlapping assertions and supported testing a narrow, bounded
+deassertion edge. Fast same-bundle relaunch also reproduced, so a bundle-set
+change alone is insufficient. Build161 uses ephemeral publisher incarnations
+(bundle, PID and launch time), never persisted or used as item/display/Focus
+authority. Only observed publishers admitted visible by the current policy
+trigger refresh. Late first-item publishers are not prematurely marked settled.
+Active reveal ownership defers refresh until reconciliation can safely proceed.
+
+The receipt stays transient during the230mscandidate settle interval and native
+activation is bounded. Failed or cancelled reset compensates the previous
+accepted logical configuration independently of caller cancellation. Failed
+compensation remains unknown and uses the revocable recovery worker. Existing
+snapshot, ownership, semantic, Focus and persistence checks remain unchanged.
+Astra review found that an ambiguous post-commit failure could reuse an earlier
+clear boundary for a publisher born under the candidate assertion. Each native
+attempt now consumes its own boundary witness. Compensation explicitly clears
+again, waits230ms, then samples and restores accepted intent with a250ms
+activation budget; this is480ms of cooperative compensation, not a hard wall-clock
+guarantee over synchronous native calls or MainActor scheduling. A deterministic
+post-commit mismatch/process-replacement regression failed before this repair.
+The real production controller failed the new same-bundle regression before
+the repair and passes it afterward, plus delayed eligibility, no-op, reveal
+deferral, failed candidate/compensation, cancellation and supersession cases.
+Source review is not runtime proof: exact161 packaging and installed lifecycle
+reproductions on both hosts, full regression, long observation and final reviews
+remain required. Build160 and earlier receipts cannot qualify161. Public142
+remains unchanged.
+
 ## 1.0.67 native assignment repair - October 3, 2026
 
 Installed159 passed cold shelf responsiveness and the clean CODEX01 full gate,

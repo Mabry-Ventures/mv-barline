@@ -4,7 +4,7 @@
 
 No unreleased changes.
 
-## 1.0.67 (build 160) — candidate
+## 1.0.67 (build 161) — candidate
 
 - macOS 27 menu bar discovery is no longer restricted to one exact OS patch
   and build number. Every discovery attempt still verifies the live system
@@ -24,6 +24,10 @@ No unreleased changes.
   Barline's divider off-screen. Native visibility now follows saved assignments
   and defaults new items to visible, without depending on divider position.
   Unknown display ownership and unsupported system controls remain protected.
+- macOS 27 visibility refreshes account for newly launched and relaunched menu
+  bar apps, including apps that publish their first item after launch. The
+  refresh preserves saved assignments, waits for an active item interaction to
+  finish, and restores the accepted configuration if the update is interrupted.
 
 This candidate is not published or fully qualified. Installed runtime testing
 now includes CODEX01 and a notched MacBook Pro; additional OS builds are not

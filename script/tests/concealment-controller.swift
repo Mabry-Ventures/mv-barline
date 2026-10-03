@@ -10,9 +10,9 @@ import AppKit
 import BarlineCore
 import Foundation
 
-// Isolated replacement for the helper's sealed Info.plist lookup. The actual
-// production controller must use this identity in both resolver and allowlist;
-// no application is running with this identifier in the workspace double.
+/// Isolated replacement for the helper's sealed Info.plist lookup. The actual
+/// production controller must use this identity in both resolver and allowlist;
+/// no application is running with this identifier in the workspace double.
 enum BarlineMenuService {
     static let configuredAppIdentifier = "test.barline.CustomIdentity"
 
@@ -22,14 +22,21 @@ enum BarlineMenuService {
     }
 }
 
-@MainActor
-final class NSWorkspace {
+final class NSWorkspace: @unchecked Sendable {
     static let shared = NSWorkspace()
-    struct Application {
+    struct Application: Sendable {
         let bundleIdentifier: String?
+        var processIdentifier: Int32 = 1
+        var launchDate: Date? = Date(timeIntervalSince1970: 1)
+        var isTerminated = false
     }
 
-    var runningApplications: [Application] = []
+    private let lock = NSLock()
+    private var applications: [Application] = []
+    var runningApplications: [Application] {
+        get { lock.withLock { applications } }
+        set { lock.withLock { applications = newValue } }
+    }
 }
 
 private struct Payload: Equatable, Sendable {
@@ -54,6 +61,9 @@ private final class BridgeSpy: @unchecked Sendable {
         var committedStateOverride: Int32?
         var failCreate = false
         var cancelNextBegin = false
+        var cancelNextInvalidate = false
+        var rejectBegins = 0
+        var afterNextCommit: (@Sendable () -> Void)?
     }
 
     private let lock = NSLock()
@@ -97,6 +107,10 @@ func BLNGoldenGateAssessmentBegin(
     }
     return bridgeSpy.withState {
         $0.begins.append(payload)
+        if $0.rejectBegins > 0 {
+            $0.rejectBegins -= 1
+            return 0
+        }
         if $0.failNextBegin {
             $0.failNextBegin = false
             return 0
@@ -112,12 +126,12 @@ func BLNGoldenGateAssessmentActivationState(_: UnsafeMutableRawPointer, _ token:
 }
 
 func BLNGoldenGateAssessmentCommit(_: UnsafeMutableRawPointer, _ token: UInt64) -> Bool {
-    bridgeSpy.withState {
+    let result: (Bool, (@Sendable () -> Void)?) = bridgeSpy.withState {
         if $0.failNextCommit {
             $0.failNextCommit = false
-            return false
+            return (false, nil)
         }
-        guard let payload = $0.pending.removeValue(forKey: token) else { return false }
+        guard let payload = $0.pending.removeValue(forKey: token) else { return (false, nil) }
         $0.committed = payload
         $0.acknowledgedState = true
         if $0.mismatchAfterNextCommit {
@@ -125,8 +139,12 @@ func BLNGoldenGateAssessmentCommit(_: UnsafeMutableRawPointer, _ token: UInt64) 
             $0.committedStateOverride = -1
         }
         $0.commits += 1
-        return true
+        let callback = $0.afterNextCommit
+        $0.afterNextCommit = nil
+        return (true, callback)
     }
+    result.1?()
+    return result.0
 }
 
 func BLNGoldenGateAssessmentAbort(_: UnsafeMutableRawPointer, _ token: UInt64) -> Bool {
@@ -150,6 +168,14 @@ func BLNGoldenGateAssessmentCommittedState(_: UnsafeMutableRawPointer) -> Int32 
 }
 
 func BLNGoldenGateAssessmentInvalidate(_: UnsafeMutableRawPointer) {
+    let cancel = bridgeSpy.withState {
+        let value = $0.cancelNextInvalidate
+        $0.cancelNextInvalidate = false
+        return value
+    }
+    if cancel {
+        withUnsafeCurrentTask { $0?.cancel() }
+    }
     bridgeSpy.withState {
         $0.invalidations += 1
         $0.pending.removeAll()
@@ -272,6 +298,134 @@ struct ControllerSkipPathProbe {
     }
 
     @MainActor
+    @available(macOS 27.0, *)
+    private static func verifyPublisherLifecycleRefresh() async throws {
+        bridgeSpy.withState { $0 = BridgeSpy.State() }
+        let publisher = MenuBarItemID(bundleIdentifier: "test.publisher", accessibilityIdentifier: "item")
+        let delayed = MenuBarItemID(bundleIdentifier: "test.delayed", accessibilityIdentifier: "late-item")
+        let hidden = MenuBarItemID(bundleIdentifier: "test.hidden", accessibilityIdentifier: "hidden")
+        let otherHidden = MenuBarItemID(bundleIdentifier: "test.other-hidden", accessibilityIdentifier: "hidden")
+        var publisherPID: Int32 = 10
+        func running(includeDelayed: Bool = false) {
+            NSWorkspace.shared.runningApplications = [
+                .init(bundleIdentifier: publisher.bundleIdentifier, processIdentifier: publisherPID),
+                .init(bundleIdentifier: hidden.bundleIdentifier, processIdentifier: 20),
+                .init(bundleIdentifier: otherHidden.bundleIdentifier, processIdentifier: 21),
+            ] + (includeDelayed ? [.init(bundleIdentifier: delayed.bundleIdentifier, processIdentifier: 30)] : [])
+        }
+        var configuration = MenuBarConcealmentConfiguration(
+            visibleItemIDs: [publisher], concealedItemIDs: [hidden, otherHidden]
+        )
+        let controller = GoldenGateConcealmentController()
+        running()
+        let original = try await controller.configure(configuration)
+        publisherPID = 11
+        running()
+        let replaced = try await controller.configure(configuration)
+        try require(bridgeSpy.withState { $0.invalidations == 1 && $0.begins.count == 2 },
+                    "same-bundle replacement must cross a native deassertion boundary before reassertion")
+        try require(replaced.isStable && replaced.assertionRevision > original.assertionRevision &&
+            replaced.effectiveStateDigest == original.effectiveStateDigest,
+            "process witness must expire observation proof without changing semantic visibility")
+        let noOp = try await controller.configure(configuration)
+        try require(noOp == replaced && bridgeSpy.withState { $0.invalidations == 1 && $0.begins.count == 2 },
+                    "unchanged publisher must not churn the native assertion")
+
+        running(includeDelayed: true)
+        try await controller.configure(configuration)
+        try require(bridgeSpy.withState { $0.invalidations == 1 }, "unobserved publisher must not trigger a lift")
+        configuration = .init(visibleItemIDs: [publisher, delayed], concealedItemIDs: [hidden, otherHidden])
+        try await controller.configure(configuration)
+        try require(bridgeSpy.withState { $0.invalidations == 2 },
+                    "late first AX item must remain unsettled despite an earlier running-app sample")
+
+        _ = try await controller.beginTemporaryReveal(hidden)
+        publisherPID = 12
+        running(includeDelayed: true)
+        try await controller.configure(configuration)
+        try require(bridgeSpy.withState { $0.invalidations == 2 }, "active reveal must defer publisher reset")
+        try await controller.endTemporaryReveal(hidden)
+        try await Task.sleep(for: .milliseconds(1500))
+        try require(bridgeSpy.withState { $0.invalidations == 3 }, "final reveal end must reconcile deferred publisher")
+        try await require(controller.receipt().isStable, "deferred publisher refresh must eventually acknowledge state")
+
+        // A failed candidate must compensate the accepted configuration, not
+        // the new configuration that configure() assigned before native work.
+        publisherPID = 13
+        running(includeDelayed: true)
+        let rejected = MenuBarConcealmentConfiguration(visibleItemIDs: [publisher, delayed, otherHidden], concealedItemIDs: [hidden])
+        bridgeSpy.withState { $0.failNextCommit = true }
+        var failed = false
+        do { try await controller.configure(rejected) } catch { failed = true }
+        try require(failed && bridgeSpy.withState {
+            $0.committed?.concealed == Set([hidden.bundleIdentifier, otherHidden.bundleIdentifier]) && $0.pending.isEmpty
+        }, "post-clear failure must restore accepted hidden intent, not the rejected candidate")
+        try await require(controller.receipt().isStable, "successful compensation must acknowledge its own receipt")
+
+        // Native Commit succeeds, but its acknowledgement is ambiguous. A
+        // different incarnation appears while that candidate assertion exists.
+        // Compensation needs its own clear edge; the earlier witness is spent.
+        publisherPID = 16
+        running(includeDelayed: true)
+        let compensatingSample = NSWorkspace.shared.runningApplications.map { application in
+            application.bundleIdentifier == publisher.bundleIdentifier
+                ? NSWorkspace.Application(bundleIdentifier: publisher.bundleIdentifier, processIdentifier: 17)
+                : application
+        }
+        let beforeAmbiguous = bridgeSpy.withState { $0.invalidations }
+        bridgeSpy.withState {
+            $0.mismatchAfterNextCommit = true
+            $0.afterNextCommit = { NSWorkspace.shared.runningApplications = compensatingSample }
+        }
+        failed = false
+        do { try await controller.configure(rejected) } catch { failed = true }
+        try require(failed && bridgeSpy.withState {
+            $0.invalidations == beforeAmbiguous + 2 &&
+                $0.committed?.concealed == Set([hidden.bundleIdentifier, otherHidden.bundleIdentifier])
+        }, "ambiguous committed candidate must clear again before settling compensation's new incarnation")
+        let afterCompensation = bridgeSpy.withState { $0.begins.count }
+        try await controller.configure(configuration)
+        try require(bridgeSpy.withState { $0.begins.count == afterCompensation },
+                    "fresh compensation boundary may settle only its own captured publisher sample")
+
+        // A recycled PID is not the same process incarnation.
+        NSWorkspace.shared.runningApplications = compensatingSample.map { application in
+            var replacement = application
+            if application.bundleIdentifier == publisher.bundleIdentifier {
+                replacement.launchDate = Date(timeIntervalSince1970: 2)
+            }
+            return replacement
+        }
+        try await controller.configure(configuration)
+        try require(bridgeSpy.withState { $0.begins.count == afterCompensation + 1 },
+                    "recycled PID with a different launch date must receive a new clear boundary")
+
+        publisherPID = 14
+        running(includeDelayed: true)
+        bridgeSpy.withState { $0.cancelNextInvalidate = true }
+        let cancelled = Task { try await controller.configure(rejected) }
+        failed = false
+        do { _ = try await cancelled.value } catch { failed = true }
+        try require(failed && bridgeSpy.withState {
+            $0.committed?.concealed == Set([hidden.bundleIdentifier, otherHidden.bundleIdentifier])
+        }, "cancellation after clear must compensate independently of caller cancellation")
+        try await require(controller.receipt().isStable, "cancelled reset cannot strand concealed items")
+
+        publisherPID = 15
+        running(includeDelayed: true)
+        bridgeSpy.withState { $0.rejectBegins = 2 }
+        failed = false
+        do { try await controller.configure(rejected) } catch { failed = true }
+        try require(failed, "candidate plus compensation failure must propagate")
+        try await require(controller.receipt().phase == .unknown, "failed compensation must preserve unknown authority")
+        await controller.invalidate()
+        let revoked = try await controller.receipt()
+        try await Task.sleep(for: .milliseconds(1100))
+        try await require(controller.receipt() == revoked, "revoked lifecycle recovery must never replay rejected intent")
+        print("PASS: publisher incarnation, delayed eligibility, no-op, deferred reveal, compensation, cancellation and recovery revocation")
+    }
+
+    @MainActor
     static func main() async throws {
         guard #available(macOS 27.0, *) else {
             throw CheckFailure(description: "Requires macOS 27; no controller test executed")
@@ -280,6 +434,7 @@ struct ControllerSkipPathProbe {
         for failure in 0 ... 4 {
             try await verifyFailedBootstrapRemainsUnknown(failure)
         }
+        try await verifyPublisherLifecycleRefresh()
         bridgeSpy.withState { $0 = BridgeSpy.State() }
         let hiddenBundle = "test.barline.hidden"
         let existing = "test.barline.existing"
