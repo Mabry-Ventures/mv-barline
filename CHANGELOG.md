@@ -4,7 +4,7 @@
 
 No unreleased changes.
 
-## 1.0.67 (build 161) — candidate
+## 1.0.67 (build 162) — candidate
 
 - macOS 27 menu bar discovery is no longer restricted to one exact OS patch
   and build number. Every discovery attempt still verifies the live system
@@ -28,6 +28,9 @@ No unreleased changes.
   bar apps, including apps that publish their first item after launch. The
   refresh preserves saved assignments, waits for an active item interaction to
   finish, and restores the accepted configuration if the update is interrupted.
+- Menu Bar Layout refreshes after native visibility changes, so a relaunched
+  app does not stay missing from Settings after its menu bar icons return.
+  Unchanged visibility acknowledgements do not trigger repeated refreshes.
 
 This candidate is not published or fully qualified. Installed runtime testing
 now includes CODEX01 and a notched MacBook Pro; additional OS builds are not

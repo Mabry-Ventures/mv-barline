@@ -1,5 +1,32 @@
 # Barline execution plan
 
+## 1.0.67 post-reconciliation presentation repair - October 3, 2026
+
+Signed161 passed clean fast/full gates and restored physical fixture geometry
+after both slow and rapid relaunch on the notched local Mac (first visible
+samples1.81s/1.76s, remaining on-screen for the rest of each12sprobe). Settings
+still omitted the item after12seconds in both cases, eventually updating after
+another refresh. Source inspection found that workspace discovery races native
+reconciliation, caches all IDs while filtering out unhideable parked items, then
+can skip corrected geometry/capability with identical IDs. Acknowledgement only
+invalidated the provider snapshot, not the manager's presentation cache.
+
+Build162 returns the native acknowledgement from the serialized coordinator and
+queues one full presentation discovery for each new stable receipt. The existing
+discovery admission/supersession rules remain authoritative. A confirmed physical
+transition uses authoritative discovery, so an in-flight bounded trailing pass
+cannot swallow its reload as ordinary automatic chatter. The
+receipt gate is consumed before suspension, so cache publication's ordinary
+sync echo is a no-op rather than a feedback loop. Unknown/transient/absent and
+stale same-session acknowledgements cannot trigger a reload. A receipt requests
+fresh discovery only; it never grants item/display/Focus capabilities. Tests
+cover same-ID capability repair, unchanged100-call boundedness, uncertainty,
+helper replacement, trailing-pass supersession, terminal-failure recovery and
+exact coordinator receipt propagation.164 targeted tests pass. Astra High and
+Gemini Flash3.8High approve source freeze only; both require installed proof of
+prompt row appearance and bounded interaction latency. Build161 is held,
+public142 unchanged, no long observation has started.
+
 ## 1.0.67 publisher lifecycle repair - October 3, 2026
 
 Build160 passed clean local gates, signed packaging and CODEX01 installed

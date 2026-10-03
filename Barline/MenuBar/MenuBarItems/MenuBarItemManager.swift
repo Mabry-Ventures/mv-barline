@@ -37,6 +37,7 @@ final class MenuBarItemManager: ObservableObject {
     }
 
     private let goldenGateConcealmentSyncDebouncer = GoldenGateConcealmentSyncDebouncer()
+    private var concealmentPresentationRefreshGate = MenuBarConcealmentRefreshGate()
 
     deinit {
         for task in visibleInterfaceTasks.values {
@@ -688,9 +689,20 @@ extension MenuBarItemManager {
             case .alwaysHidden: .alwaysHidden
             }
         }
-        try await appState.compatibilityCoordinator.synchronizeConcealment(
+        let receipt = try await appState.compatibilityCoordinator.synchronizeConcealmentWithReceipt(
             concealedSections: concealedSections
         )
+        // Discovery can win the workspace-event race while a new publisher is
+        // still parked. Its IDs stay identical after native reconciliation,
+        // so an ID-only cache check would retain stale bounds/capabilities.
+        // Queue one full discovery per acknowledged transition. The
+        // gate is consumed before suspending; cache publication may schedule a
+        // normal sync, but its unchanged receipt cannot form a refresh loop.
+        // This physical-state change supersedes any stale in-flight discovery:
+        // an automatic request could be lost inside an already trailing pass.
+        if concealmentPresentationRefreshGate.requestRefresh(after: receipt) {
+            await cacheItemsRegardless(intent: .authoritative)
+        }
     }
 
     /// Caches the current menu bar items, regardless of whether the

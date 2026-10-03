@@ -1,5 +1,25 @@
 import Foundation
 
+/// Requests at most one presentation reload for an acknowledged native state.
+/// A reload uses ordinary discovery and never promotes receipt evidence into
+/// item capability, geometry, display ownership or Focus authority.
+public struct MenuBarConcealmentRefreshGate: Sendable {
+    private var lastRequestedReceipt: NativeConcealmentReceipt?
+
+    public init() {}
+
+    public mutating func requestRefresh(after receipt: NativeConcealmentReceipt?) -> Bool {
+        guard let receipt, receipt.isStable, receipt != lastRequestedReceipt else { return false }
+        if let previous = lastRequestedReceipt, previous.helperSessionID == receipt.helperSessionID,
+           receipt.assertionRevision <= previous.assertionRevision
+        {
+            return false
+        }
+        lastRequestedReceipt = receipt
+        return true
+    }
+}
+
 /// Describes why menu bar discovery was requested.
 public enum MenuBarDiscoveryRefreshIntent: Sendable {
     /// A direct user action or an operation that changed the physical layout.

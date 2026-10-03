@@ -426,6 +426,14 @@ public actor MenuBarStateCoordinator {
     public func synchronizeConcealment(
         concealedSections: [MenuBarSection]
     ) async throws {
+        _ = try await synchronizeConcealmentWithReceipt(concealedSections: concealedSections)
+    }
+
+    /// Returns the helper's acknowledgement so presentation can invalidate a
+    /// pre-transition cache without inventing item or display authority.
+    public func synchronizeConcealmentWithReceipt(
+        concealedSections: [MenuBarSection]
+    ) async throws -> NativeConcealmentReceipt? {
         try await acquireUnleasedMutationTurn()
         defer { releaseMutationTurn() }
         try Task.checkCancellation()
@@ -451,7 +459,7 @@ public actor MenuBarStateCoordinator {
         // Once the backend acknowledges the complete configuration, do not
         // reinterpret caller cancellation as failure: the native side effect
         // has already committed and is now the latest serialized state.
-        try await backend.configureConcealment(configuration)
+        return try await backend.configureConcealmentWithReceipt(configuration)
     }
 
     /// Waits out an item activation lease without losing the latest requested

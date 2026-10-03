@@ -132,6 +132,10 @@ unless concealment.match?(/receiptLedger\.beginNativeTransition\(\).*?var acknow
   abort('Golden Gate receipt must expire before native activation and fail closed after uncertain outcomes')
 end
 
+unless manager.match?(/synchronizeConcealmentWithReceipt\(.*?concealmentPresentationRefreshGate\.requestRefresh\(after: receipt\).*?cacheItemsRegardless\(intent: \.authoritative\)/m)
+  abort('Native presentation refresh must be receipt-deduplicated and supersede stale trailing discovery')
+end
+
 unless shelf.match?(/if #available\(macOS 27\.0, \*\) \{\s*orderFrontRegardless\(\)\s*\} else \{\s*orderFront\(nil\)\s*\}/m)
   abort('macOS 27 shelf presentation must force accessory-panel compositing')
 end
