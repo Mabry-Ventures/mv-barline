@@ -1,5 +1,27 @@
 # macOS 27 platform-presence contract
 
+## Current contract: capability-based attempt eligibility
+
+The 1.0.67/build 158 candidate removes the accidental exact-OS-build gate in
+1.0.66. macOS 27 and later may attempt the observer; an OS version or kernel
+build is never proof of native Focus presence or absence. Every existing live
+publisher, closed-tree, same-scan, receipt and scene check must still pass.
+Unknown structure still rejects inventory before it can authorize mutations.
+This is not an unqualified read fallback or a claim that future OS semantics
+are known. Deterministic version/topology tests do not qualify another runtime.
+
+Prepared migration is now projected without writes. Identity migration,
+remembered sections, retained descriptors and the publication cache commit only
+after final envelope association. Already-cancelled work is rejected before
+commit; cancellation arriving during synchronous persistence can still leave
+valid associated identity saves while the caller receives cancellation.
+
+Fresh signed installed qualification is pending on the owner-approved CODEX01
+runtime. Public stable remains 1.0.65. The records below are historical context,
+not current release approval or a requirement to use an unauthorized test Mac.
+
+## Historical implementation checkpoints
+
 Status: **build 155 resolves initial inventory and passes exploratory installed
 interaction/recovery checks; build 156 requires final candidate qualification**.
 Build 156 adds guaranteed mouse-up on cancellation and corrects the helper/app

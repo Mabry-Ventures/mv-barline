@@ -222,6 +222,7 @@ run_fast() {
     run_step "status-item-geometry" bash ./script/test-status-item-geometry.sh
     run_step "shelf-probe-cycle" bash ./script/test-shelf-probe-cycle.sh
     run_step "activation-routing-topology" ruby ./script/test-activation-routing-topology.rb
+    run_step "platform-presence-topology" ruby ./script/test-platform-presence-topology.rb
     require_gate_script ./script/test-golden-gate-transaction-state.sh
     if [[ "$(uname -s)" == Darwin ]]; then
         run_step "performance-window-observer" bash ./script/test-performance-observer.sh

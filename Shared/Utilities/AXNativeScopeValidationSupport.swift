@@ -45,6 +45,13 @@ enum AXNativeScopeValidationSupport {
     static let controlCenterIdentifier = "com.apple.menuextra.controlcenter"
     static let maximumNodeCount = 192
 
+    /// OS availability permits an attempt, never publication or absence
+    /// authority. Patch and kernel build labels say nothing about a live AX
+    /// tree; every supported attempt must still pass the complete contract.
+    static func canAttemptObservation(on version: OperatingSystemVersion) -> Bool {
+        version.majorVersion >= 27
+    }
+
     /// Validates a closed extras -> hosting wrapper -> terminal-item forest.
     /// No-value/unsupported children never become empty; every edge must have
     /// exactly one record, and before/after ordered membership must match.

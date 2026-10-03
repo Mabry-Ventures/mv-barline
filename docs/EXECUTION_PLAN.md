@@ -1,5 +1,37 @@
 # Barline execution plan
 
+## 1.0.67 compatibility repair candidate - October 2, 2026
+
+Build 158 removes the exact 27.0.1/26A434 observation-attempt restriction.
+The minimum OS now permits an attempt; only the existing live, closed-scope
+publisher/identity/scene/receipt contract can qualify the result. All three
+provider publication guards and the Core Focus/cached-authority safeguards
+remain. Unqualified inventory is not returned as a permissive fallback.
+
+The helper now uses its sealed `BarlineAppSigningIdentifier` for both policy
+resolution and the mandatory native self-allowlist. Pure Core requires this
+identity explicitly. Discovery prepares bounded identity migration without
+writing it, proves final scan association, then commits persistence and cache.
+Temporary transaction verification cannot persist remembered sections.
+
+Red tests reproduced rejection of 27.0 and missing custom self identity. A
+source-wiring regression also reproduced persistence before final association.
+The targeted repaired checks pass; these are iteration evidence, not candidate
+qualification. Astra's design and initial diff review found no demonstrated
+blocker in this narrower approach. Gemini's design review warned against an
+unqualified read fallback; it is not implemented. Neither review certifies an
+untested OS runtime.
+
+Required next gates: clean frozen-source fast/full Xcode 27 checks, completed
+independent diff reviews, signed/notarized packaging, actual installed native
+activation and concealment/recovery, saved-layout/Focus/Clock journeys, upgrade
+and legacy migration, responsiveness/resource checks, and normal enforced PR
+integration. Runtime testing remains owner-scoped to CPLCODEX01. Other OS
+patch/build eligibility has deterministic coverage, not runtime qualification;
+macOS 26, other 27 builds, notched/multi-display and long-soak coverage are not
+claimed. Keep the stable website/update feed on 1.0.65 until a new qualified
+candidate has separate publication approval.
+
 ## General rollout withdrawn - October 2, 2026
 
 The 1.0.66 general release was briefly published, then demoted to a clearly

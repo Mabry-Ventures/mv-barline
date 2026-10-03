@@ -77,15 +77,18 @@ struct GoldenGateConcealmentPolicyTests {
             allowedSystemItemIdentifiers: GoldenGateConcealmentPolicy.allSystemItemIdentifiers
         )
         let first = GoldenGateNativeConcealmentState(
-            resolution: resolution, runningBundleIdentifiers: ["com.example.visible", "com.example.hidden"]
+            resolution: resolution, runningBundleIdentifiers: ["com.example.visible", "com.example.hidden"],
+            barlineBundleIdentifier: barlineID
         )
         let reordered = GoldenGateNativeConcealmentState(
             resolution: resolution,
-            runningBundleIdentifiers: ["com.example.hidden", "com.example.visible", "com.example.visible"]
+            runningBundleIdentifiers: ["com.example.hidden", "com.example.visible", "com.example.visible"],
+            barlineBundleIdentifier: barlineID
         )
         let launched = GoldenGateNativeConcealmentState(
             resolution: resolution,
-            runningBundleIdentifiers: ["com.example.visible", "com.example.new", "com.example.hidden"]
+            runningBundleIdentifiers: ["com.example.visible", "com.example.new", "com.example.hidden"],
+            barlineBundleIdentifier: barlineID
         )
         #expect(first == reordered)
         #expect(first != launched)
@@ -100,10 +103,57 @@ struct GoldenGateConcealmentPolicyTests {
             allowedSystemItemIdentifiers: GoldenGateConcealmentPolicy.allSystemItemIdentifiers
         )
         #expect(GoldenGateNativeConcealmentState(
-            resolution: resolution, runningBundleIdentifiers: ["com.example.first"]
+            resolution: resolution, runningBundleIdentifiers: ["com.example.first"],
+            barlineBundleIdentifier: barlineID
         ) == GoldenGateNativeConcealmentState(
-            resolution: resolution, runningBundleIdentifiers: ["com.example.second"]
+            resolution: resolution, runningBundleIdentifiers: ["com.example.second"],
+            barlineBundleIdentifier: barlineID
         ))
+    }
+
+    @Test("The configured app stays allowed even when it is missing from the running list",
+          arguments: ["com.mabryventures.Barline", "com.example.CustomBarline", "COM.EXAMPLE.CUSTOMBARLINE"])
+    func configuredAppIsAlwaysAllowed(barlineIdentifier: String) {
+        let control = item(barlineIdentifier.lowercased(), "Barline.ControlItem.Hidden")
+        let hidden = item("com.example.hidden", "status")
+        let resolved = GoldenGateConcealmentPolicy.resolve(
+            .init(visibleItemIDs: [], concealedItemIDs: [control, hidden]),
+            barlineBundleIdentifier: barlineIdentifier
+        )
+        let state = GoldenGateNativeConcealmentState(
+            resolution: resolved, runningBundleIdentifiers: ["com.example.hidden", "com.example.visible"],
+            barlineBundleIdentifier: barlineIdentifier
+        )
+        #expect(!resolved.concealedBundleIdentifiers.contains(control.bundleIdentifier))
+        #expect(state.allowedBundleIdentifiers.contains(barlineIdentifier))
+        #expect(!state.allowedBundleIdentifiers.contains("com.example.hidden"))
+        #expect(state.allowedBundleIdentifiers.contains("com.example.visible"))
+        #expect(state.allowedBundleIdentifiers.isSuperset(of: ["com.apple.systemuiserver", "com.apple.finder", "com.apple.dock"]))
+    }
+
+    @Test("A changed configured identity updates an active native allowlist")
+    func configuredIdentityIsPartOfNativeState() {
+        let resolution = GoldenGateResolvedConcealment(
+            concealedBundleIdentifiers: ["com.example.hidden"],
+            allowedSystemItemIdentifiers: GoldenGateConcealmentPolicy.allSystemItemIdentifiers
+        )
+        let original = GoldenGateNativeConcealmentState(
+            resolution: resolution, runningBundleIdentifiers: [], barlineBundleIdentifier: "com.example.Original"
+        )
+        let changed = GoldenGateNativeConcealmentState(
+            resolution: resolution, runningBundleIdentifiers: [], barlineBundleIdentifier: "com.example.Custom"
+        )
+        #expect(original != changed)
+        #expect(!changed.allowedBundleIdentifiers.contains("com.example.Original"))
+        #expect(!changed.allowedBundleIdentifiers.contains("com.mabryventures.Barline"))
+        #expect(changed.allowedBundleIdentifiers.contains("com.example.Custom"))
+
+        let allVisible = GoldenGateNativeConcealmentState(
+            resolution: .init(concealedBundleIdentifiers: [], allowedSystemItemIdentifiers: GoldenGateConcealmentPolicy.allSystemItemIdentifiers),
+            runningBundleIdentifiers: ["com.example.Custom"],
+            barlineBundleIdentifier: "com.example.Custom"
+        )
+        #expect(allVisible.allowedBundleIdentifiers.isEmpty)
     }
 
     @Test("Canonicalization repairs unsupported legacy Apple concealment")
