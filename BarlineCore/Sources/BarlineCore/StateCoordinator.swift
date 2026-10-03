@@ -562,6 +562,35 @@ public actor MenuBarStateCoordinator {
         try await perform(mutation, expectedGeneration: expectedGeneration as UInt64?, now: now, interactionID: interactionID)
     }
 
+    /// Plans against fresh authority and commits without releasing the mutation
+    /// turn. Background refreshes may not invalidate a user intent between its
+    /// read and write. A nil plan is a no-op, not a history or profile change.
+    public func performPlannedMove(
+        now: Date? = nil,
+        planning: @Sendable (MenuBarSnapshot) throws -> MenuBarMoveOperation?
+    ) async throws -> (snapshot: MenuBarSnapshot, previousProfileID: UUID?, didMutate: Bool) {
+        await acquireMutationTurn()
+        defer { releaseMutationTurn() }
+        try requireItemInteraction(nil)
+        try Task.checkCancellation()
+        let before = try await refreshAssumingMutationTurn(now: now, freshness: .freshRequired)
+        if qualifiedPlatformPresenceContractHasBeenEstablished {
+            guard let observation = currentAuthorityObservation,
+                  observation.snapshot == before,
+                  MenuBarPlatformPresenceContract.admitting(observation) != nil
+            else { throw MenuBarBackendError.invalidSnapshot(.platformPresenceContractChanged) }
+        }
+        try Task.checkCancellation()
+        let previousProfileID = activeProfileID
+        let operation = try planning(before)
+        try Task.checkCancellation()
+        guard let operation else {
+            return (before, previousProfileID, false)
+        }
+        let after = try await performAssumingMutationTurn(.move(operation), before: before, now: now)
+        return (after, previousProfileID, true)
+    }
+
     /// Delivers a status-item activation without treating the click as a
     /// transactional layout mutation. The target may open a menu, mutate its
     /// own status item, or perform a direct action while handling the event;
@@ -670,6 +699,19 @@ public actor MenuBarStateCoordinator {
             throw MenuBarBackendError.operationFailed("no last-known-good snapshot")
         }
         let before = try await validatedStartingSnapshot(now: now)
+        return try await performAssumingMutationTurn(
+            mutation, before: before, now: now,
+            restoreTarget: restoreTarget, restoreProfileID: restoreProfileID
+        )
+    }
+
+    private func performAssumingMutationTurn(
+        _ mutation: MenuBarMutation,
+        before: MenuBarSnapshot,
+        now: Date?,
+        restoreTarget: MenuBarSnapshot? = nil,
+        restoreProfileID: UUID? = nil
+    ) async throws -> MenuBarSnapshot {
         let priorPlatformPresenceContract = activePlatformPresenceContract
         activePlatformPresenceContract = currentAuthorityObservation.flatMap {
             MenuBarPlatformPresenceContract.admitting($0)

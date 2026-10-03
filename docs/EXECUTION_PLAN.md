@@ -1,5 +1,32 @@
 # Barline execution plan
 
+## 1.0.67 atomic assignment repair - October 3, 2026
+
+Exact merged main dbc074d7/build163 passed clean fast/full gates, packaging,
+notarization, CODEX01 cold shelf latency, four visible publisher relaunch cycles
+and delayed five-second first publication. Installed hide/show then reproduced
+a real `stale_generation` alert. The manager released the serialized turn after
+discovery, awaited profile authority, and only then submitted its mutation.
+Lifecycle synchronization could refresh in both handoff gaps, defeating its
+single retry. Cancelling the presentation debouncer did not stop that worker.
+Astra independently verified this source chain. Public142 remains unchanged.
+
+Build164 plans the requested move from a fresh, qualified snapshot and executes
+the existing transaction under one coordinator turn. The planner and rollback
+share that exact starting snapshot; no second scan silently changes its origin.
+The original explicit-generation API stays strict. Cancellation, interaction
+leases, native conflict checking, postconditions, compensation, history and
+profile guards remain in force. No-op plans do not supersede reveals or clear
+profile authority. No helper hiding change or global refresh suspension is used.
+The failure-first test reproduced the installed stale-generation race with a
+queued background refresh, then passed with the serialized repair. Additional
+tests exercise cancellation, no-op/error planning, missing targets, exact native
+admission and rollback origin. Source tests are not installed release proof.
+
+Requalify the new clean merged source and signed artifact on authorized hosts.
+Build163 receipts cannot qualify164. Local interactive qualification remains
+blocked by its locked console; keep-awake does not bypass that security boundary.
+
 ## 1.0.67 lifecycle review repairs - October 3, 2026
 
 Build162 completed CODEX01 installed shelf/activation/Clock/Focus/layout/recovery
