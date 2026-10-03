@@ -119,9 +119,10 @@ unless concealment.include?('BLNGoldenGateAssessmentCreate()') &&
   abort('Golden Gate concealment bridge is not compile-time linked')
 end
 
-unless concealment.match?(/if appliedNativeState == nativeState,\s*checkedReceipt\(\)\.hasKnownEffectiveState,\s*BLNGoldenGateAssessmentCommittedState\(opaqueController\) == expectedAssertionState\(nativeState\).*?receiptLedger\.accept\(.*?forceObservationChange: revealOwnershipChanged.*?return/m) &&
+unless concealment.match?(/if appliedNativeState == prepared\.native,\s*checkedReceipt\(\)\.hasKnownEffectiveState,\s*BLNGoldenGateAssessmentCommittedState\(opaqueController\) == expectedAssertionState\(prepared\.native\).*?accept\(prepared, nativeTransition: false, crossedDeassertionBoundary: false\)\s*return/m) &&
        concealment.match?(/GoldenGateNativeConcealmentState\(.*?runningBundleIdentifiers:/m) &&
-       concealment.match?(/BLNGoldenGateAssessmentCommit\(.*?appliedNativeState = nativeState/m)
+       concealment.match?(/private func accept\(.*?appliedNativeState = prepared\.native.*?forceObservationChange: nativeTransition \|\| prepared\.revealOwnershipChanged/m) &&
+       concealment.match?(/BLNGoldenGateAssessmentCommit\(.*?BLNGoldenGateAssessmentCommittedState\(opaqueController\) == expectedAssertionState\(prepared\.native\).*?accept\(prepared, nativeTransition: true, crossedDeassertionBoundary: crossedDeassertionBoundary\)/m)
   abort('Golden Gate concealment must preserve exactly unchanged committed native inputs, including the running-app allowlist')
 end
 
@@ -129,6 +130,10 @@ unless concealment.match?(/receiptLedger\.beginNativeTransition\(\).*?var acknow
        assessment_bridge.include?('if (self.pendingToken != 0 || !self.hasAcknowledgedState) return -1;') &&
        bridge_header.include?('BLNGoldenGateAssessmentCommittedState')
   abort('Golden Gate receipt must expire before native activation and fail closed after uncertain outcomes')
+end
+
+unless manager.match?(/synchronizeConcealmentWithReceipt\(.*?concealmentPresentationRefreshGate\.requestRefresh\(after: receipt\).*?cacheItemsRegardless\(intent: \.authoritative\)/m)
+  abort('Native presentation refresh must be receipt-deduplicated and supersede stale trailing discovery')
 end
 
 unless shelf.match?(/if #available\(macOS 27\.0, \*\) \{\s*orderFrontRegardless\(\)\s*\} else \{\s*orderFront\(nil\)\s*\}/m)

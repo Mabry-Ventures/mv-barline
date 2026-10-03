@@ -67,7 +67,7 @@ struct MenuBarLayoutSettingsPane: View {
 
     private var menuBarInstruction: String {
         if #available(macOS 27.0, *) {
-            return "Items macOS cannot conceal independently remain disabled. Use ⌘ Command-drag to reorder the system menu bar."
+            return "Some system items cannot be hidden. Use ⌘ Command-drag to reorder the system menu bar."
         }
         return "Items can also be arranged by ⌘ Command + dragging them in the menu bar."
     }

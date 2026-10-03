@@ -226,6 +226,133 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
         #expect(snapshot.items.filter { !$0.isBarlineControlItem }.map(\.section) == [.hidden, .visible])
     }
 
+    @Test("Native new items remain assignable with an off-screen divider")
+    func nativeParkedDivider() throws {
+        let snapshot = try build([
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 2500),
+            observation(bundle: "com.example.fixture", title: "Native", x: 1400),
+            observation(bundle: "com.example.fixture", title: "Popover", x: 1450),
+        ], sectionPolicy: .nativeVisibilityAssignments)
+        let items = snapshot.items.filter { !$0.isBarlineControlItem }
+        #expect(items.count == 2)
+        #expect(items.allSatisfy { $0.section == .visible && $0.canBeHidden && !$0.isMovable })
+        #expect(items.allSatisfy { $0.displayID == displayID })
+    }
+
+    @Test("Native unassigned items default visible regardless of divider geometry")
+    func nativeDoesNotInferHiddenFromGeometry() throws {
+        for dividerX in [1450.0, 1550, 2500] {
+            let snapshot = try build([
+                observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: dividerX),
+                observation(bundle: "com.example.new", title: "New", x: 1500),
+            ], sectionPolicy: .nativeVisibilityAssignments)
+            #expect(snapshot.items[1].section == .visible)
+            #expect(snapshot.items[1].canBeHidden)
+            #expect(!snapshot.items[1].isMovable)
+        }
+    }
+
+    @Test("Native saved assignments precede remembered sections and geometry")
+    func nativeAssignmentPrecedence() throws {
+        let observations = [
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 1400),
+            observation(bundle: "com.example.saved", title: "Saved", x: 1500),
+        ]
+        let identifier = GoldenGateMenuBarSnapshotBuilder.identifiers(for: observations)[1]
+        let remembered = try build(observations, rememberedSections: [identifier: .hidden],
+                                   sectionPolicy: .nativeVisibilityAssignments)
+        #expect(remembered.items[1].section == .hidden)
+        let explicit = try build(observations, rememberedSections: [identifier: .hidden],
+                                 assignedSections: [identifier: .visible],
+                                 sectionPolicy: .nativeVisibilityAssignments)
+        #expect(explicit.items[1].section == .visible)
+        #expect(remembered.items[1].canBeHidden && explicit.items[1].canBeHidden)
+    }
+
+    @Test("Native policy does not guess unresolved display ownership")
+    func nativeUnknownDisplayFailsVisible() throws {
+        let snapshot = try build([
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 2500),
+            observation(bundle: "com.example.offscreen", title: "Offscreen", x: -10000),
+        ], sectionPolicy: .nativeVisibilityAssignments)
+        #expect(snapshot.items[1].section == .visible)
+        #expect(snapshot.items[1].displayID == nil)
+        #expect(!snapshot.items[1].canBeHidden && !snapshot.items[1].isMovable)
+    }
+
+    @Test("Native policy retains control-presence and Focus safeguards")
+    func nativeControlSafeguards() throws {
+        #expect(throws: MenuBarBackendError.self) {
+            try build([observation(bundle: "com.example.new", title: "New", x: 1500)],
+                      sectionPolicy: .nativeVisibilityAssignments)
+        }
+        let observations = [
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 2500),
+            observation(bundle: "com.apple.MenuBarAgent", title: "com.apple.menuextra.focusmode", x: 1500),
+            observation(bundle: "com.apple.controlcenter", title: "Clock", x: 1650),
+        ]
+        let snapshot = try build(observations,
+                                 assignedSections: [MenuBarPlatformPresenceIdentity.focusItemID: .hidden],
+                                 sectionPolicy: .nativeVisibilityAssignments)
+        #expect(snapshot.items[1].section == .visible)
+        #expect(!snapshot.items[1].canBeHidden && !snapshot.items[1].isMovable)
+        #expect(!snapshot.items[2].canBeHidden && !snapshot.items[2].isMovable)
+    }
+
+    @Test("Default geometry policy still rejects a parked divider's new items")
+    func defaultParkedDividerRemainsStrict() throws {
+        let snapshot = try build([
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 2500),
+            observation(bundle: "com.example.new", title: "New", x: 1500),
+        ])
+        #expect(snapshot.items[1].section == .visible)
+        #expect(!snapshot.items[1].canBeHidden && !snapshot.items[1].isMovable)
+    }
+
+    @Test("Native policy does not resolve ownership across overlapping displays")
+    func nativeAmbiguousDisplayRemainsStrict() throws {
+        let secondDisplay = MenuBarDisplayID("display-b")
+        let snapshot = try GoldenGateMenuBarSnapshotBuilder.build(
+            observations: [
+                observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 2500),
+                observation(bundle: "com.example.ambiguous", title: "Ambiguous", x: 1500),
+            ],
+            displayIdentities: [MenuBarDisplayIdentity(runtimeID: displayID), MenuBarDisplayIdentity(runtimeID: secondDisplay)],
+            activeDisplayID: displayID,
+            displayBounds: [displayID: displayBounds, secondDisplay: displayBounds],
+            activeSpaceIsValid: true, menuTrackingIsActive: false,
+            appSigningIdentifier: appID, sectionPolicy: .nativeVisibilityAssignments, generation: 8
+        )
+        #expect(snapshot.items[1].section == .visible)
+        #expect(snapshot.items[1].displayID == nil)
+        #expect(!snapshot.items[1].canBeHidden && !snapshot.items[1].isMovable)
+    }
+
+    @Test("Native policy preserves existing saved off-screen state without granting movability")
+    func nativeSavedOffscreenStateIsNotNewAuthority() throws {
+        let observations = [
+            observation(bundle: appID, title: "Barline.ControlItem.Hidden", x: 2500),
+            observation(bundle: "com.example.saved", title: "Saved", x: -10000),
+        ]
+        let identifier = GoldenGateMenuBarSnapshotBuilder.identifiers(for: observations)[1]
+        for remembered in [false, true] {
+            let snapshot = try build(
+                observations,
+                rememberedSections: remembered ? [identifier: .hidden] : [:],
+                assignedSections: remembered ? [:] : [identifier: .hidden],
+                sectionPolicy: .nativeVisibilityAssignments
+            )
+            #expect(snapshot.items[1].section == .hidden)
+            #expect(snapshot.items[1].displayID == nil)
+            #expect(!snapshot.items[1].isMovable && !snapshot.items[1].isOnScreen)
+            // This preserves the pre-existing saved-intent path, not permission
+            // to guess a display or to mutate on an unqualified observation.
+            #expect(!MenuBarDisplayOwnershipPolicy.permitsLogicalMove(
+                sourceDisplayID: snapshot.items[1].displayID, destinationDisplayID: displayID
+            ))
+        }
+    }
+
     @Test("Explicit assignments override live divider geometry")
     func explicitAssignmentOverridesGeometry() throws {
         let item = observation(bundle: "com.example.utility", title: "Utility", x: 1600)
@@ -296,7 +423,8 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
     private func build(
         _ observations: [GoldenGateMenuBarObservation],
         rememberedSections: [MenuBarItemID: MenuBarSection] = [:],
-        assignedSections: [MenuBarItemID: MenuBarSection] = [:]
+        assignedSections: [MenuBarItemID: MenuBarSection] = [:],
+        sectionPolicy: GoldenGateMenuBarSnapshotBuilder.SectionPolicy = .dividerGeometry
     ) throws -> MenuBarSnapshot {
         try GoldenGateMenuBarSnapshotBuilder.build(
             observations: observations,
@@ -308,6 +436,7 @@ struct GoldenGateMenuBarSnapshotBuilderTests {
             appSigningIdentifier: appID,
             rememberedSections: rememberedSections,
             assignedSections: assignedSections,
+            sectionPolicy: sectionPolicy,
             generation: 7
         )
     }

@@ -1,5 +1,195 @@
 # Barline execution plan
 
+## 1.0.67 lifecycle review repairs - October 3, 2026
+
+Build162 completed CODEX01 installed shelf/activation/Clock/Focus/layout/recovery
+and public142-to162 Sparkle upgrade checks. The local Mac locked before its
+interactive162 checks, so those remain unverified. Independent PR review and
+Astra confirmed three additional controller defects, reproduced in the actual
+production controller with isolated transport/workspace doubles: a newly
+relaunched hidden owner's first reveal skipped its required clear; retained
+logical IDs could settle a process before its first live AX item; nil AppKit
+launch dates could alias a recycled PID. The presentation gate also permanently
+consumed acknowledgements after failed full discovery. Both incomplete endurance
+runs were stopped and preserved as interrupted, not passes. Public142 unchanged.
+
+Build163 repairs these with kernel-birth and bounded live-publisher evidence,
+accepted/proposed reveal separation, target-first/fair probe scheduling, fresh
+post-clear workspace sampling, cancellation-independent compensation and
+request-scoped presentation completion. Native system-item routes remain separate.
+No item/display/Focus authority is granted by lifecycle evidence. Clock restore
+and compensation skip advisory AX reads and leave new publishers unsettled for
+later reconciliation. The canonical platform-presence contract now documents
+the exact anonymous overflow-button closure exception introduced in159.
+
+Review caught an incompatible child-count argument in the initial advisory
+adapter; the production reader now shares its maximum cap with the caller,
+backed by executable decoder and source-wiring checks. Controller regression
+tests cover missing post-clear AX, first-item publication while deasserted,
+kernel-read rejection, PID/bundle replacement, unchanged100-call boundedness,
+all nine native system reveal routes and unrelated slow-owner isolation.
+Tests using doubles do not replace signed installed evidence.
+
+The first163source freeze passed clean fast/full gates, but new PR review
+reopened it for two reproduced defects: unobserved visible publishers did not
+schedule another observation, and a silent same-bundle process rejected valid
+reveals. Advisory pending observation now has per-candidate nonrenewing budgets,
+separate from live clear eligibility. Bundle-level reveal coverage does not
+settle unobserved instances or weaken downstream exact-item resolution.
+The app follows genuine lifecycle events for a bounded window through ordinary
+discovery and receipt synchronization, covering newly published items absent
+from the original configuration and helper-owned background receipt changes.
+Repeated identical workspace hints cannot renew the window. Core budget and
+revocation tests supplement executable production-controller regressions.
+Both independent reviewers must approve the revised source before freezing;
+the earlier source-freeze opinions and clean gates do not qualify this repair.
+Pre-Begin compensation completes only the remainder of the original clear
+interval; an attempted native activation still requires a fresh230ms boundary.
+
+The next clean full gate passed852 Core tests, but final review
+reproduced same-bundle probe starvation: a settled sibling plus a stalled new
+companion could prevent observation of a readable new publisher. Probe scheduling
+now reserves each owner a share of the remaining200ms budget; silence/timeout
+alone never authorizes repeated clears. Removal-only workspace changes also no
+longer renew the lifecycle window, while remembering departures and preserving
+the existing launch opportunity. Both regressions were captured failing before
+repair; new exact-source gates and source review supersede prior results.
+
+This checkpoint is implementation, not release approval. Obtain clean fast/full
+gates and reviewer closure before normal protected integration. Freeze the clean
+resulting main SHA, then rerun its package/installed/upgrade/lifecycle/resource
+qualification. PR-head receipts cannot be relabeled as merged-main evidence.
+
+## 1.0.67 post-reconciliation presentation repair - October 3, 2026
+
+Signed161 passed clean fast/full gates and restored physical fixture geometry
+after both slow and rapid relaunch on the notched local Mac (first visible
+samples1.81s/1.76s, remaining on-screen for the rest of each12sprobe). Settings
+still omitted the item after12seconds in both cases, eventually updating after
+another refresh. Source inspection found that workspace discovery races native
+reconciliation, caches all IDs while filtering out unhideable parked items, then
+can skip corrected geometry/capability with identical IDs. Acknowledgement only
+invalidated the provider snapshot, not the manager's presentation cache.
+
+Build162 returns the native acknowledgement from the serialized coordinator and
+queues one full presentation discovery for each new stable receipt. The existing
+discovery admission/supersession rules remain authoritative. A confirmed physical
+transition uses authoritative discovery, so an in-flight bounded trailing pass
+cannot swallow its reload as ordinary automatic chatter. The
+receipt gate is consumed before suspension, so cache publication's ordinary
+sync echo is a no-op rather than a feedback loop. Unknown/transient/absent and
+stale same-session acknowledgements cannot trigger a reload. A receipt requests
+fresh discovery only; it never grants item/display/Focus capabilities. Tests
+cover same-ID capability repair, unchanged100-call boundedness, uncertainty,
+helper replacement, trailing-pass supersession, terminal-failure recovery and
+exact coordinator receipt propagation.164 targeted tests pass. Astra High and
+Gemini Flash3.8High approve source freeze only; both require installed proof of
+prompt row appearance and bounded interaction latency. Build161 is held,
+public142 unchanged, no long observation has started.
+
+## 1.0.67 publisher lifecycle repair - October 3, 2026
+
+Build160 passed clean local gates, signed packaging and CODEX01 installed
+hide/show, native-left/right, popover and helper-recovery checks. Local testing
+then reproduced a separate blocker: a freshly launched or rapidly relaunched
+fixture's items were parked below the display despite native assertion update
+acknowledgement. Correct signing and fresh nonpersistent fixture positions did
+not resolve it. Lifting and restoring the assertion through the existing Clock
+path immediately put the same process's items on-screen without changing any
+assignment or divider. Restarting Barline with the fixture already alive also
+resolved it. Neither is accepted as a user workaround.
+
+Both Astra High and Gemini Flash3.8High independently traced ordinary bridge
+replacement's overlapping assertions and supported testing a narrow, bounded
+deassertion edge. Fast same-bundle relaunch also reproduced, so a bundle-set
+change alone is insufficient. Build161 uses ephemeral publisher incarnations
+(bundle, PID and launch time), never persisted or used as item/display/Focus
+authority. Only observed publishers admitted visible by the current policy
+trigger refresh. Late first-item publishers are not prematurely marked settled.
+Active reveal ownership defers refresh until reconciliation can safely proceed.
+
+The receipt stays transient during the230mscandidate settle interval and native
+activation is bounded. Failed or cancelled reset compensates the previous
+accepted logical configuration independently of caller cancellation. Failed
+compensation remains unknown and uses the revocable recovery worker. Existing
+snapshot, ownership, semantic, Focus and persistence checks remain unchanged.
+Astra review found that an ambiguous post-commit failure could reuse an earlier
+clear boundary for a publisher born under the candidate assertion. Each native
+attempt now consumes its own boundary witness. Compensation explicitly clears
+again, waits230ms, then samples and restores accepted intent with a250ms
+activation budget; this is480ms of cooperative compensation, not a hard wall-clock
+guarantee over synchronous native calls or MainActor scheduling. A deterministic
+post-commit mismatch/process-replacement regression failed before this repair.
+The real production controller failed the new same-bundle regression before
+the repair and passes it afterward, plus delayed eligibility, no-op, reveal
+deferral, failed candidate/compensation, cancellation and supersession cases.
+Source review is not runtime proof: exact161 packaging and installed lifecycle
+reproductions on both hosts, full regression, long observation and final reviews
+remain required. Build160 and earlier receipts cannot qualify161. Public142
+remains unchanged.
+
+## 1.0.67 native assignment repair - October 3, 2026
+
+Installed159 passed cold shelf responsiveness and the clean CODEX01 full gate,
+but local functional testing found an independent blocker: the native snapshot
+contained22items while Layout showed only five saved hidden apps and no visible
+items. The local hidden divider was parked below/outside the display. The
+snapshot builder's geometric fallback removed concealment eligibility from new
+unassigned items; the managed-item cache then excluded them. Both Astra and
+Gemini independently verified this source chain. No privacy permission reset,
+native-tree relaxation or inference from the display notch is part of this fix.
+
+Build160 selects an explicit native-visibility section policy only in the
+qualified provider. Explicit assignments precede remembered sections; new items
+default visible and retain semantic eligibility only with resolved display
+ownership. The default geometric policy, missing-control rejection, Focus
+override, builder immovability and all transaction/association/persistence
+guards remain. The shared managed/shelf cache is not broadened to unsupported
+items. Settings wording no longer promises to display every unsupported item.
+
+Red builder tests reproduced four failing expectations before repair. Targeted
+coverage includes a parked divider, geometry-independent default visibility,
+assignment precedence, unresolved/ambiguous displays, Focus/control safeguards
+and the unchanged default geometric policy. Exact160 clean gates, package and
+installed regression on both hosts, extended observation, independent reviews
+and protected integration remain mandatory before publication.159 receipts are
+historical, not160evidence. Public1.0.65remains unchanged.
+
+## 1.0.67 native overflow repair - October 3, 2026
+
+The newly authorized local notched-Mac qualification found an additional real
+blocker in build158 before publication. The exact native observer returned
+`tree.unexpectedShape` in three independent captures while CODEX01 captured
+three complete scopes. A successfully read anonymous direct `AXButton` sibling
+(the native double-chevron overflow control) violated the wrapper-only schema.
+Clock, Control Center and Focus remained in normal closed hosting wrappers.
+This was not a deadline, permission, display-coordinate or persistence failure.
+
+Build159 explicitly recognizes at most one such direct terminal button with
+the observed typed role, identifier-noValue and subrole-unsupported dispositions.
+Successful empty children, finite positive geometry, owner and identical double
+reads are required. It participates in closure but supplies no inventory item,
+Focus identity, anchor, concealment key or mutation authority. Other schemas
+remain unknown. Explicit read kinds replace geometry-based second-pass inference.
+Privacy-safe failure categories are now retained in native-discovery logs.
+
+A red fixture reproduced the precise rejection. The repaired validator passes
+92 scope checks including adversarial near-misses and root-order permutations; the repaired exact observer
+captures the local live tree in three independent read-only diagnostic scans.
+These are iteration proofs, not signed-candidate runtime qualification. Astra
+and Gemini independently agreed with the bounded design. Gemini's assertion
+that all notched Macs inject this control is not established by our evidence;
+only the observed overflowing display is established.
+
+The owner authorized overnight local and CODEX01 test/fix work and publication
+only after exact-candidate gates pass. Rebuild/sign/notarize159, rerun clean
+fast/full gates and installed journeys on both hosts, verify settings/layout
+preservation, native activation, Clock/Focus/recovery, performance and extended
+resource observation. Obtain final independent reviews and normal protected
+integration before publishing matching binaries/source/checksums/release notes,
+then verify the live site/feed/downloads. Keep public1.0.65 unchanged until then.
+Build158 receipts remain historical and must not be relabeled for159.
+
 ## 1.0.67 compatibility repair candidate - October 2, 2026
 
 Build 158 removes the exact 27.0.1/26A434 observation-attempt restriction.

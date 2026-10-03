@@ -4,7 +4,7 @@
 
 No unreleased changes.
 
-## 1.0.67 (build 158) — candidate
+## 1.0.67 (build 163) — candidate
 
 - macOS 27 menu bar discovery is no longer restricted to one exact OS patch
   and build number. Every discovery attempt still verifies the live system
@@ -15,9 +15,43 @@ No unreleased changes.
 - Rejected menu bar observations no longer save identity migration or cached
   inventory before the final observation checks pass. Temporary layout
   verification also leaves remembered sections unchanged.
+- Menu bar discovery recognizes macOS 27's native overflow-arrow button. It
+  previously rejected the complete inventory when that extra control appeared,
+  leaving Menu Bar Layout unable to load on a crowded, notched display.
+- Native discovery failures now record a privacy-safe reason category for
+  troubleshooting, without recording menu item names or other user content.
+- Newly discovered items remain available to arrange when macOS 27 parks
+  Barline's divider off-screen. Native visibility now follows saved assignments
+  and defaults new items to visible, without depending on divider position.
+  Unknown display ownership and unsupported system controls remain protected.
+- macOS 27 visibility refreshes account for newly launched and relaunched menu
+  bar apps, including apps that publish their first item after launch. The
+  refresh preserves saved assignments, waits for an active item interaction to
+  finish, and restores the accepted configuration if the update is interrupted.
+- Menu Bar Layout refreshes after native visibility changes, so a relaunched
+  app does not stay missing from Settings after its menu bar icons return.
+  Unchanged visibility acknowledgements do not trigger repeated refreshes.
+- The first shelf click after a hidden app relaunch now performs its required
+  visibility recovery before opening the item. Apps that publish their menu
+  items late are checked using live observations, not only saved assignments.
+- A failed menu bar refresh can retry without being mistaken for a completed
+  refresh. Stale or cancelled requests cannot overwrite a newer refresh.
+- Publisher recovery prioritizes the clicked app and preserves the native
+  system-control path. Unresponsive hidden apps cannot consume another app's
+  foreground recovery probe, and failed recovery keeps the accepted layout.
+- Apps that create their menu icons several seconds after launch receive a
+  bounded follow-up check, including when they were absent from the first
+  inventory. Physical visibility and Settings refresh together, without a
+  permanent polling loop or requiring another app launch.
+- An additional process from the same app no longer blocks a working menu
+  item's reveal merely because that extra process has no menu icon. Each real
+  publisher still requires its own live observation and identity checks.
+- A stalled companion process cannot consume another menu publisher's entire
+  first-click observation budget. Quitting an app no longer starts a new
+  30-second delayed-startup observation window.
 
 This candidate is not published or fully qualified. Installed runtime testing
-is scoped to CODEX01; additional OS builds and display configurations are not
+now includes CODEX01 and a notched MacBook Pro; additional OS builds are not
 claimed as tested merely because they may attempt the live safety checks.
 
 ## 1.0.66 (build 157) — limited prerelease, October 2, 2026

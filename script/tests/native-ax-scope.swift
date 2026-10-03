@@ -30,13 +30,13 @@ enum NativeScopeTests {
         return nodes
     }
 
-    static func changed(_ node: AXNativeScopeNode, identifier: AXStringRead? = nil, role: AXStringRead? = nil,
+    static func changed(_ node: AXNativeScopeNode, identifier: AXStringRead? = nil, role: AXStringRead? = nil, subrole: AXStringRead? = nil,
                         owner: AXProcessIdentifierRead? = nil, children: AXNativeScopeMembership? = nil,
                         geometry: AXGeometryRead? = nil, afterOnly: Bool = false) -> AXNativeScopeNode
     {
         guard case let .attributes(identity) = node.before.identity else { fatalError("fixture_identity") }
         let read = AXNativeScopeNodeRead(identity: .attributes(AXIdentityAttributes(identifier: identifier ?? identity.identifier,
-                                                                                    role: role ?? identity.role, subrole: identity.subrole)),
+                                                                                    role: role ?? identity.role, subrole: subrole ?? identity.subrole)),
                                          owner: owner ?? node.before.owner, geometry: geometry ?? node.before.geometry,
                                          children: children ?? node.before.children)
         return AXNativeScopeNode(token: node.token, before: afterOnly ? node.before : read, after: read)
@@ -70,6 +70,82 @@ enum NativeScopeTests {
         let baseline = forest()
         expect(closed(baseline)?.leafTokens == [4, 5] && closed(baseline)?.focusToken == nil, "closed_no_focus_scope_not_mode_state")
         expect(closed(forest(focus: true))?.focusToken == 7, "exact_focus_leaf_in_closed_scope")
+        // Captured on macOS 27 with the native overflow chevron visible.
+        // It is a terminal structural sibling, not a named menu-bar item.
+        var overflow = forest(focus: true)
+        overflow[0] = changed(overflow[0], children: .elements([2, 3, 6, 8]))
+        overflow.append(node(8, role: "AXButton", subrole: .unsupported, geometry: .bounds(bounds)))
+        expect(closed(overflow)?.leafTokens == [4, 5, 7] && closed(overflow)?.focusToken == 7,
+               "native_overflow_button_closes_scope_without_becoming_item")
+        expect(closed(overflow)?.clockToken == 4 && closed(overflow)?.controlCenterToken == 5,
+               "native_button_does_not_replace_anchors")
+        for membership: [UInt32] in [[8, 2, 3, 6], [2, 8, 3, 6], [2, 3, 8, 6]] {
+            var candidate = overflow; candidate[0] = changed(candidate[0], children: .elements(membership))
+            expect(closed(candidate)?.leafTokens == [4, 5, 7] && closed(candidate)?.focusToken == 7,
+                   "native_button_position_never_changes_item_order_or_identity")
+        }
+        var overflowWithoutFocus = forest()
+        overflowWithoutFocus[0] = changed(overflowWithoutFocus[0], children: .elements([2, 3, 8]))
+        overflowWithoutFocus.append(overflow.last!)
+        expect(closed(overflowWithoutFocus)?.leafTokens == [4, 5] && closed(overflowWithoutFocus)?.focusToken == nil,
+               "native_button_closed_scope_without_focus")
+        for value in [AXStringRead.unsupported, .failure(AXReadFailure(.cannotComplete)), .value(""),
+                      .value(AXNativeScopeValidationSupport.focusIdentifier)]
+        {
+            var candidate = overflow; candidate[7] = changed(candidate[7], identifier: value)
+            expect(unknown(candidate, .unexpectedShape), "native_button_identifier_must_be_positive_no_value")
+        }
+        for value in [AXStringRead.noValue, .failure(AXReadFailure(.cannotComplete)), .value(""), .value("AXMenuExtra")] {
+            var candidate = overflow; candidate[7] = changed(candidate[7], subrole: value)
+            expect(unknown(candidate, .unexpectedShape), "native_button_subrole_exact_unsupported_disposition")
+        }
+        for value in [AXNativeScopeMembership.noValue, .unsupported, .failure(AXReadFailure(.cannotComplete)), .elements([9])] {
+            var candidate = overflow; candidate[7] = changed(candidate[7], children: value)
+            expect(unknown(candidate, .openFrontier), "native_button_requires_successful_empty_closure")
+        }
+        for value in [AXGeometryRead.noValue, .unsupported, .failure(AXReadFailure(.cannotComplete)),
+                      .bounds(CGRect(x: 0, y: 0, width: 0, height: 22)),
+                      .bounds(CGRect(x: 0, y: 0, width: 22, height: -1)),
+                      .bounds(CGRect(x: Double.infinity, y: 0, width: 22, height: 22)),
+                      .bounds(CGRect(x: 0, y: 0, width: Double.nan, height: 22))]
+        {
+            var candidate = overflow; candidate[7] = changed(candidate[7], geometry: value)
+            // NaN does not equal itself, so the stable double-read guard may
+            // reject it before geometry validation. It must never close.
+            expect(closed(candidate) == nil, "native_button_invalid_geometry_unknown")
+        }
+        var candidate = overflow
+        candidate[7] = node(8, role: "AXButton", subrole: .unsupported)
+        expect(unknown(candidate, .unusableGeometry), "native_button_geometry_not_optional")
+        for mutation in [changed(overflow[7], identifier: .value("named"), afterOnly: true),
+                         changed(overflow[7], role: .value("AXMenuBarItem"), afterOnly: true),
+                         changed(overflow[7], subrole: .noValue, afterOnly: true),
+                         changed(overflow[7], owner: .value(456), afterOnly: true),
+                         changed(overflow[7], children: .elements([9]), afterOnly: true),
+                         changed(overflow[7], geometry: .bounds(CGRect(x: 101, y: 0, width: 22, height: 22)), afterOnly: true)]
+        {
+            candidate = overflow; candidate[7] = mutation
+            expect(unknown(candidate, .changedNode), "native_button_same_node_double_read_required")
+        }
+        candidate = overflow; candidate[7] = changed(candidate[7], owner: .value(456))
+        expect(unknown(candidate, .readUnknown), "native_button_owner_must_be_attested_publisher")
+        candidate = overflow; candidate[0] = changed(candidate[0], children: .elements([2, 3, 6, 8, 9]))
+        candidate.append(node(9, role: "AXButton", subrole: .unsupported, geometry: .bounds(bounds)))
+        expect(unknown(candidate, .unexpectedShape), "second_anonymous_button_is_unqualified")
+        candidate = overflow; candidate[7] = changed(candidate[7], role: .value("AXImage"))
+        expect(unknown(candidate, .unexpectedShape), "other_direct_terminal_role_unqualified")
+        candidate = overflow; candidate[0] = changed(candidate[0], children: .elements([2, 3, 6]))
+        candidate[1] = changed(candidate[1], children: .elements([4, 8]))
+        expect(unknown(candidate, .invalidIdentity), "anonymous_button_under_wrapper_unqualified")
+        candidate = overflow; candidate[0] = changed(candidate[0], children: .elements([8, 2, 3, 6]))
+        candidate[1] = changed(candidate[1], children: .elements([4, 8]))
+        expect(unknown(candidate, .duplicateNode), "button_alias_between_direct_and_wrapped_parent")
+        expect(unknown(overflow + [leaf(9, "unreferenced")], .orphanNode), "button_does_not_excuse_orphan")
+        for (wrapper, anchor) in [(UInt32(2), UInt32(4)), (3, 5)] {
+            candidate = overflow.filter { $0.token != wrapper && $0.token != anchor }
+            candidate[0] = changed(candidate[0], children: .elements([2, 3, 6, 8].filter { $0 != wrapper }))
+            expect(unknown(candidate, .missingAnchor), "button_cannot_supply_missing_anchor")
+        }
         expect(!((baseline[0] as Any) is any Encodable), "node_facts_not_codable")
         expect(unknown([], .nodeLimit), "empty_scope_not_absence")
         expect(unknown(baseline + [baseline[0]], .duplicateNode), "duplicate_record")

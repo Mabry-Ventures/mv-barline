@@ -81,6 +81,7 @@ final class AXReadCancellation: @unchecked Sendable {
 }
 
 enum AXIdentityReadSupport {
+    static let maximumChildCount = 64
     static func decodeProcessIdentifier(status: AXError, value: Int32) -> AXProcessIdentifierRead {
         guard status == .success else { return .failure(failure(status)) }
         guard value > 0 else { return .failure(AXReadFailure(.malformedResponse)) }
@@ -265,7 +266,7 @@ enum AXIdentityReadSupport {
     ) -> AXChildrenRead {
         // Zero remaining capacity may prove a genuinely empty leaf without
         // copying anything; any positive count fails before a native fetch.
-        guard maximumCount >= 0, maximumCount <= 64 else { return .failure(AXReadFailure(.overLimit)) }
+        guard maximumCount >= 0, maximumCount <= maximumChildCount else { return .failure(AXReadFailure(.overLimit)) }
         let first = perform(deadline: deadline, now: now, cancelled: cancelled, setTimeout: setTimeout, operation: count)
         let observedCount: CFIndex
         switch first {

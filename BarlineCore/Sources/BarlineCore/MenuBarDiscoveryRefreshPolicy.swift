@@ -1,5 +1,112 @@
 import Foundation
 
+/// Advisory scheduling only. An expired observation is not negative identity
+/// evidence and never prevents a later explicit, fresh observation.
+public struct MenuBarPublisherObservationBudget<Key: Hashable & Sendable, Witness: Equatable & Sendable>: Sendable {
+    private struct Entry: Sendable {
+        var lastKnownWitness: Witness?
+        let deadline: UInt64
+    }
+
+    private var entries = [Key: Entry]()
+    private let durationNanoseconds: UInt64
+
+    public init(durationNanoseconds: UInt64 = 30_000_000_000) {
+        self.durationNanoseconds = durationNanoseconds
+    }
+
+    public mutating func pending(_ candidates: [Key: Witness?], now: UInt64) -> Set<Key> {
+        entries = entries.filter { candidates.keys.contains($0.key) }
+        for (candidate, witness) in candidates {
+            if var entry = entries[candidate] {
+                if witness == nil || entry.lastKnownWitness == nil || entry.lastKnownWitness == witness {
+                    // Unknown -> known and known -> unknown -> same known are
+                    // not new lifetimes and cannot extend the original budget.
+                    if let witness {
+                        entry.lastKnownWitness = witness
+                    }
+                    entries[candidate] = entry
+                    continue
+                }
+            }
+            let (deadline, overflow) = now.addingReportingOverflow(durationNanoseconds)
+            entries[candidate] = Entry(lastKnownWitness: witness, deadline: overflow ? UInt64.max : deadline)
+        }
+        return Set(candidates.keys.filter { now < (entries[$0]?.deadline ?? 0) })
+    }
+}
+
+/// One revocable opportunity per lifecycle signal, not a permanent poller.
+/// Repeated identical or removal-only workspace samples cannot renew a window.
+public struct MenuBarLifecycleRefreshWindow<Element: Hashable & Sendable>: Sendable {
+    private var signal: Set<Element>?
+    private var generation: UInt64 = 0
+    private var deadline: UInt64 = 0
+    private let durationNanoseconds: UInt64
+
+    public init(durationNanoseconds: UInt64 = 30_000_000_000) {
+        self.durationNanoseconds = durationNanoseconds
+    }
+
+    public mutating func begin(signal: Set<Element>, now: UInt64, force: Bool = false) -> UInt64? {
+        let hasAddition = self.signal.map { !signal.isSubset(of: $0) } ?? true
+        // Remember removals without cancelling an earlier launch opportunity.
+        // A later reappearance must compare against the actual last sample.
+        self.signal = signal
+        guard force || hasAddition else { return nil }
+        generation &+= 1
+        let (end, overflow) = now.addingReportingOverflow(durationNanoseconds)
+        deadline = overflow ? UInt64.max : end
+        return generation
+    }
+
+    public func isCurrent(_ token: UInt64, now: UInt64) -> Bool {
+        token == generation && now < deadline
+    }
+}
+
+/// Reserves one presentation reload at a time for an acknowledged native state.
+/// A reload uses ordinary discovery and never promotes receipt evidence into
+/// item capability, geometry, display ownership or Focus authority.
+public struct MenuBarConcealmentRefreshGate: Sendable {
+    public struct Request: Equatable, Sendable {
+        fileprivate let id = UUID()
+        fileprivate let receipt: NativeConcealmentReceipt
+    }
+
+    private var lastRequestedReceipt: NativeConcealmentReceipt?
+    private var inFlight: Request?
+    private var completedReceipt: NativeConcealmentReceipt?
+
+    public init() {}
+
+    public mutating func requestRefresh(after receipt: NativeConcealmentReceipt?) -> Request? {
+        guard let receipt, receipt.isStable, receipt != completedReceipt else { return nil }
+        if let previous = lastRequestedReceipt, previous.helperSessionID == receipt.helperSessionID,
+           receipt != previous, receipt.assertionRevision <= previous.assertionRevision
+        {
+            return nil
+        }
+        guard inFlight?.receipt != receipt else { return nil }
+        lastRequestedReceipt = receipt
+        let request = Request(receipt: receipt)
+        inFlight = request
+        return request
+    }
+
+    /// Only this reservation's successful fresh publication consumes a receipt.
+    /// Failure/cancellation releases it for the next bounded synchronization;
+    /// it does not enqueue a polling loop. Older completions cannot release or
+    /// acknowledge a newer reservation, including a retry of the same receipt.
+    public mutating func finish(_ request: Request, succeeded: Bool) {
+        guard inFlight == request else { return }
+        inFlight = nil
+        if succeeded {
+            completedReceipt = request.receipt
+        }
+    }
+}
+
 /// Describes why menu bar discovery was requested.
 public enum MenuBarDiscoveryRefreshIntent: Sendable {
     /// A direct user action or an operation that changed the physical layout.

@@ -1491,6 +1491,23 @@ struct StateCoordinatorTests {
         #expect(await coordinator.canUndo)
     }
 
+    @Test("Presentation synchronization returns the exact backend acknowledgement")
+    func presentationSynchronizationReturnsReceipt() async throws {
+        let itemID = MenuBarItemID(bundleIdentifier: "test.publisher", accessibilityIdentifier: "item")
+        let snapshot = makeProfileSnapshot(generation: 1, layout: ProfileLayout(visible: [itemID]))
+        let receipt = NativeConcealmentReceipt(
+            helperSessionID: UUID(), assertionRevision: 7, configurationRevision: 3,
+            configurationDigest: String(repeating: "a", count: 64),
+            effectiveStateDigest: String(repeating: "b", count: 64), phase: .asserted
+        )
+        let backend = FakeBackend(snapshots: [snapshot])
+        await backend.setConcealmentReceipt(receipt)
+        let coordinator = MenuBarStateCoordinator(backend: backend)
+        let returned = try await coordinator.synchronizeConcealmentWithReceipt(concealedSections: [.hidden])
+        #expect(returned == receipt)
+        #expect(await backend.operationEvents == ["configure"])
+    }
+
     @Test("Delayed presentation synchronization derives state after an authoritative move")
     func delayedPresentationSynchronizationUsesCommittedLayout() async throws {
         let itemID = MenuBarItemID(
@@ -6288,6 +6305,7 @@ private actor FakeBackend: MenuBarBackend {
     private(set) var moveOperations = [MenuBarMoveOperation]()
     private(set) var activations = [Activation]()
     private(set) var concealmentConfigurations = [MenuBarConcealmentConfiguration]()
+    private var concealmentReceipt: NativeConcealmentReceipt?
     private(set) var operationEvents = [String]()
     private(set) var maximumConcurrentMutations = 0
     private(set) var snapshotCallCount = 0
@@ -6406,6 +6424,15 @@ private actor FakeBackend: MenuBarBackend {
     ) {
         concealmentConfigurations.append(configuration)
         operationEvents.append("configure")
+    }
+
+    func setConcealmentReceipt(_ receipt: NativeConcealmentReceipt) {
+        concealmentReceipt = receipt
+    }
+
+    func configureConcealmentWithReceipt(_ configuration: MenuBarConcealmentConfiguration) -> NativeConcealmentReceipt? {
+        configureConcealment(configuration)
+        return concealmentReceipt
     }
 
     func reveal(_ item: MenuBarItemID) async throws -> MenuBarMutationResult {

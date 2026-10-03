@@ -37,8 +37,20 @@ final class MenuBarItemManager: ObservableObject {
     }
 
     private let goldenGateConcealmentSyncDebouncer = GoldenGateConcealmentSyncDebouncer()
+    private var concealmentPresentationRefreshGate = MenuBarConcealmentRefreshGate()
+    /// Workspace scheduling hints only; these never establish item identity or
+    /// publisher settlement. Missing AppKit launch dates remain stable unknowns.
+    private struct LifecycleApplication: Hashable, Sendable {
+        let processIdentifier: Int32
+        let bundleIdentifier: String?
+        let launchDate: Date?
+    }
+
+    private var lifecycleRefreshWindow = MenuBarLifecycleRefreshWindow<LifecycleApplication>()
+    private var lifecycleRefreshTask: Task<Void, Never>?
 
     deinit {
+        lifecycleRefreshTask?.cancel()
         for task in visibleInterfaceTasks.values {
             task.cancel()
         }
@@ -112,6 +124,7 @@ final class MenuBarItemManager: ObservableObject {
         await cacheItemsRegardless()
         _ = await prepareForShelfPresentation()
         configureCancellables(with: appState)
+        scheduleGoldenGateLifecycleFollowUp()
     }
 
     /// Configures the internal observers for the manager.
@@ -119,19 +132,9 @@ final class MenuBarItemManager: ObservableObject {
         var c = Set<AnyCancellable>()
 
         NSWorkspace.shared.publisher(for: \.runningApplications)
-            .discardMerge(
-                NSWorkspace.shared.notificationCenter.publisher(
-                    for: NSWorkspace.didWakeNotification
-                )
-            )
-            .discardMerge(
-                NotificationCenter.default.publisher(
-                    for: NSApplication.didChangeScreenParametersNotification
-                )
-            )
             .delay(for: 0.25, scheduler: DispatchQueue.main)
             .debounce(for: 1, scheduler: DispatchQueue.main)
-            .sink { [weak self] in
+            .sink { [weak self] _ in
                 guard let self else {
                     return
                 }
@@ -140,9 +143,21 @@ final class MenuBarItemManager: ObservableObject {
                 // publishing its status item; failing visible is safer than
                 // withholding that app until another lifecycle event arrives.
                 scheduleGoldenGateConcealmentSync()
+                scheduleGoldenGateLifecycleFollowUp()
                 Task {
                     await self.cacheItemsIfNeeded(intent: .automatic)
                 }
+            }
+            .store(in: &c)
+
+        NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didWakeNotification)
+            .merge(with: NotificationCenter.default.publisher(for: NSApplication.didChangeScreenParametersNotification))
+            .debounce(for: 1, scheduler: DispatchQueue.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                scheduleGoldenGateConcealmentSync()
+                scheduleGoldenGateLifecycleFollowUp(force: true)
+                Task { await self.cacheItemsIfNeeded(intent: .automatic) }
             }
             .store(in: &c)
 
@@ -160,10 +175,11 @@ final class MenuBarItemManager: ObservableObject {
         )
         .delay(for: 1, scheduler: DispatchQueue.main)
         .sink { [weak self] _ in
-            guard let self,
-                  MenuBarDiscoveryRefreshPolicy.shouldRetryWhenSessionBecomesAvailable(
-                      state: itemDiscoveryState
-                  )
+            guard let self else { return }
+            scheduleGoldenGateLifecycleFollowUp(force: true)
+            guard MenuBarDiscoveryRefreshPolicy.shouldRetryWhenSessionBecomesAvailable(
+                state: itemDiscoveryState
+            )
             else {
                 return
             }
@@ -202,6 +218,48 @@ final class MenuBarItemManager: ObservableObject {
             .store(in: &c)
 
         cancellables = c
+    }
+
+    /// An app launch precedes status-item publication, sometimes by seconds.
+    /// Follow the lifecycle event for a fixed window through normal discovery
+    /// and receipt synchronization. Neither successful empty discovery nor an
+    /// unchanged receipt proves a not-yet-published item will never arrive.
+    private func scheduleGoldenGateLifecycleFollowUp(force: Bool = false) {
+        guard #available(macOS 27.0, *) else { return }
+        let applications = Set(NSWorkspace.shared.runningApplications.filter { !$0.isTerminated }.map {
+            LifecycleApplication(processIdentifier: $0.processIdentifier, bundleIdentifier: $0.bundleIdentifier, launchDate: $0.launchDate)
+        })
+        guard let token = lifecycleRefreshWindow.begin(
+            signal: applications, now: DispatchTime.now().uptimeNanoseconds, force: force
+        ) else { return }
+        let previous = lifecycleRefreshTask
+        previous?.cancel()
+        lifecycleRefreshTask = Task { [weak self] in
+            // Do not overlap lifecycle scans when a second launch arrives
+            // while the previous window is finishing its qualified discovery.
+            await previous?.value
+            for delay in [1, 1, 1, 1, 1, 2, 3, 5, 5, 5, 4] {
+                do { try await Task.sleep(for: .seconds(delay)) } catch { return }
+                guard let self, !Task.isCancelled,
+                      lifecycleRefreshWindow.isCurrent(token, now: DispatchTime.now().uptimeNanoseconds)
+                else { return }
+                // ID changes enter qualified discovery; an autonomous helper
+                // receipt change also requests the existing full refresh path.
+                await cacheItemsIfNeeded(intent: .automatic)
+                guard !Task.isCancelled,
+                      lifecycleRefreshWindow.isCurrent(token, now: DispatchTime.now().uptimeNanoseconds)
+                else { return }
+                do {
+                    try await synchronizeGoldenGateConcealmentNow()
+                } catch is CancellationError {
+                    return
+                } catch {
+                    // Locked/unavailable sessions retain the accepted layout.
+                    // Unlock grants a fresh opportunity; no permission prompt.
+                    logger.debug("Deferred lifecycle synchronization did not complete")
+                }
+            }
+        }
     }
 
     /// Returns a Boolean value that indicates whether the most recent
@@ -266,7 +324,7 @@ extension MenuBarItemManager {
     /// An actor that manages menu bar item cache operations.
     private final actor CacheActor {
         /// Stored task for the current cache operation.
-        private var cacheTask: Task<Void, Never>?
+        private var cacheTask: Task<Bool, Never>?
 
         /// Identifier of the newest cache request accepted by this actor.
         private var currentRequestID: UInt64 = 0
@@ -282,12 +340,12 @@ extension MenuBarItemManager {
         /// running, that task is cancelled and replaced.
         func runCacheTask(
             requestID: UInt64,
-            operation: @escaping @MainActor @Sendable (UInt64) async -> Void
-        ) async {
+            operation: @escaping @MainActor @Sendable (UInt64) async -> Bool
+        ) async -> Bool {
             // MainActor callers assign increasing IDs. Reject an older request
             // if actor scheduling ever delivers it after a newer one.
             guard requestID > currentRequestID else {
-                return
+                return false
             }
             currentRequestID = requestID
             cacheTask.take()?.cancel()
@@ -295,10 +353,11 @@ extension MenuBarItemManager {
                 await operation(requestID)
             }
             cacheTask = task
-            await task.value
+            let succeeded = await task.value
             if currentRequestID == requestID {
                 cacheTask = nil
             }
+            return succeeded
         }
 
         /// Returns whether the given request still owns cache publication.
@@ -688,9 +747,21 @@ extension MenuBarItemManager {
             case .alwaysHidden: .alwaysHidden
             }
         }
-        try await appState.compatibilityCoordinator.synchronizeConcealment(
+        let receipt = try await appState.compatibilityCoordinator.synchronizeConcealmentWithReceipt(
             concealedSections: concealedSections
         )
+        // Discovery can win the workspace-event race while a new publisher is
+        // still parked. Its IDs stay identical after native reconciliation,
+        // so an ID-only cache check would retain stale bounds/capabilities.
+        // Queue one full discovery per acknowledged transition. The
+        // gate is consumed before suspending; cache publication may schedule a
+        // normal sync, but its unchanged receipt cannot form a refresh loop.
+        // This physical-state change supersedes any stale in-flight discovery:
+        // an automatic request could be lost inside an already trailing pass.
+        if let request = concealmentPresentationRefreshGate.requestRefresh(after: receipt) {
+            let succeeded = await cacheItemsRegardless(intent: .authoritative)
+            concealmentPresentationRefreshGate.finish(request, succeeded: succeeded)
+        }
     }
 
     /// Caches the current menu bar items, regardless of whether the
@@ -699,13 +770,14 @@ extension MenuBarItemManager {
     /// Before caching, this method ensures that the control items for
     /// the hidden and always-hidden sections are correctly ordered,
     /// arranging them into valid positions if needed.
+    @discardableResult
     func cacheItemsRegardless(
         _ currentItemIDs: [MenuBarItemID]? = nil,
         intent: MenuBarDiscoveryRefreshIntent = .authoritative,
         allowsTrailingAutomaticRefresh: Bool = true
-    ) async {
+    ) async -> Bool {
         guard let requestID = beginDiscoveryRequest(intent: intent) else {
-            return
+            return false
         }
         defer {
             finishDiscoveryRequest(
@@ -715,16 +787,17 @@ extension MenuBarItemManager {
         }
         await discardSupersededRestorations()
 
-        await runCacheDiscovery(currentItemIDs: currentItemIDs, requestID: requestID)
+        return await runCacheDiscovery(currentItemIDs: currentItemIDs, requestID: requestID)
     }
 
+    @discardableResult
     private func runCacheDiscovery(
         currentItemIDs: [MenuBarItemID]?,
         requestID: UInt64
-    ) async {
+    ) async -> Bool {
         await cacheActor.runCacheTask(requestID: requestID) { [weak self] requestID in
             guard let self else {
-                return
+                return false
             }
             let hadUsableSnapshot = itemDiscoveryState.hasUsableSnapshot
             if !hadUsableSnapshot, itemDiscoveryState != .failed {
@@ -738,7 +811,7 @@ extension MenuBarItemManager {
                             for: itemDiscoveryRetryPolicy.delay(forAttempt: attempt - 1)
                         )
                     } catch {
-                        return
+                        return false
                     }
                 }
 
@@ -748,6 +821,7 @@ extension MenuBarItemManager {
                 )
                 switch result {
                 case .success:
+                    guard requestID == cacheRequestSequence, !Task.isCancelled else { return false }
                     itemDiscoveryState = .completed(
                         managedItemCount: itemCache.managedItems.count
                     )
@@ -755,9 +829,9 @@ extension MenuBarItemManager {
                         attemptCount: attempt + 1,
                         managedItemCount: itemCache.managedItems.count
                     )
-                    return
+                    return true
                 case .cancelled:
-                    return
+                    return false
                 case let .retryableFailure(failure):
                     itemDiscoveryDiagnostics.recordAttemptFailure(code: failure)
                     continue
@@ -768,7 +842,7 @@ extension MenuBarItemManager {
                 await cacheActor.isCurrent(requestID),
                 requestID == cacheRequestSequence
             else {
-                return
+                return false
             }
             itemDiscoveryState = hadUsableSnapshot
                 ? itemDiscoveryState.preservingUsableSnapshotOrFailure()
@@ -777,6 +851,7 @@ extension MenuBarItemManager {
                 attemptCount: itemDiscoveryRetryPolicy.maximumAttempts
             )
             logger.error("Menu bar item discovery exhausted its bounded retry budget")
+            return false
         }
     }
 

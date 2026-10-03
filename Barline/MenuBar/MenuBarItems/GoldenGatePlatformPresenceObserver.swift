@@ -41,6 +41,21 @@ enum GoldenGateNativeScopeFailure: Equatable, Sendable {
     case cancelled, deadlineExceeded, publisherChanged
     case tree(AXNativeScopeFailure)
     case read(AXReadFailure)
+
+    /// Fixed categories only: never AX identifiers, labels, paths or PID lists.
+    var diagnosticCode: String {
+        switch self {
+        case .unsupportedSystem: "unsupported_system"
+        case .publisherUnavailable: "publisher_unavailable"
+        case .extrasUnavailable: "extras_unavailable"
+        case .membershipChanged: "membership_changed"
+        case .cancelled: "cancelled"
+        case .deadlineExceeded: "deadline_exceeded"
+        case .publisherChanged: "publisher_changed"
+        case let .tree(reason): "tree_\(reason.rawValue)"
+        case let .read(reason): "read_\(reason.kind.rawValue)"
+        }
+    }
 }
 
 enum GoldenGateNativeScopeObservation: Equatable, Sendable {
@@ -52,10 +67,11 @@ actor GoldenGatePlatformPresenceObserver {
     private struct LocalNode {
         let token: UInt32
         let element: AXUIElement
+        let kind: NodeKind
         let before: AXNativeScopeNodeRead
     }
 
-    private enum NodeKind { case extras, wrapper, leaf }
+    private enum NodeKind { case extras, directChild, wrapper, leaf, anonymousButton }
     private struct ScanFailure: Error {
         let reason: GoldenGateNativeScopeFailure
     }
@@ -111,20 +127,25 @@ actor GoldenGatePlatformPresenceObserver {
                 }
                 return result
             }
-            func read(_ node: AXUIElement, kind: NodeKind, register: Bool, maximum: Int) throws -> AXNativeScopeNodeRead {
+            func read(_ node: AXUIElement, kind: NodeKind, register: Bool, maximum: Int) throws -> (value: AXNativeScopeNodeRead, kind: NodeKind) {
                 try requireAdmission(deadline: deadline, cancellation: cancellation)
                 let owner = reader.processIdentifier(on: node)
                 guard owner == .value(pid) else { throw ScanFailure(reason: .tree(.readUnknown)) }
                 let identity = reader.identity(on: node)
-                guard case .attributes = identity else { throw ScanFailure(reason: .tree(.readUnknown)) }
-                let geometry: AXGeometryRead? = kind == .leaf ? reader.geometry(on: node) : nil
-                if kind == .leaf, case .bounds = geometry {} else if kind == .leaf {
+                guard case let .attributes(attributes) = identity else { throw ScanFailure(reason: .tree(.readUnknown)) }
+                // Classify only from the identity recorded by this read. The
+                // resolved kind is retained, never inferred from missing geometry.
+                let resolvedKind = kind == .directChild ?
+                    (AXNativeScopeValidationSupport.isAnonymousNativeButton(attributes) ? NodeKind.anonymousButton : .wrapper) : kind
+                let isTerminal = resolvedKind == .leaf || resolvedKind == .anonymousButton
+                let geometry: AXGeometryRead? = isTerminal ? reader.geometry(on: node) : nil
+                if isTerminal, case .bounds = geometry {} else if isTerminal {
                     throw ScanFailure(reason: .tree(.unusableGeometry))
                 }
                 let membership: AXNativeScopeMembership
                 switch reader.children(on: node, maximumCount: maximum) {
                 case let .elements(children):
-                    if kind == .leaf, !children.isEmpty {
+                    if isTerminal, !children.isEmpty {
                         throw ScanFailure(reason: .tree(.openFrontier))
                     }
                     membership = try .elements(tokens(for: children, register: register))
@@ -134,33 +155,32 @@ actor GoldenGatePlatformPresenceObserver {
                 }
                 guard reader.processIdentifier(on: node) == owner else { throw ScanFailure(reason: .tree(.changedNode)) }
                 try requireAdmission(deadline: deadline, cancellation: cancellation)
-                return AXNativeScopeNodeRead(identity: identity, owner: owner, geometry: geometry, children: membership)
+                return (AXNativeScopeNodeRead(identity: identity, owner: owner, geometry: geometry, children: membership), resolvedKind)
             }
 
             let extraRead = try read(extras, kind: .extras, register: true, maximum: 64)
-            records.append(LocalNode(token: 1, element: extras, before: extraRead))
-            guard case let .elements(rootTokens) = extraRead.children else { return .unknown(.tree(.readUnknown)) }
+            records.append(LocalNode(token: 1, element: extras, kind: extraRead.kind, before: extraRead.value))
+            guard case let .elements(rootTokens) = extraRead.value.children else { return .unknown(.tree(.readUnknown)) }
             for token in rootTokens {
                 let root = handles[Int(token) - 1]
                 let remaining = min(64, AXNativeScopeValidationSupport.maximumNodeCount - handles.count)
-                let rootRead = try read(root, kind: .wrapper, register: true, maximum: remaining)
-                records.append(LocalNode(token: token, element: root, before: rootRead))
-                guard case let .elements(leafTokens) = rootRead.children else { return .unknown(.tree(.readUnknown)) }
+                let rootRead = try read(root, kind: .directChild, register: true, maximum: remaining)
+                records.append(LocalNode(token: token, element: root, kind: rootRead.kind, before: rootRead.value))
+                guard case let .elements(leafTokens) = rootRead.value.children else { return .unknown(.tree(.readUnknown)) }
                 for leafToken in leafTokens {
                     let leaf = handles[Int(leafToken) - 1]
                     let remaining = min(64, AXNativeScopeValidationSupport.maximumNodeCount - handles.count)
                     let leafRead = try read(leaf, kind: .leaf, register: true, maximum: remaining)
-                    records.append(LocalNode(token: leafToken, element: leaf, before: leafRead))
+                    records.append(LocalNode(token: leafToken, element: leaf, kind: leafRead.kind, before: leafRead.value))
                 }
             }
             var nodes: [AXNativeScopeNode] = []
             for record in records {
-                let kind: NodeKind = record.token == 1 ? .extras : record.before.geometry == nil ? .wrapper : .leaf
                 guard case let .elements(originalChildren) = record.before.children else { return .unknown(.tree(.readUnknown)) }
                 // A count beyond the original membership fails before copying.
                 // Empty leaf closure permits one counted item but never admits it.
-                let after = try read(record.element, kind: kind, register: false, maximum: max(1, originalChildren.count))
-                nodes.append(AXNativeScopeNode(token: record.token, before: record.before, after: after))
+                let after = try read(record.element, kind: record.kind, register: false, maximum: max(1, originalChildren.count))
+                nodes.append(AXNativeScopeNode(token: record.token, before: record.before, after: after.value))
             }
             // Reacquire the current extras attribute from the application.
             // Re-reading an old, still-responsive extras handle alone cannot

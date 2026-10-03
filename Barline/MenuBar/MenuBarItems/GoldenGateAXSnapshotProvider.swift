@@ -582,6 +582,7 @@ actor GoldenGateAXSnapshotProvider {
                 appSigningIdentifier: signingIdentifier,
                 rememberedSections: migratedRemembered,
                 assignedSections: effectiveAssignments.mapValues(\.section),
+                sectionPolicy: .nativeVisibilityAssignments,
                 generation: generation
             )
         } catch {
@@ -699,12 +700,17 @@ actor GoldenGateAXSnapshotProvider {
         guard !overflow else { return nil }
         let cancellation = AXReadCancellation()
         return await withTaskCancellationHandler {
-            guard case let .captured(capture) = await platformPresenceObserver.capture(
+            let observation = await platformPresenceObserver.capture(
                 scanID: scanID,
                 deadline: deadline,
                 cancellation: cancellation
-            ) else { return nil }
-            return capture
+            )
+            switch observation {
+            case let .captured(capture): return capture
+            case let .unknown(reason):
+                logger.notice("Native menu bar scope rejected: \(reason.diagnosticCode, privacy: .public)")
+                return nil
+            }
         } onCancel: {
             cancellation.cancel()
         }

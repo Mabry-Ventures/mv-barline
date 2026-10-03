@@ -2,6 +2,7 @@ import AppKit
 @preconcurrency import AXSwift
 import BarlineCore
 import CryptoKit
+import Darwin
 import Foundation
 import os
 
@@ -104,6 +105,61 @@ enum GoldenGateAXInventory {
             state = (completedAt: nil, observations: [])
         }
         ownerProbePolicy.withLock { $0.invalidate() }
+    }
+
+    static func publisherLifetime(for pid: Int32) -> GoldenGatePublisherLifetime? {
+        var information = proc_bsdinfo()
+        let expected = Int32(MemoryLayout<proc_bsdinfo>.size)
+        let received = withUnsafeMutablePointer(to: &information) {
+            proc_pidinfo(pid, PROC_PIDTBSDINFO, 0, $0, expected)
+        }
+        return GoldenGatePublisherLifetime(
+            pid: pid, reportedPID: information.pbi_pid, bytes: received, expectedBytes: expected,
+            seconds: information.pbi_start_tvsec, microseconds: information.pbi_start_tvusec
+        )
+    }
+
+    /// Advisory lifecycle evidence only. Never creates item identity, geometry,
+    /// mutation eligibility, display ownership, or native Focus authority.
+    /// Bypass inventory caches/owner scheduling so a retained hidden ID cannot
+    /// stand in for a newly published status item. Bind before and after reads.
+    static func publisherHasStatusItem(
+        processIdentifier pid: Int32, bundleIdentifier: String, lifetime: GoldenGatePublisherLifetime, deadline: UInt64
+    ) -> Bool {
+        guard !Task.isCancelled, DispatchTime.now().uptimeNanoseconds < deadline,
+              publisherLifetime(for: pid) == lifetime,
+              let running = NSRunningApplication(processIdentifier: pid), !running.isTerminated,
+              running.bundleIdentifier == bundleIdentifier,
+              let application = AXHelpers.application(for: running) else { return false }
+        let cancellation = AXReadCancellation()
+        guard case let .element(root) = AXHelpers.boundedExtrasMenuBar(
+            for: application, deadline: deadline, cancellation: cancellation
+        ), case let .elements(children) = AXHelpers.boundedChildren(
+            for: UIElement(root), maximumCount: AXIdentityReadSupport.maximumChildCount, deadline: deadline, cancellation: cancellation
+        ) else { return false }
+        for child in children {
+            guard !Task.isCancelled, DispatchTime.now().uptimeNanoseconds < deadline else { return false }
+            var owner: pid_t = 0
+            guard AXUIElementGetPid(child, &owner) == .success, owner == pid else { continue }
+            let geometry = AXIdentityReadSupport.perform(
+                deadline: deadline, now: { DispatchTime.now().uptimeNanoseconds },
+                cancelled: { Task.isCancelled }, setTimeout: { AXUIElementSetMessagingTimeout(child, $0) }
+            ) {
+                var values: CFArray?
+                let status = AXUIElementCopyMultipleAttributeValues(
+                    child, [kAXPositionAttribute, kAXSizeAttribute] as CFArray, [], &values
+                )
+                return AXIdentityReadSupport.decodeGeometry(status: status, values: values)
+            }
+            if case let .success(.bounds(bounds)) = geometry, bounds.height <= maximumItemHeight,
+               !Task.isCancelled, DispatchTime.now().uptimeNanoseconds < deadline,
+               publisherLifetime(for: pid) == lifetime,
+               NSRunningApplication(processIdentifier: pid)?.bundleIdentifier == bundleIdentifier
+            {
+                return true
+            }
+        }
+        return false
     }
 
     static func identifiers(for observations: [Observation]) -> [MenuBarItemID] {

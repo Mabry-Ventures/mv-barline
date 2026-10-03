@@ -7,6 +7,26 @@ observer = File.read('Barline/MenuBar/MenuBarItems/GoldenGatePlatformPresenceObs
 provider = File.read('Barline/MenuBar/MenuBarItems/GoldenGateAXSnapshotProvider.swift')
 helper = File.read('BarlineMenuService/Backends/GoldenGateConcealmentController.swift')
 scope = File.read('Shared/Utilities/AXNativeScopeValidationSupport.swift')
+inventory = File.read('BarlineMenuService/WindowServer/GoldenGateAXInventory.swift')
+manager = File.read('Barline/MenuBar/MenuBarItems/MenuBarItemManager.swift')
+lifecycle_follow_up = manager.split('private func scheduleGoldenGateLifecycleFollowUp(', 2).last
+  .split('/// Returns a Boolean', 2).first
+unless lifecycle_follow_up.include?('lifecycleRefreshWindow.begin(') &&
+       lifecycle_follow_up.include?('await previous?.value') &&
+       lifecycle_follow_up.include?('await cacheItemsIfNeeded(intent: .automatic)') &&
+       lifecycle_follow_up.include?('try await synchronizeGoldenGateConcealmentNow()') &&
+       lifecycle_follow_up.scan('lifecycleRefreshWindow.isCurrent(').length == 2 &&
+       helper.include?('publisherObservationBudget.pending(') &&
+       helper.match?(/if recoveryTask == nil\s*\{\s*scheduleBackgroundReapply\(\)\s*\}/)
+  abort('delayed publishers require bounded nonrenewing helper observation and sequential app discovery plus receipt sync')
+end
+publisher_probe = inventory.split('static func publisherHasStatusItem(', 2).last
+  .split('static func identifiers(', 2).first
+unless publisher_probe.include?('maximumCount: AXIdentityReadSupport.maximumChildCount') &&
+       publisher_probe.scan('bundleIdentifier == bundleIdentifier').length == 2 &&
+       publisher_probe.scan('publisherLifetime(for: pid) == lifetime').length == 2
+  abort('publisher advisory probe must share the bounded reader cap and bind bundle plus lifetime before and after AX')
+end
 
 unless observer.include?('AXNativeScopeValidationSupport.canAttemptObservation(on: ProcessInfo.processInfo.operatingSystemVersion)') &&
        observer.include?('guard Self.requiresQualifiedPresenceContract else')
