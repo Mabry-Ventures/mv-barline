@@ -48,12 +48,28 @@ probes rotate within bounded priority groups. Bundle and kernel lifetime must
 match before and after observation. Clock restoration and compensation perform
 no advisory AX work; unsettled owners are reconciled separately.
 
+Pending observation and reset eligibility are distinct. An unseen configured
+visible owner, including unavailable kernel evidence, receives a bounded retry
+opportunity but cannot cause a clear until live evidence exists. Per-candidate
+deadlines are not renewed by identical configuration calls or new peer owners.
+Expiry stops autonomous observation, not later fresh explicit eligibility.
+Proposed reveal requires observed coverage per app bundle, not every same-bundle
+process. Only individually observed lifetimes settle; exact target resolution
+and ambiguity rejection still occur before any input delivery.
+
 Presentation refresh reserves a request before suspension, supersedes stale
 automatic discovery, and consumes an acknowledgement only after current fresh
 discovery succeeds. Retaining an old usable snapshot after failure is not
 refresh success. Failed/cancelled attempts release the receipt for the next
 bounded synchronization; stale completions cannot release newer reservations.
-No periodic retry loop or additional authority exception is introduced.
+The app follows setup and changed workspace hints, wake/display and unlock
+signals with sequential ordinary discovery plus receipt synchronization for a
+maximum30second admission window. Identical workspace signals, cache publication
+and receipt changes never renew it. Cancellation revokes old work and replacement
+waits for it. Optional AppKit launch dates are advisory scheduling hints only,
+never publisher settlement evidence. This finite lifecycle follow-up observes
+brand-new late publishers and autonomous helper changes, not a permanent poller
+or an additional authority exception.
 
 Fresh signed installed qualification is pending on the owner-approved local Mac
 and CODEX01. Public stable remains 1.0.65. The records below are historical context,

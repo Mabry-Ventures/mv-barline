@@ -43,7 +43,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         let lifetime: GoldenGatePublisherLifetime
     }
 
-    private struct RunningPublisher: Sendable {
+    private struct RunningPublisher: Hashable, Sendable {
         let bundleIdentifier: String
         let processIdentifier: Int32
     }
@@ -54,7 +54,10 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         let running: Set<PublisherInstance>
         let observedPublishers: Set<PublisherInstance>
         let visiblePublishers: Set<PublisherInstance>
-        let proposedRevealPublishers: Set<PublisherInstance>
+        let pendingPublishers: Set<PublisherInstance>
+        let hasUnverifiedPendingPublisher: Bool
+        let proposedRevealBundles: Set<String>
+        let requiresPublisherRefresh: Bool
         let configurationDigest: String
         let effectiveDigest: String
         let hasTemporaryReveal: Bool
@@ -66,6 +69,9 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     private var hasDeassertionBoundary = true
     private var publisherRefreshPending = false
     private var lastProbedPublisherPID: Int32 = 0
+    /// Raw bundle/PID keys schedule observations only. Unknown birth reads do
+    /// not renew deadlines or establish publisher settlement/input authority.
+    private var publisherObservationBudget = MenuBarPublisherObservationBudget<RunningPublisher, GoldenGatePublisherLifetime>()
     private var receiptLedger = NativeConcealmentReceiptLedger()
     /// A new helper session has no acknowledged native state. Discovery needs
     /// a real deasserted acknowledgement before it can derive the first saved
@@ -260,7 +266,13 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
                     }
                 }
             }
-            self?.logger.error("Concealment reconciliation exhausted its bounded recovery attempts")
+            guard let self else { return }
+            try? await transactionGate.withLock { [self] in
+                guard recoveryLease.contains(lease) else { return }
+                recoveryLease.invalidate()
+                recoveryTask = nil
+                logger.error("Concealment reconciliation exhausted its bounded recovery attempts")
+            }
         }
     }
 
@@ -271,9 +283,14 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
     }
 
     private func finishSuccessfulReconciliation() {
-        cancelBackgroundRecovery()
         if publisherRefreshPending, temporaryRevealLedger.visibleItemIDs.isEmpty {
-            scheduleBackgroundReapply()
+            // A no-op configure cannot restart the same observation window or
+            // keep its worker perpetually one second away from actually running.
+            if recoveryTask == nil {
+                scheduleBackgroundReapply()
+            }
+        } else {
+            cancelBackgroundRecovery()
         }
     }
 
@@ -294,6 +311,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
                 settledPublishers.removeAll()
                 hasDeassertionBoundary = true
                 publisherRefreshPending = false
+                publisherObservationBudget = MenuBarPublisherObservationBudget()
                 desiredConfiguration = MenuBarConcealmentConfiguration(visibleItemIDs: [], concealedItemIDs: [])
                 receiptLedger.invalidateSession()
                 initialEnvironmentStatePending = true
@@ -313,8 +331,7 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         }
         let candidateRevealLedger = temporaryRevealLedger ?? self.temporaryRevealLedger
         let prepared = try await prepareState(candidateRevealLedger: candidateRevealLedger, observesPublishers: observesPublishers)
-        let hasUnsettledPublisher = !prepared.visiblePublishers.isSubset(of: settledPublishers)
-        if permitsPublisherRefresh, observesPublishers, hasUnsettledPublisher,
+        if permitsPublisherRefresh, observesPublishers, prepared.requiresPublisherRefresh,
            let appliedNativeState, expectedAssertionState(appliedNativeState) == 1,
            checkedReceipt().hasKnownEffectiveState,
            self.temporaryRevealLedger.visibleItemIDs.isEmpty,
@@ -402,6 +419,25 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         let observedPublishers = observesPublishers ? observedPublishers(
             configuredPublishers, proposed: proposedRevealPublishers, visible: allowedVisiblePublishers
         ) : configuredPublishers.intersection(settledPublishers)
+        let verifiedRunningPIDs = Set(running.map(\.processIdentifier))
+        let uncertainVisible = applications.filter {
+            visibleBundles.contains($0.bundleIdentifier.lowercased()) &&
+                allowedBundles.contains($0.bundleIdentifier.lowercased()) &&
+                !verifiedRunningPIDs.contains($0.processIdentifier)
+        }
+        var observationCandidates = [RunningPublisher: GoldenGatePublisherLifetime?]()
+        for publisher in allowedVisiblePublishers {
+            observationCandidates.updateValue(publisher.lifetime, forKey: RunningPublisher(
+                bundleIdentifier: publisher.bundleIdentifier, processIdentifier: publisher.processIdentifier
+            ))
+        }
+        for publisher in uncertainVisible {
+            observationCandidates.updateValue(nil, forKey: publisher)
+        }
+        let pendingObservations = publisherObservationBudget.pending(observationCandidates, now: DispatchTime.now().uptimeNanoseconds)
+        let settledRunningBundles = Set(running.intersection(settledPublishers).map { $0.bundleIdentifier.lowercased() })
+        let needsFirstRevealBoundary = !proposedRevealBundles.isSubset(of: settledRunningBundles)
+        let observedVisible = allowedVisiblePublishers.intersection(observedPublishers)
         if revealOwnershipChanged, temporaryRevealLedger.visibleItemIDs.isEmpty,
            !proposedRevealBundles.isSubset(of: Set(proposedRevealPublishers.map { $0.bundleIdentifier.lowercased() }))
         {
@@ -410,8 +446,13 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
         return PreparedState(
             configuration: desiredConfiguration, native: nativeState, running: running,
             observedPublishers: observedPublishers,
-            visiblePublishers: observesPublishers ? allowedVisiblePublishers.intersection(observedPublishers.union(proposedRevealPublishers)) : allowedVisiblePublishers,
-            proposedRevealPublishers: proposedRevealPublishers,
+            visiblePublishers: allowedVisiblePublishers,
+            pendingPublishers: allowedVisiblePublishers.filter {
+                pendingObservations.contains(RunningPublisher(bundleIdentifier: $0.bundleIdentifier, processIdentifier: $0.processIdentifier))
+            },
+            hasUnverifiedPendingPublisher: uncertainVisible.contains { pendingObservations.contains($0) },
+            proposedRevealBundles: proposedRevealBundles,
+            requiresPublisherRefresh: !observedVisible.isSubset(of: settledPublishers) || needsFirstRevealBoundary,
             configurationDigest: configurationDigest, effectiveDigest: effectiveDigest,
             hasTemporaryReveal: !temporarilyVisible.isEmpty, revealOwnershipChanged: revealOwnershipChanged
         )
@@ -480,7 +521,11 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             // This clear may settle only live observations of the exact sampled
             // lifetime, never retained configuration IDs or a replaced process.
             let refreshed = try await prepareState(candidateRevealLedger: candidateRevealLedger, observesPublishers: true)
-            guard refreshed.proposedRevealPublishers.isSubset(of: refreshed.observedPublishers) else {
+            // Bundle coverage is advisory only; one silent same-bundle process
+            // must not reject its real publisher. Fresh exact-item resolution
+            // after native reveal still owns identity and ambiguity rejection.
+            let observedBundles = Set(refreshed.observedPublishers.map { $0.bundleIdentifier.lowercased() })
+            guard refreshed.proposedRevealBundles.isSubset(of: observedBundles) else {
                 throw MenuBarBackendError.operationFailed("Menu bar publisher has not published its item")
             }
             attemptedNativeCommit = true
@@ -538,7 +583,11 @@ final class GoldenGateConcealmentController: @unchecked Sendable {
             settledPublishers.formUnion(prepared.observedPublishers)
         }
         hasDeassertionBoundary = !asserted
-        publisherRefreshPending = asserted && !prepared.visiblePublishers.isSubset(of: settledPublishers)
+        let observedVisible = prepared.visiblePublishers.intersection(prepared.observedPublishers)
+        publisherRefreshPending = asserted && (
+            !observedVisible.isSubset(of: settledPublishers) ||
+                !prepared.pendingPublishers.isSubset(of: settledPublishers) || prepared.hasUnverifiedPendingPublisher
+        )
         receiptLedger.accept(
             configurationDigest: prepared.configurationDigest, effectiveStateDigest: prepared.effectiveDigest,
             hasCommittedAssertion: asserted, hasTemporaryReveal: prepared.hasTemporaryReveal,

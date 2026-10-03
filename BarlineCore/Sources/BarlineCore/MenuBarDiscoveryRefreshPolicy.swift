@@ -1,5 +1,67 @@
 import Foundation
 
+/// Advisory scheduling only. An expired observation is not negative identity
+/// evidence and never prevents a later explicit, fresh observation.
+public struct MenuBarPublisherObservationBudget<Key: Hashable & Sendable, Witness: Equatable & Sendable>: Sendable {
+    private struct Entry: Sendable {
+        var lastKnownWitness: Witness?
+        let deadline: UInt64
+    }
+
+    private var entries = [Key: Entry]()
+    private let durationNanoseconds: UInt64
+
+    public init(durationNanoseconds: UInt64 = 30_000_000_000) {
+        self.durationNanoseconds = durationNanoseconds
+    }
+
+    public mutating func pending(_ candidates: [Key: Witness?], now: UInt64) -> Set<Key> {
+        entries = entries.filter { candidates.keys.contains($0.key) }
+        for (candidate, witness) in candidates {
+            if var entry = entries[candidate] {
+                if witness == nil || entry.lastKnownWitness == nil || entry.lastKnownWitness == witness {
+                    // Unknown -> known and known -> unknown -> same known are
+                    // not new lifetimes and cannot extend the original budget.
+                    if let witness {
+                        entry.lastKnownWitness = witness
+                    }
+                    entries[candidate] = entry
+                    continue
+                }
+            }
+            let (deadline, overflow) = now.addingReportingOverflow(durationNanoseconds)
+            entries[candidate] = Entry(lastKnownWitness: witness, deadline: overflow ? UInt64.max : deadline)
+        }
+        return Set(candidates.keys.filter { now < (entries[$0]?.deadline ?? 0) })
+    }
+}
+
+/// One revocable opportunity per lifecycle signal, not a permanent poller.
+/// Repeated identical workspace samples cannot renew an exhausted window.
+public struct MenuBarLifecycleRefreshWindow<Signal: Equatable & Sendable>: Sendable {
+    private var signal: Signal?
+    private var generation: UInt64 = 0
+    private var deadline: UInt64 = 0
+    private let durationNanoseconds: UInt64
+
+    public init(durationNanoseconds: UInt64 = 30_000_000_000) {
+        self.durationNanoseconds = durationNanoseconds
+    }
+
+    public mutating func begin(signal: Signal, now: UInt64, force: Bool = false) -> UInt64? {
+        guard force || self.signal != signal else { return nil }
+        self.signal = signal
+        generation &+= 1
+        let (end, overflow) = now.addingReportingOverflow(durationNanoseconds)
+        deadline = overflow ? UInt64.max : end
+        return generation
+    }
+
+    public func isCurrent(_ token: UInt64, now: UInt64) -> Bool {
+        token == generation && now < deadline
+    }
+}
+
 /// Reserves one presentation reload at a time for an acknowledged native state.
 /// A reload uses ordinary discovery and never promotes receipt evidence into
 /// item capability, geometry, display ownership or Focus authority.

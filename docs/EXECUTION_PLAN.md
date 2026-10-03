@@ -30,8 +30,19 @@ kernel-read rejection, PID/bundle replacement, unchanged100-call boundedness,
 all nine native system reveal routes and unrelated slow-owner isolation.
 Tests using doubles do not replace signed installed evidence.
 
-Astra High and Gemini Flash3.8High independently approve freezing163 for fresh
-qualification after the repairs above. Neither grants runtime or release GO.
+The first163source freeze passed clean fast/full gates, but new PR review
+reopened it for two reproduced defects: unobserved visible publishers did not
+schedule another observation, and a silent same-bundle process rejected valid
+reveals. Advisory pending observation now has per-candidate nonrenewing budgets,
+separate from live clear eligibility. Bundle-level reveal coverage does not
+settle unobserved instances or weaken downstream exact-item resolution.
+The app follows genuine lifecycle events for a bounded window through ordinary
+discovery and receipt synchronization, covering newly published items absent
+from the original configuration and helper-owned background receipt changes.
+Repeated identical workspace hints cannot renew the window. Core budget and
+revocation tests supplement executable production-controller regressions.
+Both independent reviewers must approve the revised source before freezing;
+the earlier source-freeze opinions and clean gates do not qualify this repair.
 Pre-Begin compensation completes only the remainder of the original clear
 interval; an attempted native activation still requires a fresh230ms boundary.
 

@@ -246,6 +246,77 @@ private func require(_ condition: Bool, _ message: String) throws {
 struct ControllerSkipPathProbe {
     @MainActor
     @available(macOS 27.0, *)
+    private static func verifyAutonomousPublicationAndDuplicateInstances() async throws {
+        let target = MenuBarItemID(bundleIdentifier: "test.autonomous.target", accessibilityIdentifier: "item")
+        let sibling = MenuBarItemID(bundleIdentifier: "test.autonomous.sibling", accessibilityIdentifier: "item")
+        let visible = MenuBarConcealmentConfiguration(visibleItemIDs: [target], concealedItemIDs: [sibling])
+        let hidden = MenuBarConcealmentConfiguration(visibleItemIDs: [], concealedItemIDs: [target, sibling])
+        let siblingApp = NSWorkspace.Application(bundleIdentifier: sibling.bundleIdentifier, processIdentifier: 81)
+        var failures = [String]()
+        bridgeSpy.withState { $0 = BridgeSpy.State() }
+        NSWorkspace.shared.runningApplications = [
+            .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: 80), siblingApp,
+        ]
+        let lateController = GoldenGateConcealmentController()
+        try await lateController.configure(visible)
+        NSWorkspace.shared.runningApplications = [
+            .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: 82, hasLiveMenuItem: false), siblingApp,
+        ]
+        try await lateController.configure(visible)
+        try await Task.sleep(for: .milliseconds(300))
+        // No second workspace/configuration event: only the same process's
+        // status item becomes available after the launch observation.
+        NSWorkspace.shared.runningApplications[0].hasLiveMenuItem = true
+        try await Task.sleep(for: .milliseconds(1500))
+        if bridgeSpy.withState({ $0.invalidations }) != 1 {
+            failures.append("visible late publisher must recover without a second workspace event")
+        }
+        await lateController.invalidate()
+
+        bridgeSpy.withState { $0 = BridgeSpy.State() }
+        NSWorkspace.shared.runningApplications = [
+            .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: 83), siblingApp,
+        ]
+        let duplicateController = GoldenGateConcealmentController()
+        try await duplicateController.configure(hidden)
+        NSWorkspace.shared.runningApplications = [
+            .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: 84),
+            .init(bundleIdentifier: target.bundleIdentifier, processIdentifier: 85, hasLiveMenuItem: false), siblingApp,
+        ]
+        var revealed = false
+        do { revealed = try await duplicateController.beginTemporaryReveal(target) } catch {}
+        if !revealed {
+            failures.append("a nonpublisher same-bundle process must not reject an observed publisher's reveal")
+        }
+        if revealed {
+            try await duplicateController.endTemporaryReveal(target)
+            let clears = bridgeSpy.withState { $0.invalidations }
+            for _ in 0 ..< 20 {
+                _ = try await duplicateController.beginTemporaryReveal(target)
+                try await duplicateController.endTemporaryReveal(target)
+            }
+            if bridgeSpy.withState({ $0.invalidations }) != clears {
+                failures.append("silent same-bundle duplicate must not cause repeated reveal clears")
+            }
+            // The duplicate remains an independent unsettled lifetime. Its
+            // later AX publication needs its own boundary, not bundle credit.
+            NSWorkspace.shared.runningApplications[1].hasLiveMenuItem = true
+            _ = try await duplicateController.beginTemporaryReveal(target)
+            try await duplicateController.endTemporaryReveal(target)
+            if bridgeSpy.withState({ $0.invalidations }) != clears + 1 {
+                failures.append("same-bundle duplicate publishing later needs its own clear")
+            }
+        }
+        await duplicateController.invalidate()
+        for failure in failures {
+            print("FAIL: \(failure)")
+        }
+        try require(failures.isEmpty, failures.joined(separator: "; "))
+        print("PASS: autonomous late publication and same-bundle nonpublisher reveal regressions")
+    }
+
+    @MainActor
+    @available(macOS 27.0, *)
     private static func verifyReviewRegressions() async throws {
         let hidden = MenuBarItemID(bundleIdentifier: "test.review.hidden", accessibilityIdentifier: "item")
         let other = MenuBarItemID(bundleIdentifier: "test.review.other", accessibilityIdentifier: "item")
@@ -666,6 +737,7 @@ struct ControllerSkipPathProbe {
         guard #available(macOS 27.0, *) else {
             throw CheckFailure(description: "Requires macOS 27; no controller test executed")
         }
+        try await verifyAutonomousPublicationAndDuplicateInstances()
         try await verifyReviewRegressions()
         try await verifyPublisherObservationFailures()
         try await verifyPublisherRoutingAndBudget()
@@ -685,8 +757,16 @@ struct ControllerSkipPathProbe {
         let mandatory: Set = [
             BarlineMenuService.configuredAppIdentifier, "com.apple.systemuiserver", "com.apple.finder", "com.apple.dock",
         ]
+        // Distinct apps cannot share one PID. Stable per-bundle fixture PIDs
+        // keep lifecycle assertions meaningful when array order changes.
+        var fixturePIDs = [String: Int32]()
         func running(_ bundles: [String]) {
-            NSWorkspace.shared.runningApplications = bundles.map { .init(bundleIdentifier: $0) }
+            NSWorkspace.shared.runningApplications = bundles.map { bundle in
+                if fixturePIDs[bundle] == nil {
+                    fixturePIDs[bundle] = Int32(100 + fixturePIDs.count)
+                }
+                return .init(bundleIdentifier: bundle, processIdentifier: fixturePIDs[bundle] ?? 0)
+            }
         }
         func beginCount() -> Int {
             bridgeSpy.withState { $0.begins.count }

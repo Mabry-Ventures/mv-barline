@@ -39,6 +39,13 @@ No unreleased changes.
 - Publisher recovery prioritizes the clicked app and preserves the native
   system-control path. Unresponsive hidden apps cannot consume another app's
   foreground recovery probe, and failed recovery keeps the accepted layout.
+- Apps that create their menu icons several seconds after launch receive a
+  bounded follow-up check, including when they were absent from the first
+  inventory. Physical visibility and Settings refresh together, without a
+  permanent polling loop or requiring another app launch.
+- An additional process from the same app no longer blocks a working menu
+  item's reveal merely because that extra process has no menu icon. Each real
+  publisher still requires its own live observation and identity checks.
 
 This candidate is not published or fully qualified. Installed runtime testing
 now includes CODEX01 and a notched MacBook Pro; additional OS builds are not
