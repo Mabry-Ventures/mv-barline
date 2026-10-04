@@ -1,0 +1,22 @@
+name: CI Policy
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths: ['.github/**', 'scripts/check-ci-policy.py']
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: ci-policy-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+jobs:
+  policy:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-24.04
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - run: python3 -m pip install --disable-pip-version-check 'PyYAML==6.0.3'
+      - run: python3 scripts/check-ci-policy.py
