@@ -6,8 +6,8 @@ exception requires Jared's explicit approval of the exact workflow/commit,
 purpose, maximum runtime and expiry before allocation. A manual-dispatch
 button or a positive credit balance is not that approval.
 
-Run `python3 scripts/check-ci-policy.py` (PyYAML 6.0.3) before pushing workflow
-changes. The workflow check is defense in depth, not a platform-level runner
+Run `./script/ci/repo_hygiene.sh` before pushing workflow changes. Keep the
+existing single Linux job; it validates literal Ubuntu routing and its five-minute bound. The workflow check is defense in depth, not a platform-level runner
 ban; another workflow can allocate before it finishes. Standard hosted runners
 remain enabled to preserve the included Linux allowance.
 
