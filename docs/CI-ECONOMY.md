@@ -31,3 +31,14 @@ coverage floors to fit a timeout. Preserve the current 90-day global evidence
 retention; shorten only disposable artifacts. GitHub paid overage remains $0;
 Xcode Cloud remains on its current tier. No auto-reload or credit spending is
 implied by this policy.
+
+## Xcode Cloud enrollment
+
+`Barline Manual Validation` is enrolled for the Mabry Ventures LLC team.
+Its only admission is manual branch or pull-request start, after local full
+qualification of the same candidate. It has one macOS build action, pinned to
+Xcode 27 (27A266a) and macOS 27 (26A428), with no archive or distribution action.
+The shared Xcode Cloud manifest records product enrollment; the workflow itself
+is managed in Xcode's Integrate > Manage Workflows UI. Do not add automatic push,
+PR, tag, or scheduled starts. Local full CI remains responsible for unit,
+integration, UI, Accessibility, and hardware journeys.
