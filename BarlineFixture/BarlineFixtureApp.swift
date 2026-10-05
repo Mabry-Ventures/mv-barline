@@ -25,6 +25,22 @@ private final class BarlineFixtureAppDelegate: NSObject, NSApplicationDelegate {
     private var auditPanel: NSPanel?
     private var auditStatusItems: FixtureStatusItemController?
 
+    /// A journey fixture is started detached and nothing stops it when its
+    /// qualification run ends, so its synthetic status items ("BF Native",
+    /// "BF Popover") would stay in the menu bar indefinitely. When the launcher
+    /// sets a lifetime, quit when it elapses. Absent, zero, or out-of-range
+    /// values mean no expiry.
+    private func scheduleLifetimeExpiry() {
+        guard let value = ProcessInfo.processInfo.environment["BARLINE_FIXTURE_LIFETIME_SECONDS"],
+              let seconds = Int(value),
+              (1 ... 86400).contains(seconds)
+        else { return }
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(seconds))
+            NSApp.terminate(nil)
+        }
+    }
+
     func applicationDidFinishLaunching(_: Notification) {
         if ProcessInfo.processInfo.environment["BARLINE_FIXTURE_MODE"] == "journey" {
             if ProcessInfo.processInfo.environment["BARLINE_FIXTURE_QUALIFICATION_WINDOW"] != "1" {
@@ -33,6 +49,7 @@ private final class BarlineFixtureAppDelegate: NSObject, NSApplicationDelegate {
                     window.orderOut(nil)
                 }
             }
+            scheduleLifetimeExpiry()
             return
         }
         guard CommandLine.arguments.contains("--barline-fixture-accessibility-audit") else {
