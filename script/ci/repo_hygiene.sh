@@ -72,6 +72,16 @@ fi
     printf 'error: exactly one GitHub Actions workflow is allowed\n' >&2
     exit 1
 }
+ruby -rpsych -e '
+  workflow = Psych.safe_load(File.read(".github/workflows/repo-hygiene.yml"), aliases: false)
+  jobs = workflow.fetch("jobs")
+  abort "error: exactly one portable hygiene job is allowed" unless jobs.keys == ["hygiene"]
+  job = jobs.fetch("hygiene")
+  abort "error: matrix expansion is forbidden for the single hygiene job" if job.key?("strategy")
+  abort "error: only included Ubuntu runners are allowed" unless ["ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04"].include?(job["runs-on"])
+  abort "error: reusable workflows are forbidden" if job.key?("uses")
+  abort "error: hygiene timeout must remain bounded at five minutes" unless job["timeout-minutes"] == 5
+'
 grep -q '^permissions:$' .github/workflows/repo-hygiene.yml
 grep -q '^  contents: read$' .github/workflows/repo-hygiene.yml
 if grep -RInE '^[[:space:]]+[a-z-]+:[[:space:]]*write[[:space:]]*$' .github/workflows; then

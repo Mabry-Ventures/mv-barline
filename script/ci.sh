@@ -62,6 +62,7 @@ mkdir -p "$ARTIFACT_DIR/logs" "$ARTIFACT_DIR/results"
 # input. Interactive gates intentionally reuse this root within the run.
 BARLINE_RUN_ROOT="/private/tmp/barline-ci-$(id -u)-$SHA-$MODE-${STARTED_AT//:/-}"
 export BARLINE_RUN_ROOT
+export BARLINE_CORE_SCRATCH_PATH="$BARLINE_RUN_ROOT/core-build"
 COMMANDS_FILE="$ARTIFACT_DIR/commands.tsv"
 FAILURES_FILE="$ARTIFACT_DIR/failures.txt"
 : > "$COMMANDS_FILE"
@@ -134,7 +135,7 @@ write_summary() {
         xcode_version="$(xcodebuild -version 2>/dev/null | tr '\n' ' ' || printf unavailable)"
         swift_version="$(swift --version 2>/dev/null | head -1 || printf unavailable)"
     fi
-    coverage_path="$(swift test --package-path BarlineCore --show-codecov-path 2>/dev/null || true)"
+    coverage_path="$(swift test --package-path BarlineCore --scratch-path "$BARLINE_CORE_SCRATCH_PATH" --show-codecov-path 2>/dev/null || true)"
     STARTED_AT_VALUE="$STARTED_AT" ENDED_AT_VALUE="$ended_at" SHA_VALUE="$SHA" DIRTY_VALUE="$DIRTY" \
     MODE_VALUE="$MODE" MACOS_VALUE="$macos_version" ARCH_VALUE="$(uname -m)" MODEL_VALUE="$hardware_model" \
     XCODE_VALUE="$xcode_version" SWIFT_VALUE="$swift_version" ARTIFACT_VALUE="$ARTIFACT_DIR" \
@@ -202,7 +203,7 @@ fi
 run_fast() {
     barline_require_command swiftformat
     barline_require_command swiftlint
-    run_step "dependency-resolution" swift package --package-path BarlineCore resolve
+    run_step "dependency-resolution" swift package --package-path BarlineCore --scratch-path "$BARLINE_CORE_SCRATCH_PATH" resolve
     run_step "dependency-lock-clean" git diff --exit-code -- \
         Barline.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved \
         BarlineCore/Package.resolved
@@ -217,8 +218,8 @@ run_fast() {
         printf 'Format check: no changed Swift files.\n'
     fi
     run_step "swiftlint" swiftlint lint --strict --config .swiftlint.yml
-    run_step "core-build" swift build --package-path BarlineCore
-    run_step "core-tests" swift test --package-path BarlineCore --enable-code-coverage
+    run_step "core-build" swift build --package-path BarlineCore --scratch-path "$BARLINE_CORE_SCRATCH_PATH"
+    run_step "core-tests" swift test --package-path BarlineCore --scratch-path "$BARLINE_CORE_SCRATCH_PATH" --enable-code-coverage
     run_step "status-item-geometry" bash ./script/test-status-item-geometry.sh
     run_step "shelf-probe-cycle" bash ./script/test-shelf-probe-cycle.sh
     run_step "activation-routing-topology" ruby ./script/test-activation-routing-topology.rb
