@@ -245,6 +245,7 @@ run_fast() {
     run_step "installed-evidence-writer" bash ./script/test-evidence-writer.sh
     run_step "platform-lane-classification" bash ./script/test-platform-lane.sh
     run_step "installed-app-pause" bash ./script/test-installed-app-pause.sh
+    run_step "journey-fixture-stop" bash ./script/test-journey-fixture-stop.sh
     run_step "apple-silicon-bundle" bash ./script/test-arm64-bundle.sh
     run_step "release-notes-extraction" bash ./script/test-release-notes.sh
     if [[ "$(uname -s)" == Darwin ]]; then

@@ -28,7 +28,7 @@ app or requesting a permission; the fast gate includes it.
 
 ## Prepare the fixture
 
-1. Build `BarlineFixture` locally. Run `bash script/start-journey-fixture.sh /absolute/BarlineFixture.app /absolute/ignored-artifacts-directory`. It refuses an existing fixture, starts one hidden/background instance with two synthetic items (Native and Popover), and prints the three exact environment assignments for the gate. No credentials or real item metadata enter the receipt. Optional `BARLINE_FIXTURE_JOURNEY_ITEMS=Native,Delayed` selects the delayed-discovery lane; `Native,Unresponsive` selects the bounded fault-injection lane.
+1. Build `BarlineFixture` locally. Run `bash script/start-journey-fixture.sh /absolute/BarlineFixture.app /absolute/ignored-artifacts-directory`. It refuses an existing fixture, starts one hidden/background instance with two synthetic items (Native and Popover), and prints the three exact environment assignments for the gate. No credentials or real item metadata enter the receipt. Optional `BARLINE_FIXTURE_JOURNEY_ITEMS=Native,Delayed` selects the delayed-discovery lane; `Native,Unresponsive` selects the bounded fault-injection lane. The fixture quits itself after `BARLINE_FIXTURE_LIFETIME_SECONDS` (default 14400, four hours; `0` disables), so one that is forgotten cannot leave `BF Native` and `BF Popover` in the menu bar indefinitely.
 2. Use Barline's normal layout editor to place **only the synthetic fixture items** `BF Native`, `BF Popover`, and `BF Delayed` in its hidden section. Preserve all unrelated items. Leave the shelf and fixture menus closed. `BF Unresponsive` is an optional, bounded two-second fixture-only fault injection, not part of the success test.
 3. Confirm exactly one installed signed/notarized candidate is running. The
    harness requires that process's Accessibility access and the stable journey
@@ -94,3 +94,14 @@ window is captured. AX fallback diagnostics cannot clear a failed AX lane.
 Run the same matrix after cold launch, after the real updater installs the candidate, and after a bounded helper interruption. Separately exercise failed activation recovery, open-menu mutation deferral, keyboard/VoiceOver, permission transitions, and available physical display/system-state lanes. This gate does not certify those lanes, macOS 27, or soak duration.
 
 `BarlineUITests` qualifies native-menu and custom-popover receipt behavior within the fixture. The installed `native-right` journey owns right-click qualification because XCUI can acknowledge a status-item right-click without delivering it to the owning process. Xcode 27 does not deliver XCUITest-synthesized status-item events at all, so those two fixture-click cases are explicitly skipped on macOS 27; the stronger source-bound installed-candidate physical journeys remain mandatory there. These tests are intentionally labeled **fixture qualification**, not production integration proof. Run that qualification with menu-bar managers closed: newly created macOS status items can land behind an existing hidden-item barrier even with a fresh autosave name. The tests reject off-screen geometry and do not alter any user's layout. Because macOS-hosted StatusItem can report `isHittable=false` despite an on-screen frame, qualification uses the exact AX-identified element's center coordinate, then independently requires a target-process receipt before examining its menu. A missing receipt is a failed event-delivery gate, never a fixture or production pass. Synthetic receipt JSON is retained as an xcresult attachment on success and failure. Qualification alone uses a visible regular fixture window to avoid hidden-accessory activation ambiguity; the installed journey's background mode is unchanged. Conversely, keep Barline running and the fixture target hidden for the installed production journey.
+
+## Clean up
+
+When the qualification run is finished, stop the fixture rather than waiting for its lifetime to elapse:
+
+```bash
+bash script/stop-journey-fixture.sh          # stops every journey fixture
+bash script/stop-journey-fixture.sh --list   # shows pid and age without stopping
+```
+
+It stops only journey fixtures; the ones XCUITest and the accessibility audit start for themselves are left alone. A fixture that outlives its run keeps its synthetic status items in the menu bar and makes the next `start-journey-fixture.sh` refuse to start.
