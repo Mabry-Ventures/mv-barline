@@ -77,6 +77,7 @@ ruby -rpsych -e '
   jobs = workflow.fetch("jobs")
   abort "error: exactly one portable hygiene job is allowed" unless jobs.keys == ["hygiene"]
   job = jobs.fetch("hygiene")
+  abort "error: matrix expansion is forbidden for the single hygiene job" if job.key?("strategy")
   abort "error: only included Ubuntu runners are allowed" unless ["ubuntu-latest", "ubuntu-24.04", "ubuntu-22.04"].include?(job["runs-on"])
   abort "error: reusable workflows are forbidden" if job.key?("uses")
   abort "error: hygiene timeout must remain bounded at five minutes" unless job["timeout-minutes"] == 5

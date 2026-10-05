@@ -5,6 +5,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DERIVED_DATA="$(mktemp -d "${TMPDIR:-/tmp}/barline-fixture.XXXXXX")"
 APP="$DERIVED_DATA/Build/Products/Debug/BarlineFixture.app"
+CORE_SCRATCH_PATH="${BARLINE_CORE_SCRATCH_PATH:-$DERIVED_DATA/core-build}"
 
 cleanup() {
     /usr/bin/pkill -x BarlineFixture >/dev/null 2>&1 || true
@@ -14,14 +15,14 @@ trap cleanup EXIT
 
 cd "$ROOT"
 
-tests="$(swift test --package-path BarlineCore list)"
+tests="$(swift test --package-path BarlineCore --scratch-path "$CORE_SCRATCH_PATH" list)"
 fixture_count="$(printf '%s\n' "$tests" | grep -Ec '^BarlineCoreTests\.(SnapshotValidationTests|StateCoordinatorTests|ProfileTests|MenuBarCommandValidationTests)/')"
 if ((fixture_count < 20)); then
     printf 'error: expected at least 20 fixture/state regression cases, found %d\n' "$fixture_count" >&2
     exit 1
 fi
 
-swift test --package-path BarlineCore \
+swift test --package-path BarlineCore --scratch-path "$CORE_SCRATCH_PATH" \
     --filter 'BarlineCoreTests\.(SnapshotValidationTests|StateCoordinatorTests|ProfileTests|MenuBarCommandValidationTests)/'
 
 env DEVELOPER_DIR="${DEVELOPER_DIR:-$(xcode-select -p)}" xcodebuild \
